@@ -50,7 +50,9 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Loop** — An Issue Report matching an earlier one in the same Task (same failing test and error). Escalates immediately, without spending the remaining Retry Budget.
 
-**Escalation** — Pausing a Run for a human, with a failure summary and Working Memory. The human chooses: retry with a hint, edit Approved Documents, skip the Slice, or abort. In auto mode there is no human: the Run ends and opens a **Draft PR** containing only the Slices that passed, with the failure report.
+**Escalation** — Pausing a Run for a human, with a failure summary and Working Memory. The human chooses: retry with a hint, edit Approved Documents, skip the Slice, or abort. Aborting offers to open a Draft PR (on by default). In auto mode there is no human: the Run ends and always opens a Draft PR.
+
+**Draft PR** — A pull request opened as a draft when a Run stops early. Contains only Slice Commits (Slices that passed testing) plus a failure report; code from the unfinished Slice is never included.
 
 ## Agents
 
