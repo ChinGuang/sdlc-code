@@ -44,6 +44,7 @@ M4 and M5 overlap: the server API (T21) is started as soon as M3's domain events
 **T04 Monorepo scaffold** · Sep 20
 - pnpm workspaces: `packages/core`, `packages/clients`, `apps/server`, `apps/web`, `apps/cli`.
 - TypeScript strict, ESLint, Vitest, GitHub Actions CI (lint, typecheck, test), `.env.example`.
+- Encode [CODING_STANDARDS.md](../CODING_STANDARDS.md) in lint where possible (no `private`, no parameter properties, public methods as arrow properties) and add a Prettier check.
 - Acceptance: `pnpm lint && pnpm typecheck && pnpm test` green in CI with one sample test per package.
 
 **T05 Token Factory client + agent config** · Sep 21
@@ -72,7 +73,7 @@ M4 and M5 overlap: the server API (T21) is started as soon as M3's domain events
 - Tests: validators with good/bad fixtures; agent run against recorded model responses.
 
 **T10 Penpot client + UI Design Agent** · Sep 26 – Sep 27
-- Penpot MCP client (from T02); one Penpot file per Run, one board per screen, configurable Penpot URL.
+- Penpot MCP client (from T02); one page per Run in the Penpot Workspace File ([ADR 0002](adr/0002-one-penpot-page-per-run.md)), one board per screen, configurable Penpot URL.
 - Produces UI Spec (screens, routes, components, API Contract endpoints used, states, design tokens) + board exports.
 - Validator: every UI Spec endpoint exists in the API Contract.
 - Tests: UI Spec validator; MCP client against a fake MCP server.

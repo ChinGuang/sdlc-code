@@ -117,7 +117,7 @@ classDiagram
     designTokens
   }
   class PenpotDesign {
-    fileUrl
+    pageUrl
     boards
   }
   class Slice {
@@ -357,10 +357,10 @@ sequenceDiagram
   O->>UD: Task: design UI (with API Contract)
   loop agent loop
     UD->>TF: chat + tools
-    UD->>P: create file / boards / shapes
+    UD->>P: create page / boards / shapes
     P-->>UD: shape ids, exports
   end
-  UD-->>O: UI Spec, Penpot file URL
+  UD-->>O: UI Spec, Penpot page URL
   O->>DB: Checkpoint
 
   alt gated mode
