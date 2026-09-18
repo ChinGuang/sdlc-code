@@ -61,6 +61,7 @@ export type ChatClientOptions = {
 /** Chat completions used by agents. */
 export interface ChatClient {
   complete: (request: ChatRequest) => Promise<ChatResponse>;
+  listModels: () => Promise<ModelInfo[]>;
 }
 
 export class ChatApiError extends Error {
@@ -114,13 +115,31 @@ export class TokenFactoryChatClient implements ChatClient {
 
   complete = async (request: ChatRequest): Promise<ChatResponse> => {
     const started = this.#now();
-    const response = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.#apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(toRequestBody(request)),
+    const raw = await this.#request<RawCompletion>(
+      "POST",
+      "/chat/completions",
+      toRequestBody(request),
+    );
+    return fromCompletion(raw, this.#now() - started);
+  };
+
+  listModels = async (): Promise<ModelInfo[]> => {
+    const raw = await this.#request<{ data?: RawModel[] }>(
+      "GET",
+      "/models?verbose=true",
+    );
+    return (raw.data ?? []).map(toModelInfo);
+  };
+
+  async #request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.#apiKey}`,
+    };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const response = await this.#fetch(`${this.#baseUrl}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await response.text();
     if (!response.ok) {
@@ -131,10 +150,40 @@ export class TokenFactoryChatClient implements ChatClient {
         `Token Factory ${response.status}: ${errorMessage(text)}`,
       );
     }
-    return fromCompletion(
-      JSON.parse(text) as RawCompletion,
-      this.#now() - started,
-    );
+    return JSON.parse(text) as T;
+  }
+}
+
+/** A model offered by Token Factory, from GET /models?verbose=true. */
+export type ModelInfo = {
+  id: string;
+  contextLength: number | null;
+  pricing: Pricing | null;
+  features: string[];
+};
+
+type RawModel = {
+  id: string;
+  context_length?: number;
+  pricing?: { prompt?: string; completion?: string };
+  supported_features?: string[];
+};
+
+function toModelInfo(model: RawModel): ModelInfo {
+  const prompt = Number(model.pricing?.prompt);
+  const completion = Number(model.pricing?.completion);
+  const priced = Number.isFinite(prompt) && Number.isFinite(completion);
+  return {
+    id: model.id,
+    contextLength: model.context_length ?? null,
+    pricing: priced
+      ? {
+          // API prices are per token; round away float noise from the x1e6.
+          promptPerMillion: Number((prompt * 1_000_000).toFixed(6)),
+          completionPerMillion: Number((completion * 1_000_000).toFixed(6)),
+        }
+      : null,
+    features: model.supported_features ?? [],
   };
 }
 

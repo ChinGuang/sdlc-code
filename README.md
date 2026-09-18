@@ -29,7 +29,7 @@ Details on how each is used will be added as the project is built.
 - [CODING_STANDARDS.md](CODING_STANDARDS.md) — coding rules (enforced by lint)
 - [docs/PLAN.md](docs/PLAN.md) — implementation plan
 - [docs/adr](docs/adr) — architecture decisions
-- [docs/spikes](docs/spikes) — findings from the Sandbox, Penpot MCP and Nemotron spikes
+- [docs/spikes](docs/spikes) — findings from the Sandbox, Penpot MCP and Nemotron spikes (their throwaway code is kept in git history)
 
 ## Repository layout
 
@@ -40,7 +40,6 @@ Details on how each is used will be added as the project is built.
 | `apps/server` | Local HTTP API (127.0.0.1 only) |
 | `apps/web` | Dashboard (Vite + React) |
 | `apps/cli` | `sdlccode` command line |
-| `spikes/` | Throwaway spike code kept for reference (not part of the workspace) |
 
 ## Development
 

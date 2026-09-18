@@ -10,5 +10,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sdlc-code/clients": "workspace:*"
   }
 }

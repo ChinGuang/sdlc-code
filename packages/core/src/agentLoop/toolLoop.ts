@@ -8,7 +8,9 @@ import {
   type ChatMessage,
   type ToolDefinition,
   type Usage,
-} from "./chatClient.js";
+} from "@sdlc-code/clients";
+
+export type CompletionClient = Pick<ChatClient, "complete">;
 
 export type ToolHandler = (
   args: Record<string, unknown>,
@@ -36,7 +38,8 @@ export type LoopResult = {
 };
 
 export type ChatToolLoopOptions = {
-  client: ChatClient;
+  /** Only `complete` is needed, so tests and callers can pass a narrow fake. */
+  client: CompletionClient;
   model: string;
   tools: LoopTools;
   maxIterations: number;

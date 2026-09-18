@@ -135,7 +135,14 @@ export interface SandboxClient {
     wait?: WaitOptions,
   ) => Promise<OperationResponse>;
   run: (spawnRequest: SpawnRequest, wait?: WaitOptions) => Promise<RunResult>;
+  /** Which Sandbox permissions the key has (all false until Early Access is granted). */
+  whoAmI: () => Promise<SandboxAccess>;
 }
+
+export type SandboxAccess = {
+  permissions: Record<string, boolean>;
+  limits: Record<string, number>;
+};
 
 /** SandboxClient over the Sandboxes REST API (ConTree). */
 export class NebiusSandboxClient implements SandboxClient {
@@ -213,6 +220,11 @@ export class NebiusSandboxClient implements SandboxClient {
   ): Promise<RunResult> => {
     const operationId = await this.spawn(spawnRequest);
     return toRunResult(await this.waitForOperation(operationId, wait));
+  };
+
+  whoAmI = async (): Promise<SandboxAccess> => {
+    const who = await this.#request<Partial<SandboxAccess>>("GET", "/whoami");
+    return { permissions: who.permissions ?? {}, limits: who.limits ?? {} };
   };
 
   async #request<T>(

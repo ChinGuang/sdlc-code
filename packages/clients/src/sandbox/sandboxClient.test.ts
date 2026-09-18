@@ -214,6 +214,28 @@ describe("NebiusSandboxClient", () => {
     ).resolves.toMatchObject({ status: "SUCCESS" });
   });
 
+  it("whoAmI returns the key's Sandbox permissions and limits", async () => {
+    const { fetch, calls } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          token_uuid: "t-1",
+          permissions: { spawn: true, import: false },
+          limits: { instance_max_timeout: 3600 },
+          operations_stat: { running_instances: 0 },
+        },
+      },
+    ]);
+
+    const who = await makeClient({ ...base, fetch }).whoAmI();
+
+    expect(calls[0]!.url).toBe("https://sandbox.test/v1/whoami");
+    expect(who).toEqual({
+      permissions: { spawn: true, import: false },
+      limits: { instance_max_timeout: 3600 },
+    });
+  });
+
   it("never exposes the API key or project", () => {
     const client = makeClient({ ...base, token: "secret-key-123" });
 
@@ -225,6 +247,7 @@ describe("NebiusSandboxClient", () => {
       "spawn",
       "uploadFile",
       "waitForOperation",
+      "whoAmI",
     ]);
     expect("token" in client).toBe(false);
     expect("project" in client).toBe(false);

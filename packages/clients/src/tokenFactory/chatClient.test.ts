@@ -174,10 +174,45 @@ describe("TokenFactoryChatClient.complete", () => {
     );
   });
 
+  it("listModels returns id, context length, per-million pricing and features", async () => {
+    const { fetch, calls } = fakeFetch([
+      {
+        status: 200,
+        body: {
+          data: [
+            {
+              id: "nvidia/nemotron-3-super-120b-a12b",
+              context_length: 262144,
+              pricing: { prompt: "0.0000003", completion: "0.0000009" },
+              supported_features: ["tools", "reasoning"],
+            },
+            { id: "other/model" },
+          ],
+        },
+      },
+    ]);
+
+    const models = await makeClient({ ...base, fetch }).listModels();
+
+    expect(calls[0]!.url).toBe("https://tf.test/v1/models?verbose=true");
+    expect(new Headers(calls[0]!.init.headers).get("authorization")).toBe(
+      "Bearer key-123",
+    );
+    expect(models).toEqual([
+      {
+        id: "nvidia/nemotron-3-super-120b-a12b",
+        contextLength: 262144,
+        pricing: { promptPerMillion: 0.3, completionPerMillion: 0.9 },
+        features: ["tools", "reasoning"],
+      },
+      { id: "other/model", contextLength: null, pricing: null, features: [] },
+    ]);
+  });
+
   it("never exposes the API key", () => {
     const client = makeClient({ ...base, apiKey: "secret-xyz" });
 
-    expect(Object.keys(client)).toEqual(["complete"]);
+    expect(Object.keys(client).sort()).toEqual(["complete", "listModels"]);
     expect("apiKey" in client).toBe(false);
     expect(JSON.stringify(client)).not.toContain("secret-xyz");
   });

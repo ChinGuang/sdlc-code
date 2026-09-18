@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ChatClient, ChatRequest, ChatResponse } from "./chatClient.js";
-import { ChatToolLoop, type LoopTools, type ToolLoop } from "./toolLoop.js";
+import type { ChatRequest, ChatResponse } from "@sdlc-code/clients";
+import {
+  ChatToolLoop,
+  type CompletionClient,
+  type LoopTools,
+  type ToolLoop,
+} from "./toolLoop.js";
 
 const reply = (partial: Partial<ChatResponse>): ChatResponse => ({
   content: null,
@@ -14,7 +19,7 @@ const reply = (partial: Partial<ChatResponse>): ChatResponse => ({
 
 function scriptedClient(replies: ChatResponse[]) {
   const requests: ChatRequest[] = [];
-  const client: ChatClient = {
+  const client: CompletionClient = {
     complete: vi.fn(async (request: ChatRequest) => {
       requests.push(structuredClone(request));
       const next = replies.shift();
@@ -41,7 +46,7 @@ const tools: LoopTools = {
 
 // Tests depend on the interface; only this factory knows the class.
 const makeLoop = (
-  client: ChatClient,
+  client: CompletionClient,
   maxIterations = 10,
   loopTools: LoopTools = tools,
 ): ToolLoop =>

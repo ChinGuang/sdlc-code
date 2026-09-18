@@ -68,7 +68,11 @@ importers:
 
   packages/clients: {}
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      '@sdlc-code/clients':
+        specifier: workspace:*
+        version: link:../clients
 
 packages:
 
