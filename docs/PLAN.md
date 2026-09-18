@@ -44,6 +44,7 @@ M4 and M5 overlap: the server API (T21) is started as soon as M3's domain events
 **T04 Monorepo scaffold** · Sep 20
 - pnpm workspaces: `packages/core`, `packages/clients`, `apps/server`, `apps/web`, `apps/cli`.
 - TypeScript strict, ESLint, Vitest, GitHub Actions CI (lint, typecheck, test), `.env.example`.
+- Encode [CODING_STANDARDS.md](../CODING_STANDARDS.md) in lint where possible (no `private`, no parameter properties, public methods as arrow properties) and add a Prettier check.
 - Acceptance: `pnpm lint && pnpm typecheck && pnpm test` green in CI with one sample test per package.
 
 **T05 Token Factory client + agent config** · Sep 21

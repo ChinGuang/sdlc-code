@@ -1,5 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import { classifyPenpotError, createPenpotClient, PenpotError, redactToken, type CallTool } from "./penpotClient.js";
+import {
+  classifyPenpotError,
+  McpPenpotClient,
+  PenpotError,
+  redactToken,
+  type CallTool,
+  type PenpotClient,
+  type PenpotClientOptions,
+} from "./penpotClient.js";
+
+// Tests depend on the interface; only this factory knows the class.
+const makeClient = (options: PenpotClientOptions): PenpotClient =>
+  new McpPenpotClient(options);
 
 const text = (value: string, isError = false) => ({ content: [{ type: "text", text: value }], isError });
 
@@ -17,10 +29,10 @@ describe("classifyPenpotError", () => {
   });
 });
 
-describe("createPenpotClient.executeCode", () => {
+describe("PenpotClient.executeCode", () => {
   it("returns the result field of the tool's JSON output", async () => {
     const callTool: CallTool = vi.fn(async () => text(JSON.stringify({ result: { id: "board-1" }, log: "" })));
-    const client = createPenpotClient({ callTool });
+    const client = makeClient({ callTool });
 
     await expect(client.executeCode("return 1")).resolves.toEqual({ id: "board-1" });
     expect(callTool).toHaveBeenCalledWith("execute_code", { code: "return 1" });
@@ -28,7 +40,7 @@ describe("createPenpotClient.executeCode", () => {
 
   it("throws an execution PenpotError without retrying", async () => {
     const callTool: CallTool = vi.fn(async () => text("Tool execution failed: Error: boom", true));
-    const client = createPenpotClient({ callTool, sleep: async () => {} });
+    const client = makeClient({ callTool, sleep: async () => {} });
 
     await expect(client.executeCode("x")).rejects.toMatchObject({ kind: "execution" });
     expect(callTool).toHaveBeenCalledTimes(1);
@@ -36,7 +48,7 @@ describe("createPenpotClient.executeCode", () => {
 
   it("detects failures the server reports without isError (observed on Penpot Cloud MCP)", async () => {
     const callTool: CallTool = vi.fn(async () => text("Tool execution failed: Error: Error handling task: deliberate spike error"));
-    const client = createPenpotClient({ callTool, sleep: async () => {} });
+    const client = makeClient({ callTool, sleep: async () => {} });
 
     await expect(client.executeCode("throw 1")).rejects.toMatchObject({ kind: "execution", message: expect.stringMatching(/deliberate spike error/) });
   });
@@ -46,7 +58,7 @@ describe("createPenpotClient.executeCode", () => {
       .fn()
       .mockResolvedValueOnce(text("Tool execution failed: Error: The Penpot plugin tab appears to be suspended by the browser (no heartbeat for 41s)."))
       .mockResolvedValueOnce(text(JSON.stringify({ result: 2 })));
-    const client = createPenpotClient({ callTool, sleep: async () => {}, retryDelaysMs: [1] });
+    const client = makeClient({ callTool, sleep: async () => {}, retryDelaysMs: [1] });
 
     await expect(client.executeCode("return 2")).resolves.toBe(2);
   });
@@ -57,7 +69,7 @@ describe("createPenpotClient.executeCode", () => {
       .mockResolvedValueOnce(text("The Penpot plugin tab appears to be suspended by the browser", true))
       .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
     const sleep = vi.fn(async () => {});
-    const client = createPenpotClient({ callTool, sleep, retryDelaysMs: [5] });
+    const client = makeClient({ callTool, sleep, retryDelaysMs: [5] });
 
     await expect(client.executeCode("x")).resolves.toBe("ok");
     expect(sleep).toHaveBeenCalledWith(5);
@@ -65,25 +77,25 @@ describe("createPenpotClient.executeCode", () => {
 
   it("does not retry when no plugin is connected", async () => {
     const callTool: CallTool = vi.fn(async () => text("Tool execution failed: No Penpot plugin instance is connected"));
-    const client = createPenpotClient({ callTool, sleep: async () => {}, retryDelaysMs: [1, 1] });
+    const client = makeClient({ callTool, sleep: async () => {}, retryDelaysMs: [1, 1] });
 
     await expect(client.executeCode("x")).rejects.toMatchObject({ kind: "disconnected" });
     expect(callTool).toHaveBeenCalledTimes(1);
   });
 
   it("returns undefined when the code returns nothing", async () => {
-    const client = createPenpotClient({ callTool: async () => text(JSON.stringify({ log: "" })) });
+    const client = makeClient({ callTool: async () => text(JSON.stringify({ log: "" })) });
     await expect(client.executeCode("penpot.createBoard()")).resolves.toBeUndefined();
   });
 
   it("rejects a success response that is not the expected JSON", async () => {
-    const client = createPenpotClient({ callTool: async () => text("<html>gateway error</html>") });
+    const client = makeClient({ callTool: async () => text("<html>gateway error</html>") });
     await expect(client.executeCode("x")).rejects.toMatchObject({ kind: "execution" });
   });
 
   it("gives up after the retry schedule with an actionable message", async () => {
     const callTool: CallTool = vi.fn(async () => text("appears to be suspended by the browser", true));
-    const client = createPenpotClient({ callTool, sleep: async () => {}, retryDelaysMs: [1, 1] });
+    const client = makeClient({ callTool, sleep: async () => {}, retryDelaysMs: [1, 1] });
 
     const error = await client.executeCode("x").catch((e: unknown) => e);
     expect(error).toBeInstanceOf(PenpotError);
@@ -93,11 +105,11 @@ describe("createPenpotClient.executeCode", () => {
   });
 });
 
-describe("createPenpotClient.exportShape", () => {
+describe("PenpotClient.exportShape", () => {
   it("returns decoded PNG bytes from the image content", async () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
     const callTool: CallTool = vi.fn(async () => ({ content: [{ type: "image", data: png.toString("base64"), mimeType: "image/png" }] }));
-    const client = createPenpotClient({ callTool });
+    const client = makeClient({ callTool });
 
     const image = await client.exportShape("shape-1");
     expect(image.mimeType).toBe("image/png");
@@ -106,7 +118,7 @@ describe("createPenpotClient.exportShape", () => {
   });
 
   it("throws when no image is returned", async () => {
-    const client = createPenpotClient({ callTool: async () => text("nothing") });
+    const client = makeClient({ callTool: async () => text("nothing") });
     await expect(client.exportShape("s")).rejects.toThrow(/no image/i);
   });
 });
@@ -115,5 +127,27 @@ describe("redactToken", () => {
   it("removes userToken values wherever they appear", () => {
     const leaked = "fetch https://design.penpot.app/mcp/stream?userToken=abc.def-123 failed; retry ?userToken=abc.def-123&x=1";
     expect(redactToken(leaked)).toBe("fetch https://design.penpot.app/mcp/stream?userToken=<redacted> failed; retry ?userToken=<redacted>&x=1");
+  });
+});
+
+describe("McpPenpotClient", () => {
+  it("public methods work when passed as callbacks", async () => {
+    const callTool: CallTool = vi.fn(async () =>
+      text(JSON.stringify({ result: 7 })),
+    );
+    const { executeCode } = makeClient({ callTool });
+
+    await expect(executeCode("return 7")).resolves.toBe(7);
+  });
+
+  it("does not expose its transport or retry settings", () => {
+    const client = new McpPenpotClient({
+      callTool: async () => text("{}"),
+      retryDelaysMs: [1],
+    });
+
+    expect(Object.keys(client).sort()).toEqual(["executeCode", "exportShape"]);
+    expect("callTool" in client).toBe(false);
+    expect(JSON.stringify(client)).toBe("{}");
   });
 });

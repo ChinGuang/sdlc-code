@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createPenpotClient, redactToken, type ToolResult } from "./penpotClient.js";
+import { McpPenpotClient, redactToken, type PenpotClient, type ToolResult } from "./penpotClient.js";
 
 const envUrl = process.env.PENPOT_MCP_URL;
 if (!envUrl) {
@@ -38,7 +38,7 @@ async function step<T>(name: string, fn: () => Promise<T>): Promise<T | undefine
 }
 
 const mcp = new Client({ name: "sdlc-code-spike-t02", version: "0.0.0" });
-const penpot = createPenpotClient({
+const penpot: PenpotClient = new McpPenpotClient({
   callTool: async (name, args) => (await mcp.callTool({ name, arguments: args })) as ToolResult,
 });
 
