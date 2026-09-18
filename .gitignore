@@ -6,5 +6,4 @@ node_modules/
 *.db
 dist/
 .worktrees/
-spikes/*/results/probe-*.json
-!spikes/t02-penpot-mcp/results/probe-1789694967160.json
+spikes/*/results/

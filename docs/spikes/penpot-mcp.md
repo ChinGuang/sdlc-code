@@ -16,7 +16,7 @@
 
 The MCP server is remote, but every tool call is executed by the plugin running in the user's browser tab. Our server can run anywhere; the browser tab is the hard dependency.
 
-## Measurements (live run, `results/probe-1789694967160.json`)
+## Measurements (live run, 2026-09-18 — raw output in [Appendix](#appendix-what-the-real-server-returned))
 
 | Step | Time |
 |---|---|
@@ -41,7 +41,7 @@ Implication: a 5-screen design with ~40 calls per screen is minutes, not seconds
 5. **CSS export works:** `penpot.generateStyle(shapes, { type: "css" })` returned CSS for the board (~2.6 s). `generateMarkup` (HTML/SVG) exists in the API but was not exercised. Could seed the Frontend Coding Agent's supplementary material.
 6. **Board IDs returned by `execute_code` work directly with `export_shape`** within a session. Stability across plugin reloads was not tested.
 7. **Non-JSON success output is rejected** by the client rather than passed through, so a proxy/gateway error page cannot masquerade as a result.
-8. **Token hygiene:** `PENPOT_MCP_URL` embeds a user token. The client and probe redact `userToken=…` from every error message and stored result (`redactToken`, tested). New probe result files are gitignored.
+8. **Token hygiene:** `PENPOT_MCP_URL` embeds a user token. The client and probe redact `userToken=…` from every error message and stored result (`redactToken`, tested). Probe results stay local (`results/` is gitignored); the doc keeps what matters.
 
 ## Recommendation for T10 (UI Design Agent)
 
@@ -58,3 +58,131 @@ Implication: a 5-screen design with ~40 calls per screen is minutes, not seconds
 > - **(b) One file per Run, created by the user** before the Design Phase (Run pauses until the plugin reports the new file). Matches the original decision but adds a manual step to every Run.
 >
 > Recommendation: (a).
+
+## Appendix: what the real server returned
+
+Captured from Penpot Cloud MCP on 2026-09-18. Re-run with `pnpm probe` in `spikes/t02-penpot-mcp` (writes to the gitignored `results/`). User tokens are redacted before anything is printed or saved.
+
+### Raw `execute_code` responses
+
+Exact `CallToolResult` bodies from `@modelcontextprotocol/sdk` `client.callTool(...)`. Note there is no `isError` on the failures (Finding 1).
+
+Success — `return {a:1}`:
+
+```json
+{"content":[{"type":"text","text":"{
+  \"result\": {
+    \"a\": 1
+  },
+  \"log\": \"\"
+}"}]}
+```
+
+Thrown error — `throw new Error('deliberate spike error')`:
+
+```json
+{"content":[{"type":"text","text":"Tool execution failed: Error: Error handling task: deliberate spike error"}]}
+```
+
+Runtime error — `return undefinedVar.x`:
+
+```json
+{"content":[{"type":"text","text":"Tool execution failed: Error: Error handling task: Cannot read properties of undefined (reading 'x')"}]}
+```
+
+Suspended tab (seen from Claude's Penpot MCP connection on 2026-09-17, same server):
+
+```text
+Tool execution failed: Error: The Penpot plugin tab appears to be suspended by the browser (no heartbeat for 39s). Please click/focus the Penpot tab to wake it, then retry.
+```
+
+### Probe run summary
+
+Output of `probe.ts` for the run the Measurements table uses (CSS truncated; the exported PNG was a 480×200 dark board with the green text "Hello from sdlc-code via Penpot MCP", 6,604 bytes).
+
+<details>
+<summary>probe run JSON</summary>
+
+```json
+{
+  "startedAt": "2026-09-18T01:29:10.778Z",
+  "host": "design.penpot.app",
+  "connect": {
+    "ok": true,
+    "ms": 618,
+    "value": {
+      "name": "penpot",
+      "version": "1.0.0"
+    }
+  },
+  "list_tools": {
+    "ok": true,
+    "ms": 221,
+    "value": [
+      "execute_code",
+      "high_level_overview",
+      "penpot_api_info",
+      "export_shape"
+    ]
+  },
+  "read_file_info": {
+    "ok": true,
+    "ms": 386,
+    "value": {
+      "file": "sdlc-code dashboard",
+      "pages": [
+        "Page 1"
+      ],
+      "current": "Page 1"
+    }
+  },
+  "roundtrip_latency_ms": {
+    "ok": true,
+    "ms": 1908,
+    "value": [
+      378,
+      389,
+      377,
+      387,
+      377
+    ]
+  },
+  "create_board_with_text": {
+    "ok": true,
+    "ms": 630,
+    "value": {
+      "boardId": "432b662e-d02e-8028-8008-a7cc8b9f1e1e",
+      "page": "Page 1"
+    }
+  },
+  "export_png": {
+    "ok": true,
+    "ms": 6977,
+    "value": {
+      "mimeType": "image/png",
+      "bytes": 6604
+    }
+  },
+  "generate_markup_css": {
+    "ok": true,
+    "ms": 2538,
+    "value": "/* sdlc-code T02 spike (safe to delete) */\n.sdlccode-a7cc8b9f1e1e {\n  position: relative;\n  width: 480px;\n  height: 200px;\n  background: #0b0f14FF;\n  overflow: hidden;\n  z-index: 0;\n}\n\n/* Text */\n.text-a7cc8bb6d3b6 {\n  position: absolute;\n …"
+  },
+  "execution_error_is_classified": {
+    "ok": true,
+    "ms": 383,
+    "value": {
+      "kind": "execution",
+      "message": "PenpotError: Tool execution failed: Error: Error handling task: deliberate spike error"
+    }
+  },
+  "cleanup": {
+    "ok": true,
+    "ms": 2707,
+    "value": "removed"
+  },
+  "finishedAt": "2026-09-18T01:29:27.160Z"
+}
+```
+
+</details>
