@@ -25,6 +25,8 @@ describe("sdlccode", () => {
     const { io, out } = capture();
     expect(runCli([], io)).toBe(0);
     expect(out.join("\n")).toMatch(/Usage: sdlccode/);
+    // Commands are only listed once they exist (T24).
+    expect(out.join("\n")).not.toMatch(/\brun\b/);
   });
 
   it("rejects unknown commands with exit code 2", () => {

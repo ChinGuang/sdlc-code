@@ -17,8 +17,16 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         {
-          selector:
-            "PropertyDefinition[accessibility='private'], MethodDefinition[accessibility='private']",
+          selector: [
+            "PropertyDefinition",
+            "MethodDefinition",
+            "AccessorProperty",
+            "TSAbstractPropertyDefinition",
+            "TSAbstractMethodDefinition",
+            "TSAbstractAccessorProperty",
+          ]
+            .map((node) => `${node}[accessibility='private']`)
+            .join(", "),
           message:
             "SC-2: use JavaScript #private members, not the TypeScript `private` keyword.",
         },
@@ -28,8 +36,13 @@ export default tseslint.config(
             "SC-2: no parameter properties; declare the field and assign it in the constructor body.",
         },
         {
-          selector:
-            "ClassDeclaration[implements.length>0] MethodDefinition[kind='method'][static=false]:not([key.type='PrivateIdentifier'])",
+          // Direct methods only (`> ClassBody >`), so nested helper classes are not flagged.
+          selector: ["ClassDeclaration", "ClassExpression"]
+            .map(
+              (node) =>
+                `${node}[implements.length>0] > ClassBody > MethodDefinition[kind='method'][static=false]:not([key.type='PrivateIdentifier']):not([accessibility='protected']):not([accessibility='private'])`,
+            )
+            .join(", "),
           message:
             "SC-3: public methods of a service/client must be arrow-function properties (e.g. `run = async () => {}`).",
         },

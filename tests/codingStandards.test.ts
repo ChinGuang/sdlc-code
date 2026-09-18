@@ -80,4 +80,50 @@ describe("SC-3 public methods are arrow-function properties", () => {
     `);
     expect(messages).toEqual([]);
   });
+
+  it("also applies to class expressions that implement an interface", async () => {
+    const messages = await standardsViolations(`
+      interface Api { run: () => void }
+      export const Impl = class implements Api { run(): void {} };
+    `);
+    expect(messages).toEqual([expect.stringMatching(/^SC-3/)]);
+  });
+
+  it("does not flag a nested class that has no interface", async () => {
+    const messages = await standardsViolations(`
+      interface Api { run: () => unknown }
+      export class Impl implements Api {
+        run = () => class Helper { describe(): string { return "h"; } };
+      }
+    `);
+    expect(messages).toEqual([]);
+  });
+
+  it("ignores protected and static methods (SC-3 covers public instance methods)", async () => {
+    const messages = await standardsViolations(`
+      interface Api { run: () => void }
+      export class Impl implements Api {
+        static create(): Impl { return new Impl(); }
+        protected hook(): void {}
+        run = (): void => this.hook();
+      }
+    `);
+    expect(messages).toEqual([]);
+  });
+});
+
+describe("SC-2 also covers abstract and accessor members", () => {
+  it("rejects private abstract members", async () => {
+    const messages = await standardsViolations(`
+      export abstract class Base { private abstract secret(): string; }
+    `);
+    expect(messages).toEqual([expect.stringMatching(/^SC-2/)]);
+  });
+
+  it("rejects private accessor fields", async () => {
+    const messages = await standardsViolations(`
+      export class Client { private accessor token = "x"; }
+    `);
+    expect(messages).toEqual([expect.stringMatching(/^SC-2/)]);
+  });
 });

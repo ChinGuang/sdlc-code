@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_ROLES, isAgentRole, ownsDocument } from "./agentRoles.js";
+import { AGENT_ROLES, isAgentRole, documentOwner } from "./agentRoles.js";
 
 describe("AGENT_ROLES", () => {
   it("lists the agents from CONTEXT.md", () => {
@@ -20,12 +20,12 @@ describe("AGENT_ROLES", () => {
   });
 });
 
-describe("ownsDocument", () => {
+describe("documentOwner", () => {
   it("routes design documents to their owning agent (Verdict comments)", () => {
-    expect(ownsDocument("systemDesign")).toBe("systemDesign");
-    expect(ownsDocument("slicePlan")).toBe("systemDesign");
-    expect(ownsDocument("apiContract")).toBe("systemDesign");
-    expect(ownsDocument("uiSpec")).toBe("uiDesign");
-    expect(ownsDocument("penpotDesign")).toBe("uiDesign");
+    expect(documentOwner("systemDesign")).toBe("systemDesign");
+    expect(documentOwner("slicePlan")).toBe("systemDesign");
+    expect(documentOwner("apiContract")).toBe("systemDesign");
+    expect(documentOwner("uiSpec")).toBe("uiDesign");
+    expect(documentOwner("penpotDesign")).toBe("uiDesign");
   });
 });
