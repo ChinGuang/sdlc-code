@@ -63,13 +63,18 @@ export interface ChatClient {
 }
 
 export class ChatApiError extends Error {
+  readonly status: number;
+  readonly retryAfterSeconds: number | null;
+
   constructor(
-    readonly status: number,
-    readonly retryAfterSeconds: number | null,
+    status: number,
+    retryAfterSeconds: number | null,
     message: string,
   ) {
     super(message);
     this.name = "ChatApiError";
+    this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 

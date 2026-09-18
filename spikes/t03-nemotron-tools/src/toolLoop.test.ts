@@ -40,8 +40,17 @@ const tools: LoopTools = {
 };
 
 // Tests depend on the interface; only this factory knows the class.
-const makeLoop = (client: ChatClient, maxIterations = 10): ToolLoop =>
-  new ChatToolLoop({ client, model: "nvidia/m", tools, maxIterations });
+const makeLoop = (
+  client: ChatClient,
+  maxIterations = 10,
+  loopTools: LoopTools = tools,
+): ToolLoop =>
+  new ChatToolLoop({
+    client,
+    model: "nvidia/m",
+    tools: loopTools,
+    maxIterations,
+  });
 
 describe("ChatToolLoop.run", () => {
   it("executes tool calls, feeds results back, and returns the final answer", async () => {
@@ -131,14 +140,7 @@ describe("ChatToolLoop.run", () => {
       reply({ toolCalls: [{ id: "c1", name: "read_file", arguments: "{}" }] }),
       reply({ content: "ok" }),
     ]);
-    const loop = new ChatToolLoop({
-      client,
-      model: "m",
-      tools: failing,
-      maxIterations: 5,
-    });
-
-    await loop.run({ system: "s", user: "u" });
+    await makeLoop(client, 5, failing).run({ system: "s", user: "u" });
 
     expect(requests[1]!.messages.at(-1)).toEqual({
       role: "tool",

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ChatApiError,
   costUsd,
   parseToolArguments,
   TokenFactoryChatClient,
@@ -174,14 +175,31 @@ describe("TokenFactoryChatClient.complete", () => {
   });
 
   it("never exposes the API key", () => {
-    const client = new TokenFactoryChatClient({
-      ...base,
-      apiKey: "secret-xyz",
-    });
+    const client = makeClient({ ...base, apiKey: "secret-xyz" });
 
     expect(Object.keys(client)).toEqual(["complete"]);
     expect("apiKey" in client).toBe(false);
     expect(JSON.stringify(client)).not.toContain("secret-xyz");
+  });
+});
+
+describe("ChatApiError", () => {
+  it("never includes the API key", async () => {
+    const { fetch } = fakeFetch([
+      { status: 401, body: { error: { message: "invalid token" } } },
+    ]);
+    const error = await makeClient({ ...base, apiKey: "secret-xyz", fetch })
+      .complete({ model: "m", messages: [] })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ChatApiError);
+    expect(JSON.stringify(error)).not.toContain("secret-xyz");
+    expect(String(error)).not.toContain("secret-xyz");
+    expect(Object.keys(error as object).sort()).toEqual([
+      "name",
+      "retryAfterSeconds",
+      "status",
+    ]);
   });
 });
 

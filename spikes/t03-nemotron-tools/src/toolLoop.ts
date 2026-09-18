@@ -110,35 +110,43 @@ export class ChatToolLoop implements ToolLoop {
       });
 
       for (const call of response.toolCalls) {
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          content: await this.#execute(call.name, call.arguments, result),
-        });
+        const { content, problem } = await this.#execute(
+          call.name,
+          call.arguments,
+        );
+        if (problem === "malformed") result.malformedArguments++;
+        if (problem === "unknown_tool") result.unknownTools++;
+        messages.push({ role: "tool", tool_call_id: call.id, content });
       }
     }
     return result;
   };
 
-  async #execute(
-    name: string,
-    rawArguments: string,
-    result: LoopResult,
-  ): Promise<string> {
+  async #execute(name: string, rawArguments: string): Promise<ToolOutcome> {
     const tool = this.#options.tools[name];
-    if (!tool) {
-      result.unknownTools++;
-      return `Error: unknown tool ${name}`;
-    }
+    if (!tool)
+      return {
+        content: `Error: unknown tool ${name}`,
+        problem: "unknown_tool",
+      };
     const parsed = parseToolArguments(rawArguments);
-    if (!parsed.ok) {
-      result.malformedArguments++;
-      return `Error: invalid arguments (${parsed.error})`;
-    }
+    if (!parsed.ok)
+      return {
+        content: `Error: invalid arguments (${parsed.error})`,
+        problem: "malformed",
+      };
     try {
-      return await tool.handler(parsed.value);
+      return { content: await tool.handler(parsed.value), problem: null };
     } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : String(error)}`;
+      return {
+        content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        problem: null,
+      };
     }
   }
 }
+
+type ToolOutcome = {
+  content: string;
+  problem: "malformed" | "unknown_tool" | null;
+};

@@ -2,11 +2,12 @@
 
 - **Date:** 2026-09-18
 - **Code:** [`spikes/t03-nemotron-tools`](../../spikes/t03-nemotron-tools) — `chatClient.ts` (tested `TokenFactoryChatClient`), `toolLoop.ts` (tested `ChatToolLoop`), `probe.ts` (live probe), `models.ts` (model listing)
-- **Result:** ✅ All four NVIDIA Nemotron models on Token Factory do OpenAI-style tool calling and JSON-schema output. **0 malformed tool arguments in 397 tool calls across 38 runs.** The big difference between models is **parallel tool calls**, which drives cost and latency more than per-token price.
+- **Result:** ✅ All four NVIDIA Nemotron models on Token Factory do OpenAI-style tool calling and JSON-schema output reliably: **0 malformed arguments in 521 tool calls** over 48 tool-using runs, and **16/16 schema-valid** structured outputs. They differ sharply in **parallel tool calls**, **multi-step accuracy** and **long-context recall** — which is what the agent loop has to design around.
+- **Spec coverage:** the task asked for Ultra + Super; Lightning and Nano were added because they appeared in the model listing and cost ~nothing to test.
 
 ## Models available to our key
 
-From `GET /v1/models?verbose=true` (`pnpm models`). Use these **exact** ids — they are case-sensitive in the listing (`Nemotron-3-Ultra…` vs `nemotron-3-super…`).
+From `GET /v1/models?verbose=true` (`pnpm models`). Use these **exact** ids.
 
 | Model id | Context | $ / 1M in → out | Limits (RPM / TPM) | Features |
 |---|---|---|---|---|
@@ -15,65 +16,76 @@ From `GET /v1/models?verbose=true` (`pnpm models`). Use these **exact** ids — 
 | `nvidia/Nemotron-3_5-Lightning` | 1M | 0.06 → 0.24 | 600 / 400k | tools, reasoning |
 | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | 262k | 0.06 → 0.24 | 100 / 800k | tools, reasoning |
 
-Project-wide default limits also apply (docs: 60 RPM / 400k TPM baseline, auto-scaling up to 20×; HTTP 429 with `Retry-After` when exceeded).
+Project-wide defaults also apply (docs: 60 RPM / 400k TPM baseline, auto-scaling up to 20×; HTTP 429 with `Retry-After`). **Rate limits were not exercised** — no concurrency and no 429 in this spike.
 
 ## Experiments
 
-Per model, temperature 0 (`pnpm probe [model…]`, results in gitignored `results/`):
+All at temperature 0 (`pnpm probe [model…]`; `PROBE_ONLY=<prefix> PROBE_REPEAT=<n>` to repeat one experiment; results in gitignored `results/`).
 
-1. **single_tool_call** — "weather in Paris in celsius" with a `get_weather` tool; loop until answer.
-2. **forced_tool_choice** — "tell me a joke" with `tool_choice` forcing `get_weather`.
-3. **structured_output_slice_plan** — `response_format: json_schema` (schema also in the system prompt) for a Slice Plan.
-4. **long_loop_12_files** — `list_files` + `read_file` over 12 files; reply with the sum (needs 13 tool calls). Repeated 5× (`PROBE_ONLY=long_loop PROBE_REPEAT=5`).
-5. **long_loop_parallel_hint** — as 4, plus a system-prompt instruction to issue independent calls in parallel (Super, Nano; 3×).
-6. **reasoning_off_single_tool_call** — as 1 with `chat_template_kwargs: { enable_thinking: false }`.
+| Experiment | What it checks |
+|---|---|
+| `single_tool_call` | "Weather in Paris in celsius" with `get_weather`; loop to an answer |
+| `forced_tool_choice` | Unrelated prompt with `tool_choice` forcing `get_weather` |
+| `structured_output_slice_plan` | `response_format: json_schema` + schema in the system prompt → Slice Plan |
+| `long_loop_12_files` | `list_files` + `read_file` × 12 **independent** files, reply with the sum (13 calls) |
+| `long_loop_parallel_hint` | As above, plus "issue independent calls in parallel" in the system prompt |
+| `chained_loop_12_files` | 12 files where each names the next — **forces 12 sequential turns** for every model |
+| `context_needle` | ~100k-token prompt of 3,000 near-identical records; return one record's code |
+| `reasoning_off_single_tool_call` | As `single_tool_call` with `chat_template_kwargs: { enable_thinking: false }` |
 
 ## Results
 
 | | Ultra | Super | Lightning | Nano |
 |---|---|---|---|---|
 | Single tool call | ✅ | ✅ | ✅ | ✅ |
-| Forced `tool_choice` | ✅ valid args | ✅ | ✅ | ✅ |
-| JSON-schema Slice Plan | ✅ valid, 0 schema problems | ✅ | ✅ | ✅ |
-| 12-file loop correct | 6/6 | 6/6 (+3/3 with hint) | 6/6 | **5/6** (+3/3 with hint) |
-| Parallel tool calls | **yes** (12 reads in 1 turn) | **never** | **yes** | **never** |
-| Turns for 12-file loop | 3 | 14 | 3 | 14 |
-| Avg wall time, 12-file loop | 3.9 s | 17.1 s | 2.2 s | 23.8 s |
-| Avg prompt / completion tokens | 1,940 / 693 | 12,048 / 795 | 2,243 / 427 | 10,900 / 2,922 |
-| Avg cost, 12-file loop | $0.0040 | $0.0043 | $0.00024 | $0.0014 |
-| `enable_thinking: false` | accepted; 162 → 53 completion tokens, 2.4 → 1.5 s | accepted; 88 → 68 | accepted (no reasoning emitted anyway) | accepted; 284 → 56, 1.8 → 0.8 s |
+| Forced `tool_choice` | ✅ | ✅ | ✅ | ✅ |
+| JSON-schema Slice Plan (valid, 0 schema problems) | 4/4 | 4/4 | 4/4 | 4/4 |
+| 12 independent files — correct | 6/6 | 6/6 (+3/3 hint) | 6/6 | **5/6** (+3/3 hint) |
+| Parallel tool calls | **yes** (12 reads in 1 turn) | **never**, even with hint | **yes** | **never**, even with hint |
+| Turns · avg wall time (independent) | 3 · 3.9 s | 14 · 17.1 s | 3 · 2.2 s | 14 · 23.8 s |
+| Avg tokens in / out (independent) | 1,940 / 693 | 12,048 / 795 | 2,243 / 427 | 10,900 / 2,922 |
+| Avg cost (independent) | $0.0040 | $0.0043 | $0.00024 | $0.0014 |
+| **12 chained files (13 sequential turns) — correct** | 2/2 · 14.7 s · $0.012 | 2/2 · 14.0 s · $0.0038 | **0/3** — answers the last value (193) instead of the sum (1458) | 2/2 · 17.6 s · $0.0013 |
+| **~100k-token needle (101k tokens in)** | ✗ (neighbouring record) · 4.7 s · $0.10 | ✗ ×3 (neighbouring record / empty) · 3.8–7.1 s | ✗ ×3 (neighbouring record) · 0.45–2.1 s | ✗ ×3 (neighbouring record) · 1.8–4.2 s |
+| `enable_thinking: false` | accepted; 162 → 53 completion tokens, 2.4 → 1.5 s | accepted; 88 → 68 | accepted (no reasoning emitted for tools anyway) | accepted; 284 → 56, 1.8 → 0.8 s |
 
-(Averages from the 5× repeat run; single-call figures from the first run.)
+An earlier attempt at the needle test built a **~303k-token** prompt by mistake (synthetic codes tokenize at ~3 chars/token): Super and Nano rejected it (`400 maximum context length is 262144 tokens`), Ultra returned **empty content**, Lightning answered correctly.
 
 ## Findings
 
-1. **Tool-call format is standard OpenAI.** `message.tool_calls[].function.arguments` is a JSON string; ids look like `chatcmpl-tool-…`; `finish_reason` is `tool_calls`. No malformed arguments and no calls to non-existent tools in 397 calls.
-2. **`tool_choice` forcing works** on all four, even when the prompt is unrelated.
-3. **JSON-schema output works** on all four when the schema is sent both as `response_format.json_schema` and in the system prompt (Token Factory docs recommend both). Single sample per model — T09 must still validate every response.
-4. **Super and Nano never make parallel tool calls**, even when told to. Each call costs a full turn, and every turn resends the whole conversation, so prompt tokens grow roughly with turns²: Super used **6× Ultra's prompt tokens** for the same task and ended up **as expensive as Ultra and 4× slower**, despite a per-token price one third of Ultra's.
-5. **Reasoning** comes back in `message.reasoning_content` and is on by default. `chat_template_kwargs: { enable_thinking: false }` is accepted by all four and cuts completion tokens and latency (up to 5× fewer tokens on Nano). Lightning emitted no reasoning for tool calls but ~1.5k reasoning tokens (5 s) for the structured Slice Plan.
-6. **Completion can't be trusted blindly.** Nano once read 11 of 12 files and confidently answered a wrong sum. Every other run read all 12. Agents need checks in code, not just in prompts.
+1. **Tool-call format is standard OpenAI.** `message.tool_calls[].function.arguments` is a JSON string; ids look like `chatcmpl-tool-…`; `finish_reason` is `tool_calls`. 0 malformed arguments and 0 calls to unknown tools in 521 calls.
+2. **`tool_choice` forcing works** on all four, even with an unrelated prompt.
+3. **JSON-schema output is reliable** (16/16 valid) when the schema is in both `response_format` and the prompt. We only tested "both" — the Token Factory docs recommend it; we did not test either alone. The shape was right but the *content* was not always what we mean: one Walking Skeleton included auth endpoints.
+4. **Super and Nano never make parallel tool calls**, even when told to. Each call is a turn and each turn resends the whole conversation, so on independent reads Super used **6.2× Ultra's prompt tokens** and was **as expensive as Ultra and 4.4× slower**. When calls are genuinely sequential (chained), the models converge on turns and Super is **3× cheaper** than Ultra at similar speed.
+5. **Lightning loses track over many sequential turns.** It followed all 12 links in the chain correctly but answered the last value instead of the sum, 3/3 times. It is excellent when it can parallelise, unreliable when it must accumulate state across turns — the normal shape of coding work.
+6. **Long-context exact recall is unreliable on every model.** At ~100k tokens of near-identical records, all four consistently returned a neighbouring record's value (they locate the region, then misread the line). Super sometimes returns **empty content**; Ultra did too at ~300k. Latency stays low (Lightning's repeat of the same 100k prompt dropped from 2.1 s to 0.45 s, suggesting prefix caching).
+7. **Reasoning** is returned in `message.reasoning_content` and is on by default. `chat_template_kwargs: { enable_thinking: false }` is accepted by all four and cuts completion tokens and latency (up to 5×). Lightning produced no reasoning for tool calls but ~5k characters of reasoning (≈ most of its 1,562 completion tokens) for the structured Slice Plan.
+8. **Answers need checking in code.** Nano once read 11/12 files and answered confidently; Lightning confidently answered the wrong quantity; Super/Ultra sometimes return empty content.
 
 ## Rules for the agent loop (T08) and agents
 
-1. Use the `TokenFactoryChatClient` / `ChatToolLoop` shapes from this spike; OpenAI-compatible request/response, `reasoning_content` captured into the Transcript.
-2. **Prefer batch tools over many small ones** — e.g. `read_files(paths[])` instead of only `read_file(path)` — because Super/Nano will not parallelise. This cuts turns, tokens and time for every model.
-3. **Count turns and tokens per Step** and feed them into the Token Budget; keep contexts short (Working Memory instead of long histories) since prompt cost grows with every turn.
-4. **Send JSON schemas twice** (in `response_format` and in the prompt) and validate every structured response in code before using it; on failure, retry once with the validation errors.
-5. **Verify completion in code** where possible (e.g. "all files in the Slice were read / written", tests actually ran) rather than trusting the model's final message.
-6. **Thinking on for judgement, off for mechanics:** keep reasoning on for System Design, Orchestrator decisions and Code Review; consider `enable_thinking: false` for mechanical tool loops (file reads, test runs). Make it a per-role config flag.
-7. **Handle 429** with `Retry-After` (surfaced by `ChatApiError.retryAfterSeconds`); per-model limits allow our planned parallelism (2 Coding Agents at once).
-8. Use exact model ids from `/v1/models`; don't hard-code lower-cased variants.
+1. Build on `TokenFactoryChatClient` / `ChatToolLoop`. **T08 must add** what the spike loop does not: store `reasoning_content` in the Transcript (the spike only counts characters), Working Memory, Token Budget.
+2. **Offer batch tools** — e.g. `read_files(paths[])`, `write_files(files[])` — alongside single-item tools. Super and Nano will not parallelise on their own; batch tools remove most of their turn/token penalty.
+3. **Count turns and tokens per Step** against the Token Budget and keep contexts short; prompt cost grows with every turn.
+4. **Never rely on long-context recall for exact facts.** Give agents search/read tools (grep, read a range, read a file) instead of pasting whole codebases or long documents; keep a prompt well under ~100k tokens of dense data.
+5. **Validate every structured response in code** (JSON Schema + domain checks such as "Slice 1 is a real Walking Skeleton"); on failure, retry once with the validation errors. Send the schema in both `response_format` and the prompt.
+6. **Verify outcomes in code, not from the model's final message** — e.g. every planned file written, tests actually executed and passed. Treat **empty content** as a failed Step and retry.
+7. **Thinking on for judgement, off for mechanics:** reasoning on for System Design, Orchestrator decisions and Code Review; `enable_thinking: false` is available per call for mechanical loops. Make it a per-role config flag.
+8. **Handle 429** using `Retry-After` (`ChatApiError.retryAfterSeconds`). Our parallelism (2 Coding Agents at once) is far below the per-model limits on paper, but this was not load-tested.
+9. Use exact model ids from `/v1/models`.
 
-## Open decision — model defaults per role
+## Model defaults per role
 
-The agreed defaults (grilling Q5) are **Ultra** for Orchestrator / System Design / Code Review and **Super** for Coding / Testing / UI Design. This spike suggests Super is a poor fit for **tool-heavy** roles because it never parallelises: it is no cheaper than Ultra in practice and much slower. Lightning is fast, cheap and parallel, but this spike only tests simple tools, not code quality.
+The agreed defaults (grilling Q5): **Ultra** for Orchestrator / System Design / Code Review, **Super** for Coding / Testing / UI Design.
 
-> Options:
-> - **(a) Keep defaults now, re-evaluate after T15** with a real coding task (Super vs Lightning vs Ultra on the same Slice).
-> - **(b) Switch tool-heavy roles (Coding, Testing, UI Design) to Lightning now**, keep Ultra for reasoning roles, and confirm in T15.
->
-> Recommendation: (a) plus rule 2 (batch tools), which removes most of Super's penalty regardless. Model ids are config, so switching later costs nothing.
+The data **supports keeping them**:
+
+- Super is correct on both independent and sequential loops, and cheapest-but-reliable for sequential work (the common case in coding). Its weakness — no parallel calls — is addressed by rule 2 (batch tools).
+- Lightning is attractive on price and speed but failed every sequential-accumulation run, so it is **not** a safe default for Coding/Testing. It could suit narrow, parallel, single-shot jobs later.
+- Nano skipped a file once and is the slowest; not recommended for agents.
+- Ultra is the most robust for reasoning roles; watch its cost on long sequential loops (3× Super).
+
+T15 should still compare Super vs Ultra on a real coding Slice before the demo; switching is a config change.
 
 ## Appendix: what the real API returned
 
@@ -89,12 +101,31 @@ Ultra, `forced_tool_choice` ("Tell me a joke." with `get_weather` forced):
 [{"id":"chatcmpl-tool-a66e97bfe624ec68","name":"get_weather","arguments":"{\"city\": \"Paris\", \"unit\": \"celsius\"}"}]
 ```
 
-Super, `structured_output_slice_plan` content:
+Super, `structured_output_slice_plan` content (schema-valid, but Slice 1 is not a real Walking Skeleton):
 
 ```json
 {"slices": [{"order": 1, "name": "Walking skeleton", "endpoints": ["GET /health", "POST /register", "POST /login", "GET /lists", "POST /lists"]}, {"order": 2, "name": "Auth & Todo core", "endpoints": ["POST /register (real)", "POST /login (JWT)", "GET /me", "GET /lists", "POST /lists", "GET /lists/:id", "PUT /lists/:id", "DELETE /lists/:id", "GET /lists/:id/todos", "POST /lists/:id/todos", "PUT /lists/:id/todos/:todoId", "DELETE /lists/:id/todos/:todoId"]}, {"order": 3, "name": "Shared lists & invites", "endpoints": ["POST /lists/:id/invite", "GET /invites/:token", "POST /invites/:token/accept", "GET /users/:userId/lists"]}]}
 ```
 
-Note the Walking Skeleton here already includes auth endpoints — schema-valid but not what our Walking Skeleton means (health check + one empty screen). T09's validator and prompt must enforce the definition from CONTEXT.md, not just the JSON shape.
+Lightning, `chained_loop_12_files` final content after 12 correct reads (expected `1458`, the sum; `193` is the last file's value):
 
-Nano, the one wrong 12-file run: 12 tool calls, 11 distinct files read, final content `"\n2552"` (expected 3018).
+```text
+193
+```
+
+`context_needle` answers for `record-01860` (expected `QX7-PELICAN-4418`); each is the code of a nearby record:
+
+| Model | Answer | Belongs to |
+|---|---|---|
+| Ultra | `C63288-3V-4` | record-01902 |
+| Super | `C97888-35-6` (×2), empty (×1) | nearby record / — |
+| Lightning | `The code is C38582-NY-2.` (×3) | record-01861 |
+| Nano | `C13876-GC-0` (×3) | record-01820 |
+
+Super and Nano on the ~303k-token prompt:
+
+```text
+Token Factory 400: This model's maximum context length is 262144 tokens. However, you requested 2000 output tokens and your prompt contains at least 260145 input tokens, for a total of at least 262145 tokens. Please reduce the length of the input prompt or the number of requested output tokens. (parameter=input_tokens, value=260145)
+```
+
+Nano, the one wrong independent-files run: 12 tool calls, 11 distinct files read, final content `"\n2552"` (expected 3018).

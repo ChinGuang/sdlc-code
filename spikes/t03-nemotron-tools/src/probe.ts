@@ -120,6 +120,40 @@ const fileTools = (reads: string[]): LoopTools => ({
   },
 });
 
+const CHAIN: Array<{ path: string; value: number }> = Array.from({ length: 12 }, (_, i) => ({
+  path: i === 0 ? "chain/start.txt" : `chain/node-${String((i * 7) % 12).padStart(2, "0")}-${i}.txt`,
+  value: 50 + i * 13,
+}));
+const CHAIN_SUM = CHAIN.reduce((a, c) => a + c.value, 0);
+
+const chainTools = (reads: string[]): LoopTools => ({
+  read_file: {
+    definition: {
+      name: "read_file",
+      description: "Read ONE file and return its content.",
+      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    },
+    handler: (args) => {
+      const path = String(args.path);
+      reads.push(path);
+      const index = CHAIN.findIndex((c) => c.path === path);
+      if (index < 0) throw new Error(`no such file: ${path}`);
+      const next = CHAIN[index + 1];
+      return `value=${CHAIN[index]!.value}; next=${next ? next.path : "END"}`;
+    },
+  },
+});
+
+// Haystack of synthetic records with one needle (~33 tokens per line; 3000 lines ≈ 100k tokens).
+const HAYSTACK_LINES = Number(process.env.HAYSTACK_LINES ?? 3000);
+const NEEDLE_ID = `record-${String(Math.floor(HAYSTACK_LINES * 0.62)).padStart(5, "0")}`;
+const NEEDLE_CODE = "QX7-PELICAN-4418";
+const HAYSTACK = Array.from({ length: HAYSTACK_LINES }, (_, i) => {
+  const id = `record-${String(i).padStart(5, "0")}`;
+  const code = id === NEEDLE_ID ? NEEDLE_CODE : `C${(i * 7919) % 99991}-${((i * 31) % 997).toString(36).toUpperCase()}-${i % 13}`;
+  return `${id}: owner=user${i % 251} region=eu-${i % 7} code=${code} status=${i % 3 === 0 ? "active" : "archived"}`;
+}).join("\n");
+
 const SLICE_PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -284,6 +318,53 @@ for (const model of models) {
       usage: r.usage,
       costUsd: cost(model, r.usage),
       latencyMs: r.latencyMs,
+    };
+  });
+
+  await experiment(model, "chained_loop_12_files", async () => {
+    // Each file names the next one, so reads cannot be parallelised: 12+ sequential turns.
+    const reads: string[] = [];
+    const loop = new ChatToolLoop({ client, model, tools: chainTools(reads), maxIterations: 30, temperature: 0 });
+    const r = await loop.run({
+      system: "You are a careful agent. Use the tools; never guess file contents.",
+      user: "Start by reading chain/start.txt. Each file has a value and names the next file. Follow the chain to the end, add up all the values, and reply with only the final sum as a number.",
+    });
+    const answer = Number((r.finalContent ?? "").replace(/[^0-9.-]/g, " ").trim().split(/\s+/).pop());
+    return {
+      summary: { correct: answer === CHAIN_SUM, calls: r.toolCallCount, iterations: r.iterations },
+      expected: CHAIN_SUM,
+      answer,
+      stopReason: r.stopReason,
+      toolCallCount: r.toolCallCount,
+      iterations: r.iterations,
+      malformedArguments: r.malformedArguments,
+      usage: r.usage,
+      costUsd: cost(model, r.usage),
+      latencyMs: r.latencyMs,
+      avgLatencyPerTurnMs: Math.round(r.latencyMs / Math.max(1, r.iterations)),
+      finalContent: r.finalContent?.slice(0, 600),
+    };
+  });
+
+  await experiment(model, "context_needle", async () => {
+    const response = await client.complete({
+      model,
+      temperature: 0,
+      maxTokens: 2000,
+      messages: [
+        { role: "system", content: "Answer using only the provided records. Reply with only the code." },
+        { role: "user", content: `${HAYSTACK}
+
+What is the code of ${NEEDLE_ID}?` },
+      ],
+    });
+    return {
+      summary: { correct: (response.content ?? "").includes(NEEDLE_CODE), promptTokens: response.usage.promptTokens, latencyMs: response.latencyMs },
+      promptTokens: response.usage.promptTokens,
+      completionTokens: response.usage.completionTokens,
+      latencyMs: response.latencyMs,
+      answer: response.content?.slice(0, 200),
+      costUsd: cost(model, response.usage),
     };
   });
 
