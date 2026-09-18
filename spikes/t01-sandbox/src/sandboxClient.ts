@@ -92,6 +92,16 @@ export function decodeStream(stream: StreamRepr | undefined): string {
     : stream.value;
 }
 
+/**
+ * True only if the command itself succeeded. An operation's `SUCCESS` status
+ * means the sandbox ran — it stays SUCCESS for non-zero exit codes and timeouts.
+ */
+export function commandSucceeded(result: RunResult): boolean {
+  return (
+    result.status === "SUCCESS" && result.exitCode === 0 && !result.timedOut
+  );
+}
+
 export function toRunResult(operation: OperationResponse): RunResult {
   const result = operation.metadata?.result ?? undefined;
   return {
