@@ -1,7 +1,7 @@
 # Spike T01 — Nebius Token Factory Sandboxes from Node
 
 - **Date:** 2026-09-18 (Early Access granted the same day; earlier calls were blocked)
-- **Code:** [`spikes/t01-sandbox`](../../spikes/t01-sandbox) — `sandboxClient.ts` (tested `NebiusSandboxClient` + `commandSucceeded`), `probe.ts` (live probe; `PROBE_ONLY=step1,step2` runs selected steps), `whoami.ts` (permission check)
+- **Code:** spike code (removed from `main`; kept at commit [`e51a607`](https://github.com/ChinGuang/sdlc-code/tree/e51a607/spikes/t01-sandbox)) — `sandboxClient.ts`, `probe.ts` (live probe; `PROBE_ONLY=step1,step2` runs selected steps), `whoami.ts`. **Maintained code:** `packages/clients/src/sandbox` (`NebiusSandboxClient`, `commandSucceeded`, `whoAmI`); permission check: `pnpm --filter @sdlc-code/clients sandbox:whoami`
 - **Result:** ✅ Everything a Test Run needs works from TypeScript over the REST API, and the **full ADR 0001 Test Run was exercised end to end**: branch the Base Snapshot, upload only the changed files, run unit tests + boot + smoke test in one disposable run — **0.8 s of execution, 1.5 s wall time**.
 - **No Python SDK needed.** `contree-sdk` wraps the same documented REST API; our TypeScript client calls it directly.
 
@@ -13,7 +13,7 @@ All numbers below come from the probe's saved results (gitignored `results/`), m
 |---|---|
 | API | `https://api.tokenfactory.nebius.com/sandboxes/v1` (ConTree REST API; OpenAPI spec in the docs) |
 | Auth | `Authorization: Bearer <NEBIUS_API_KEY>` **and** `Project: <NEBIUS_AI_PROJECT>` |
-| Access | **Early Access per project.** Before approval every call returned `403 Insufficient permissions`; `GET /whoami` lists each permission (`pnpm whoami`) |
+| Access | **Early Access per project.** Before approval every call returned `403 Insufficient permissions`; `GET /whoami` lists each permission (`pnpm --filter @sdlc-code/clients sandbox:whoami`) |
 | Limits (`/whoami`) | 3,600 s max per run · 50 concurrent runs · 12 GB writable layer · 8 concurrent imports · 3,600 s max import |
 | Client | `NebiusSandboxClient implements SandboxClient` — `#private` token/project, arrow-method API (CODING_STANDARDS.md) |
 
@@ -61,7 +61,7 @@ All numbers below come from the probe's saved results (gitignored `results/`), m
 
 ## Recommendation for T13 (Sandbox client + Test Runs)
 
-- Start from `spikes/t01-sandbox/src/sandboxClient.ts`; decide pass/fail with `commandSucceeded`, never `status` alone.
+- Build on `packages/clients/src/sandbox/sandboxClient.ts`; decide pass/fail with `commandSucceeded`, never `status` alone.
 - Add **retry with backoff** for 5xx and network errors on `spawn`, `uploadFile` and `getOperation`.
 - **Base Snapshot per Stack Profile:** import `node:22-slim` once, run the template's `npm ci` once (the expensive part), keep the image UUID and tag it with `set_image_tag` so it isn't cleaned up after 180 days (Beta retention).
 - **Test Run** = one disposable run from the Base Snapshot with the changed files in `files` and one script: install new deps if the lockfile changed → unit tests with a machine-readable reporter (TAP worked) → boot → smoke → stop.

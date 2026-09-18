@@ -58,13 +58,13 @@ Stateless, pure helpers (parsing, formatting, classification, redaction) remain 
 
 ## Formatting
 
-Prettier with default settings (the repository stores LF line endings; Windows checkouts may show CRLF).
+Prettier with default settings for code and config (`pnpm format:check`). Line endings are LF (`.gitattributes`). Hand-written Markdown (`*.md`, `docs/`) is not Prettier-checked.
 
-## Enforcement (added in T04)
+## Enforcement
 
-| Rule | Enforced by |
+| Rule | Enforced by (proved in `tests/codingStandards.test.ts`) |
 |---|---|
-| SC-2 no `private` / parameter properties | ESLint `no-restricted-syntax` on `[accessibility="private"]` and `TSParameterProperty` |
-| SC-3 public methods are arrow properties | ESLint `no-restricted-syntax` on public `MethodDefinition[kind="method"]` in classes that implement an interface (constructors and `#private` methods excluded) |
+| SC-2 no `private` / parameter properties | ESLint `no-restricted-syntax` on `[accessibility="private"]` (fields, methods, accessors, abstract members) and `TSParameterProperty` |
+| SC-3 public methods are arrow properties | ESLint `no-restricted-syntax` on methods declared directly in a class declaration or expression that `implements` an interface; constructors, getters/setters, static, protected and `#private` methods are excluded. A service written without `implements` is caught by SC-1 in review. |
 | SC-1, SC-4, SC-5 | Code review |
-| Formatting | Prettier check in CI |
+| Formatting | `pnpm format:check` in CI (`.github/workflows/ci.yml`) |

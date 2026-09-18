@@ -1,7 +1,7 @@
 # Spike T02 — Penpot MCP from a Node MCP client
 
 - **Date:** 2026-09-18
-- **Code:** [`spikes/t02-penpot-mcp`](../../spikes/t02-penpot-mcp) — `penpotClient.ts` (tested wrapper), `probe.ts` (live probe)
+- **Code:** spike code (removed from `main`; kept at commit [`e51a607`](https://github.com/ChinGuang/sdlc-code/tree/e51a607/spikes/t02-penpot-mcp)) — `penpotClient.ts`, `probe.ts` (live probe). **Maintained code:** `packages/clients/src/penpot` (`McpPenpotClient`)
 - **Result:** ✅ Works end to end. Node → Penpot Cloud MCP → Penpot plugin in the browser → shapes created, exported to PNG, removed.
 
 ## Setup that worked
@@ -45,7 +45,7 @@ Implication: a 5-screen design with ~40 calls per screen is minutes, not seconds
 
 ## Recommendation for T10 (UI Design Agent)
 
-- Use the tested `penpotClient.ts` as the starting point; keep code self-contained per call.
+- Build on `McpPenpotClient` in `packages/clients/src/penpot`; keep code self-contained per call.
 - Check connectivity at the start of the Design Phase (`execute_code: return penpot.currentFile?.name`) and escalate early if disconnected or suspended.
 - Batch shape creation into a few large `execute_code` calls per screen (each call ~0.4 s overhead).
 - Export PNGs once per screen after the design settles.
@@ -61,7 +61,7 @@ Implication: a 5-screen design with ~40 calls per screen is minutes, not seconds
 
 ## Appendix: what the real server returned
 
-Captured from Penpot Cloud MCP on 2026-09-18. Re-run with `pnpm probe` in `spikes/t02-penpot-mcp` (writes to the gitignored `results/`). User tokens are redacted before anything is printed or saved.
+Captured from Penpot Cloud MCP on 2026-09-18. The probe that produced this lives in the spike code at commit [`e51a607`](https://github.com/ChinGuang/sdlc-code/tree/e51a607/spikes/t02-penpot-mcp) (`pnpm probe` there). User tokens are redacted before anything is printed or saved.
 
 ### Raw `execute_code` responses
 

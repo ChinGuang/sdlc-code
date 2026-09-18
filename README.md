@@ -2,7 +2,7 @@
 
 A multi-agent developer tool that turns a plain-language product request into a reviewed pull request for a production-ready full-stack application.
 
-> Status: design phase. Nothing runnable yet.
+> Status: early build (M1). The monorepo, clients and CI exist; the agents are being built.
 
 ## Agents
 
@@ -26,11 +26,35 @@ Details on how each is used will be added as the project is built.
 ## Docs
 
 - [CONTEXT.md](CONTEXT.md) — domain glossary
+- [CODING_STANDARDS.md](CODING_STANDARDS.md) — coding rules (enforced by lint)
+- [docs/PLAN.md](docs/PLAN.md) — implementation plan
 - [docs/adr](docs/adr) — architecture decisions
+- [docs/spikes](docs/spikes) — findings from the Sandbox, Penpot MCP and Nemotron spikes (their throwaway code is kept in git history)
 
-## Setup
+## Repository layout
 
-Coming soon.
+| Path | What |
+|---|---|
+| `packages/core` | Domain logic (agents, Orchestrator, Runs) |
+| `packages/clients` | Token Factory, Sandboxes and Penpot MCP clients |
+| `apps/server` | Local HTTP API (127.0.0.1 only) |
+| `apps/web` | Dashboard (Vite + React) |
+| `apps/cli` | `sdlccode` command line |
+
+## Development
+
+Requires Node.js 22.12+ and pnpm 10.
+
+```bash
+pnpm install
+cp .env.example .env   # then fill in your keys
+pnpm check             # format check, lint, typecheck, tests
+pnpm --filter @sdlc-code/server dev
+pnpm --filter @sdlc-code/web dev
+pnpm --filter @sdlc-code/cli sdlccode --help
+```
+
+Full setup instructions come with T26.
 
 ## License
 

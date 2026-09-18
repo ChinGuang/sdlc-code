@@ -1,0 +1,12 @@
+{
+  "name": "@sdlc-code/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MPL-2.0",
+  "scripts": {
+    "sdlccode": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
+}
