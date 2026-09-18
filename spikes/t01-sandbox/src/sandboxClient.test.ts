@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSandboxClient, decodeStream, type OperationResponse } from "./sandboxClient.js";
+import {
+  decodeStream,
+  NebiusSandboxClient,
+  type OperationResponse,
+  type SandboxClient,
+  type SandboxClientOptions,
+} from "./sandboxClient.js";
+
+// Tests depend on the interface; only this factory knows the class.
+const makeClient = (options: SandboxClientOptions): SandboxClient =>
+  new NebiusSandboxClient(options);
 
 type Call = { url: string; init: RequestInit };
 
@@ -37,10 +47,10 @@ describe("decodeStream", () => {
   });
 });
 
-describe("createSandboxClient", () => {
+describe("SandboxClient", () => {
   it("sends bearer token and Project header on every request", async () => {
     const { fetch, calls } = fakeFetch([{ status: 200, body: { images: [] } }]);
-    await createSandboxClient({ ...base, fetch }).listImages();
+    await makeClient({ ...base, fetch }).listImages();
 
     const headers = new Headers(calls[0]!.init.headers);
     expect(headers.get("authorization")).toBe("Bearer tkn");
@@ -49,7 +59,7 @@ describe("createSandboxClient", () => {
 
   it("uploads raw bytes as octet-stream and returns the file uuid", async () => {
     const { fetch, calls } = fakeFetch([{ status: 201, body: { uuid: "file-1", sha256: "abc", size: 5 } }]);
-    const file = await createSandboxClient({ ...base, fetch }).uploadFile("hello");
+    const file = await makeClient({ ...base, fetch }).uploadFile("hello");
 
     expect(calls[0]!.url).toBe("https://sandbox.test/v1/files");
     expect(new Headers(calls[0]!.init.headers).get("content-type")).toBe("application/octet-stream");
@@ -58,7 +68,7 @@ describe("createSandboxClient", () => {
 
   it("spawns an instance and returns the operation id", async () => {
     const { fetch, calls } = fakeFetch([{ status: 201, body: { uuid: "op-9" } }]);
-    const id = await createSandboxClient({ ...base, fetch }).spawn({ image: "tag:node:22", command: "node -v", shell: true });
+    const id = await makeClient({ ...base, fetch }).spawn({ image: "tag:node:22", command: "node -v", shell: true });
 
     expect(calls[0]!.url).toBe("https://sandbox.test/v1/instances");
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ image: "tag:node:22", command: "node -v", shell: true });
@@ -67,7 +77,7 @@ describe("createSandboxClient", () => {
 
   it("throws with status and API error message on failure", async () => {
     const { fetch } = fakeFetch([{ status: 401, body: { error: "missing Project header" } }]);
-    await expect(createSandboxClient({ ...base, fetch }).listImages()).rejects.toThrow(/401.*missing Project header/);
+    await expect(makeClient({ ...base, fetch }).listImages()).rejects.toThrow(/401.*missing Project header/);
   });
 
   it("polls an operation until it reaches a terminal status", async () => {
@@ -77,7 +87,7 @@ describe("createSandboxClient", () => {
       { status: 200, body: op({ status: "SUCCESS", result_image_uuid: "img-2" }) },
     ]);
     const sleep = vi.fn(async () => {});
-    const done = await createSandboxClient({ ...base, fetch, sleep }).waitForOperation("op-1", { pollMs: 10 });
+    const done = await makeClient({ ...base, fetch, sleep }).waitForOperation("op-1", { pollMs: 10 });
 
     expect(done.status).toBe("SUCCESS");
     expect(calls).toHaveLength(3);
@@ -87,7 +97,7 @@ describe("createSandboxClient", () => {
   it("gives up waiting after the timeout", async () => {
     const { fetch } = fakeFetch(Array.from({ length: 5 }, () => ({ status: 200, body: op({ status: "EXECUTING" }) })));
     let now = 0;
-    const client = createSandboxClient({ ...base, fetch, sleep: async (ms) => void (now += ms), now: () => now });
+    const client = makeClient({ ...base, fetch, sleep: async (ms) => void (now += ms), now: () => now });
 
     await expect(client.waitForOperation("op-1", { pollMs: 1000, timeoutMs: 2500 })).rejects.toThrow(/timed out/);
   });
@@ -112,7 +122,7 @@ describe("createSandboxClient", () => {
         }),
       },
     ]);
-    const result = await createSandboxClient({ ...base, fetch, sleep: async () => {} }).run({ image: "img-1", command: "exit 3", shell: true });
+    const result = await makeClient({ ...base, fetch, sleep: async () => {} }).run({ image: "img-1", command: "exit 3", shell: true });
 
     expect(result).toEqual({
       operationId: "op-1",
@@ -126,5 +136,34 @@ describe("createSandboxClient", () => {
       cost: 0.002,
       error: null,
     });
+  });
+});
+
+describe("NebiusSandboxClient", () => {
+  it("public methods work when passed as callbacks", async () => {
+    const { fetch } = fakeFetch([
+      { status: 201, body: { uuid: "op-1" } },
+      { status: 200, body: op({ status: "SUCCESS" }) },
+    ]);
+    const { run } = makeClient({ ...base, fetch, sleep: async () => {} });
+
+    await expect(run({ image: "img", command: "true", shell: true })).resolves.toMatchObject({ status: "SUCCESS" });
+  });
+
+  it("never exposes the API key or project", () => {
+    const client = new NebiusSandboxClient({ ...base, token: "secret-key-123" });
+
+    expect(Object.keys(client).sort()).toEqual([
+      "getOperation",
+      "importImage",
+      "listImages",
+      "run",
+      "spawn",
+      "uploadFile",
+      "waitForOperation",
+    ]);
+    expect("token" in client).toBe(false);
+    expect(JSON.stringify(client)).not.toContain("secret-key-123");
+    expect(JSON.stringify(client)).not.toContain("proj-1");
   });
 });

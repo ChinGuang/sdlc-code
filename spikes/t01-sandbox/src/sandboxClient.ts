@@ -4,9 +4,14 @@
  * API reference: https://docs.tokenfactory.nebius.com/api-reference/sandboxes
  */
 
-export const DEFAULT_BASE_URL = "https://api.tokenfactory.nebius.com/sandboxes/v1";
+export const DEFAULT_BASE_URL =
+  "https://api.tokenfactory.nebius.com/sandboxes/v1";
 
-export type StreamRepr = { value: string; encoding: "ascii" | "base64"; truncated?: boolean };
+export type StreamRepr = {
+  value: string;
+  encoding: "ascii" | "base64";
+  truncated?: boolean;
+};
 
 export type InstanceResult = {
   state?: { exit_code?: number; timed_out?: boolean; signal?: number };
@@ -15,7 +20,8 @@ export type InstanceResult = {
   resources?: { cost?: number; elapsed_time?: number };
 };
 
-export type OperationStatus = "PENDING" | "ASSIGNED" | "EXECUTING" | "SUCCESS" | "FAILED" | "CANCELLED";
+export type OperationStatus =
+  "PENDING" | "ASSIGNED" | "EXECUTING" | "SUCCESS" | "FAILED" | "CANCELLED";
 
 export type OperationResponse = {
   uuid: string;
@@ -29,7 +35,12 @@ export type OperationResponse = {
   result?: { image?: string | null; tag?: string | null };
 };
 
-export type FileRef = { uuid: string; mode?: string; uid?: number; gid?: number };
+export type FileRef = {
+  uuid: string;
+  mode?: string;
+  uid?: number;
+  gid?: number;
+};
 
 export type SpawnRequest = {
   /** Image UUID, or `tag:<name>` */
@@ -68,11 +79,17 @@ export type SandboxClientOptions = {
   now?: () => number;
 };
 
-const TERMINAL: ReadonlySet<OperationStatus> = new Set(["SUCCESS", "FAILED", "CANCELLED"]);
+const TERMINAL: ReadonlySet<OperationStatus> = new Set([
+  "SUCCESS",
+  "FAILED",
+  "CANCELLED",
+]);
 
 export function decodeStream(stream: StreamRepr | undefined): string {
   if (!stream) return "";
-  return stream.encoding === "base64" ? Buffer.from(stream.value, "base64").toString("utf8") : stream.value;
+  return stream.encoding === "base64"
+    ? Buffer.from(stream.value, "base64").toString("utf8")
+    : stream.value;
 }
 
 export function toRunResult(operation: OperationResponse): RunResult {
@@ -91,78 +108,142 @@ export function toRunResult(operation: OperationResponse): RunResult {
   };
 }
 
-export function createSandboxClient(options: SandboxClientOptions) {
-  const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
-  const doFetch = options.fetch ?? fetch;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const now = options.now ?? Date.now;
+type ImageList = { images: Array<{ uuid: string; tag?: string }> };
+type UploadedFile = { uuid: string; sha256: string; size: number };
+type WaitOptions = { pollMs?: number; timeoutMs?: number };
+type RequestBody = { json?: unknown; bytes?: Uint8Array | string };
 
-  async function request<T>(method: string, path: string, body?: { json?: unknown; bytes?: Uint8Array | string }): Promise<T> {
-    const headers = new Headers({ Authorization: `Bearer ${options.token}`, Project: options.project });
+/** Nebius Token Factory Sandboxes, as used by Test Runs. */
+export interface SandboxClient {
+  listImages: (tagPrefix?: string) => Promise<ImageList>;
+  importImage: (registryUrl: string, tag?: string) => Promise<string>;
+  uploadFile: (content: Uint8Array | string) => Promise<UploadedFile>;
+  spawn: (spawnRequest: SpawnRequest) => Promise<string>;
+  getOperation: (operationId: string) => Promise<OperationResponse>;
+  waitForOperation: (
+    operationId: string,
+    wait?: WaitOptions,
+  ) => Promise<OperationResponse>;
+  run: (spawnRequest: SpawnRequest, wait?: WaitOptions) => Promise<RunResult>;
+}
+
+/** SandboxClient over the Sandboxes REST API (ConTree). */
+export class NebiusSandboxClient implements SandboxClient {
+  #token: string;
+  #project: string;
+  #baseUrl: string;
+  #fetch: typeof fetch;
+  #sleep: (ms: number) => Promise<void>;
+  #now: () => number;
+
+  constructor(options: SandboxClientOptions) {
+    this.#token = options.token;
+    this.#project = options.project;
+    this.#baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+    this.#fetch = options.fetch ?? fetch;
+    this.#sleep =
+      options.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
+    this.#now = options.now ?? Date.now;
+  }
+
+  listImages = (tagPrefix?: string): Promise<ImageList> => {
+    const query = tagPrefix ? `?tag=${encodeURIComponent(tagPrefix)}` : "";
+    return this.#request<ImageList>("GET", `/images${query}`);
+  };
+
+  importImage = async (registryUrl: string, tag?: string): Promise<string> => {
+    const created = await this.#request<{ uuid: string }>(
+      "POST",
+      "/images/import",
+      { json: { registry: { url: registryUrl }, tag } },
+    );
+    return created.uuid;
+  };
+
+  uploadFile = (content: Uint8Array | string): Promise<UploadedFile> =>
+    this.#request<UploadedFile>("POST", "/files", { bytes: content });
+
+  spawn = async (spawnRequest: SpawnRequest): Promise<string> => {
+    const created = await this.#request<{ uuid: string }>(
+      "POST",
+      "/instances",
+      { json: spawnRequest },
+    );
+    return created.uuid;
+  };
+
+  getOperation = (operationId: string): Promise<OperationResponse> =>
+    this.#request<OperationResponse>("GET", `/operations/${operationId}`);
+
+  waitForOperation = async (
+    operationId: string,
+    { pollMs = 1000, timeoutMs = 15 * 60_000 }: WaitOptions = {},
+  ): Promise<OperationResponse> => {
+    const deadline = this.#now() + timeoutMs;
+    for (;;) {
+      const operation = await this.getOperation(operationId);
+      if (TERMINAL.has(operation.status)) return operation;
+      if (this.#now() + pollMs > deadline)
+        throw new Error(
+          `Operation ${operationId} timed out waiting (last status ${operation.status})`,
+        );
+      await this.#sleep(pollMs);
+    }
+  };
+
+  run = async (
+    spawnRequest: SpawnRequest,
+    wait?: WaitOptions,
+  ): Promise<RunResult> => {
+    const operationId = await this.spawn(spawnRequest);
+    return toRunResult(await this.waitForOperation(operationId, wait));
+  };
+
+  async #request<T>(
+    method: string,
+    path: string,
+    body?: RequestBody,
+  ): Promise<T> {
+    const headers = new Headers({
+      Authorization: `Bearer ${this.#token}`,
+      Project: this.#project,
+    });
     let payload: BodyInit | undefined;
     if (body?.json !== undefined) {
       headers.set("Content-Type", "application/json");
       payload = JSON.stringify(body.json);
     } else if (body?.bytes !== undefined) {
       headers.set("Content-Type", "application/octet-stream");
-      payload = typeof body.bytes === "string" ? body.bytes : new Blob([new Uint8Array(body.bytes)]);
+      payload =
+        typeof body.bytes === "string"
+          ? body.bytes
+          : new Blob([new Uint8Array(body.bytes)]);
     }
 
-    const response = await doFetch(`${baseUrl}${path}`, { method, headers, body: payload });
+    const response = await this.#fetch(`${this.#baseUrl}${path}`, {
+      method,
+      headers,
+      body: payload,
+    });
     const text = await response.text();
     if (!response.ok) {
-      let message = text;
-      try {
-        const parsed = JSON.parse(text) as { error?: unknown };
-        if (parsed.error !== undefined) message = typeof parsed.error === "string" ? parsed.error : JSON.stringify(parsed.error);
-      } catch {
-        // keep raw text
-      }
-      throw new Error(`Sandbox API ${method} ${path} failed: ${response.status} ${message}`);
+      throw new Error(
+        `Sandbox API ${method} ${path} failed: ${response.status} ${errorMessage(text)}`,
+      );
     }
     return (text ? JSON.parse(text) : undefined) as T;
   }
-
-  const client = {
-    listImages(tagPrefix?: string) {
-      const query = tagPrefix ? `?tag=${encodeURIComponent(tagPrefix)}` : "";
-      return request<{ images: Array<{ uuid: string; tag?: string }> }>("GET", `/images${query}`);
-    },
-
-    async importImage(registryUrl: string, tag?: string): Promise<string> {
-      const created = await request<{ uuid: string }>("POST", "/images/import", { json: { registry: { url: registryUrl }, tag } });
-      return created.uuid;
-    },
-
-    uploadFile(content: Uint8Array | string) {
-      return request<{ uuid: string; sha256: string; size: number }>("POST", "/files", { bytes: content });
-    },
-
-    async spawn(spawnRequest: SpawnRequest): Promise<string> {
-      const created = await request<{ uuid: string }>("POST", "/instances", { json: spawnRequest });
-      return created.uuid;
-    },
-
-    getOperation(operationId: string) {
-      return request<OperationResponse>("GET", `/operations/${operationId}`);
-    },
-
-    async waitForOperation(operationId: string, { pollMs = 1000, timeoutMs = 15 * 60_000 } = {}): Promise<OperationResponse> {
-      const deadline = now() + timeoutMs;
-      for (;;) {
-        const operation = await client.getOperation(operationId);
-        if (TERMINAL.has(operation.status)) return operation;
-        if (now() + pollMs > deadline) throw new Error(`Operation ${operationId} timed out waiting (last status ${operation.status})`);
-        await sleep(pollMs);
-      }
-    },
-
-    async run(spawnRequest: SpawnRequest, wait?: { pollMs?: number; timeoutMs?: number }): Promise<RunResult> {
-      const operationId = await client.spawn(spawnRequest);
-      return toRunResult(await client.waitForOperation(operationId, wait));
-    },
-  };
-  return client;
 }
 
-export type SandboxClient = ReturnType<typeof createSandboxClient>;
+function errorMessage(text: string): string {
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown };
+    if (parsed.error !== undefined)
+      return typeof parsed.error === "string"
+        ? parsed.error
+        : JSON.stringify(parsed.error);
+  } catch {
+    // not JSON: fall through to the raw text
+  }
+  return text;
+}

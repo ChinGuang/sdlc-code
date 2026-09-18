@@ -4,7 +4,7 @@
  * Writes a secret-free summary to results/probe-<timestamp>.json
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { createSandboxClient, type RunResult, type SandboxClient } from "./sandboxClient.js";
+import { NebiusSandboxClient, type RunResult, type SandboxClient } from "./sandboxClient.js";
 
 const token = process.env.NEBIUS_API_KEY;
 const project = process.env.NEBIUS_AI_PROJECT;
@@ -13,7 +13,7 @@ if (!token || !project) {
   process.exit(1);
 }
 
-const client = createSandboxClient({ token, project, baseUrl: process.env.NEBIUS_SANDBOX_URL });
+const client: SandboxClient = new NebiusSandboxClient({ token, project, baseUrl: process.env.NEBIUS_SANDBOX_URL });
 const NODE_IMAGE_TAG = process.env.PROBE_NODE_TAG ?? "sdlc-code/node:22-slim";
 const findings: Record<string, unknown> = { startedAt: new Date().toISOString() };
 
