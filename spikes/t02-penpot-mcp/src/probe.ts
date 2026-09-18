@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createPenpotClient, type ToolResult } from "./penpotClient.js";
+import { createPenpotClient, redactToken, type ToolResult } from "./penpotClient.js";
 
 const envUrl = process.env.PENPOT_MCP_URL;
 if (!envUrl) {
@@ -24,12 +24,15 @@ async function step<T>(name: string, fn: () => Promise<T>): Promise<T | undefine
   process.stdout.write(`▶ ${name} … `);
   try {
     const value = await fn();
-    findings[name] = { ok: true, ms: Date.now() - started, value };
-    console.log(`ok (${Date.now() - started} ms)`);
+    const ms = Date.now() - started;
+    findings[name] = { ok: true, ms, value };
+    console.log(`ok (${ms} ms)`);
     return value;
   } catch (error) {
-    findings[name] = { ok: false, ms: Date.now() - started, error: String(error).replace(url, "<PENPOT_MCP_URL>") };
-    console.log(`FAILED: ${String(error).replace(url, "<PENPOT_MCP_URL>").slice(0, 300)}`);
+    const ms = Date.now() - started;
+    const message = redactToken(String(error));
+    findings[name] = { ok: false, ms, error: message };
+    console.log(`FAILED: ${message.slice(0, 300)}`);
     return undefined;
   }
 }
@@ -39,7 +42,7 @@ const penpot = createPenpotClient({
   callTool: async (name, args) => (await mcp.callTool({ name, arguments: args })) as ToolResult,
 });
 
-const CREATE_BOARD = `
+const DEMO_BOARD_CODE = `
 const board = penpot.createBoard();
 board.name = "sdlc-code T02 spike (safe to delete)";
 board.resize(480, 200);
@@ -76,7 +79,7 @@ try {
     return samples;
   });
 
-  const created = await step("create_board_with_text", () => penpot.executeCode<{ boardId: string; page: string }>(CREATE_BOARD));
+  const created = await step("create_board_with_text", () => penpot.executeCode<{ boardId: string; page: string }>(DEMO_BOARD_CODE));
 
   if (created) {
     await step("export_png", async () => {

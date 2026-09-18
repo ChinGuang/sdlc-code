@@ -32,6 +32,11 @@ const GUIDANCE: Record<Exclude<PenpotErrorKind, "execution">, string> = {
 
 const FAILURE_PREFIX = /^Tool execution failed:/;
 
+/** Strips Penpot MCP user tokens from any text before it is logged or stored. */
+export function redactToken(text: string): string {
+  return text.replace(/userToken=[^&\s"']+/g, "userToken=<redacted>");
+}
+
 function textOf(result: ToolResult): string {
   return result.content
     .filter((c) => c.type === "text" && c.text !== undefined)
@@ -42,7 +47,10 @@ function textOf(result: ToolResult): string {
 export type PenpotClientOptions = {
   callTool: CallTool;
   sleep?: (ms: number) => Promise<void>;
-  /** Delay before each retry when the tab is suspended or disconnected. */
+  /**
+   * Delay before each retry while the tab is suspended. Retries only bridge a
+   * brief refocus; if the user is away the error surfaces for Escalation.
+   */
   retryDelaysMs?: number[];
 };
 
@@ -55,10 +63,10 @@ export function createPenpotClient({ callTool, sleep = (ms) => new Promise((r) =
       if (!result.isError && !FAILURE_PREFIX.test(message)) return result;
 
       const kind = classifyPenpotError(message);
-      if (kind === "execution") throw new PenpotError(kind, message);
-
-      const delay = retryDelaysMs[attempt];
-      if (delay === undefined) throw new PenpotError(kind, `${GUIDANCE[kind]} (${message})`);
+      if (kind === "execution") throw new PenpotError(kind, redactToken(message));
+      // Only a suspended tab can come back on its own; a missing plugin needs a human now.
+      const delay = kind === "suspended" ? retryDelaysMs[attempt] : undefined;
+      if (delay === undefined) throw new PenpotError(kind, `${GUIDANCE[kind]} (${redactToken(message)})`);
       await sleep(delay);
     }
   }
@@ -67,11 +75,16 @@ export function createPenpotClient({ callTool, sleep = (ms) => new Promise((r) =
     /** Runs Penpot plugin JavaScript and returns its `result` value. */
     async executeCode<T = unknown>(code: string): Promise<T> {
       const raw = textOf(await call("execute_code", { code }));
+      let parsed: unknown;
       try {
-        return (JSON.parse(raw) as { result: T }).result;
+        parsed = JSON.parse(raw);
       } catch {
-        return raw as T;
+        parsed = undefined;
       }
+      if (typeof parsed !== "object" || parsed === null || !("result" in parsed || "log" in parsed)) {
+        throw new PenpotError("execution", `Unexpected execute_code response: ${redactToken(raw).slice(0, 200)}`);
+      }
+      return (parsed as { result?: T }).result as T;
     },
 
     async exportShape(shapeId: string, format: "png" | "svg" = "png"): Promise<{ bytes: Buffer; mimeType: string }> {

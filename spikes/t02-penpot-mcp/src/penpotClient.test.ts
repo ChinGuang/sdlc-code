@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { classifyPenpotError, createPenpotClient, PenpotError, type CallTool } from "./penpotClient.js";
+import { classifyPenpotError, createPenpotClient, PenpotError, redactToken, type CallTool } from "./penpotClient.js";
 
 const text = (value: string, isError = false) => ({ content: [{ type: "text", text: value }], isError });
 
@@ -63,6 +63,24 @@ describe("createPenpotClient.executeCode", () => {
     expect(sleep).toHaveBeenCalledWith(5);
   });
 
+  it("does not retry when no plugin is connected", async () => {
+    const callTool: CallTool = vi.fn(async () => text("Tool execution failed: No Penpot plugin instance is connected"));
+    const client = createPenpotClient({ callTool, sleep: async () => {}, retryDelaysMs: [1, 1] });
+
+    await expect(client.executeCode("x")).rejects.toMatchObject({ kind: "disconnected" });
+    expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns undefined when the code returns nothing", async () => {
+    const client = createPenpotClient({ callTool: async () => text(JSON.stringify({ log: "" })) });
+    await expect(client.executeCode("penpot.createBoard()")).resolves.toBeUndefined();
+  });
+
+  it("rejects a success response that is not the expected JSON", async () => {
+    const client = createPenpotClient({ callTool: async () => text("<html>gateway error</html>") });
+    await expect(client.executeCode("x")).rejects.toMatchObject({ kind: "execution" });
+  });
+
   it("gives up after the retry schedule with an actionable message", async () => {
     const callTool: CallTool = vi.fn(async () => text("appears to be suspended by the browser", true));
     const client = createPenpotClient({ callTool, sleep: async () => {}, retryDelaysMs: [1, 1] });
@@ -90,5 +108,12 @@ describe("createPenpotClient.exportShape", () => {
   it("throws when no image is returned", async () => {
     const client = createPenpotClient({ callTool: async () => text("nothing") });
     await expect(client.exportShape("s")).rejects.toThrow(/no image/i);
+  });
+});
+
+describe("redactToken", () => {
+  it("removes userToken values wherever they appear", () => {
+    const leaked = "fetch https://design.penpot.app/mcp/stream?userToken=abc.def-123 failed; retry ?userToken=abc.def-123&x=1";
+    expect(redactToken(leaked)).toBe("fetch https://design.penpot.app/mcp/stream?userToken=<redacted> failed; retry ?userToken=<redacted>&x=1");
   });
 });
