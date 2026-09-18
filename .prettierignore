@@ -1,0 +1,5 @@
+spikes/
+pnpm-lock.yaml
+**/dist/
+docs/
+*.md
