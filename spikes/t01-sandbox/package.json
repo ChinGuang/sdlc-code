@@ -6,8 +6,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "probe": "tsx --env-file-if-exists=../../.env src/probe.ts",
-    "whoami": "tsx --env-file-if-exists=../../.env src/whoami.ts",
-    "followup": "tsx --env-file-if-exists=../../.env src/followup.ts"
+    "whoami": "tsx --env-file-if-exists=../../.env src/whoami.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

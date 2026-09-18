@@ -118,9 +118,9 @@ export function toRunResult(operation: OperationResponse): RunResult {
   };
 }
 
-type ImageList = { images: Array<{ uuid: string; tag?: string }> };
-type UploadedFile = { uuid: string; sha256: string; size: number };
-type WaitOptions = { pollMs?: number; timeoutMs?: number };
+export type ImageList = { images: Array<{ uuid: string; tag?: string }> };
+export type UploadedFile = { uuid: string; sha256: string; size: number };
+export type WaitOptions = { pollMs?: number; timeoutMs?: number };
 type RequestBody = { json?: unknown; bytes?: Uint8Array | string };
 
 /** Nebius Token Factory Sandboxes, as used by Test Runs. */
@@ -183,7 +183,10 @@ export class NebiusSandboxClient implements SandboxClient {
   };
 
   getOperation = (operationId: string): Promise<OperationResponse> =>
-    this.#request<OperationResponse>("GET", `/operations/${operationId}`);
+    this.#request<OperationResponse>(
+      "GET",
+      `/operations/${encodeURIComponent(operationId)}`,
+    );
 
   waitForOperation = async (
     operationId: string,

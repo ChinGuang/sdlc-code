@@ -227,8 +227,18 @@ describe("NebiusSandboxClient", () => {
       "waitForOperation",
     ]);
     expect("token" in client).toBe(false);
+    expect("project" in client).toBe(false);
     expect(JSON.stringify(client)).not.toContain("secret-key-123");
     expect(JSON.stringify(client)).not.toContain("proj-1");
+  });
+
+  it("encodes the operation id in the URL", async () => {
+    const { fetch, calls } = fakeFetch([
+      { status: 200, body: op({ status: "SUCCESS" }) },
+    ]);
+    await makeClient({ ...base, fetch }).getOperation("a/b?c");
+
+    expect(calls[0]!.url).toBe("https://sandbox.test/v1/operations/a%2Fb%3Fc");
   });
 });
 
