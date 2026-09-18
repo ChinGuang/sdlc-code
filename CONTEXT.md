@@ -26,6 +26,8 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **UI Spec** — The text description of every screen written by the UI Design Agent alongside the Penpot design: route, components, which API Contract endpoints each uses, fields, states and design tokens. The source of truth for frontend work and its review; Penpot exports and live Penpot access are supplementary.
 
+**Penpot Workspace File** — The single Penpot file the user keeps open with the MCP plugin connected. Every Run gets its own page in it, with one board per screen.
+
 **Model Capabilities** — What a configured model can accept (e.g. images, live Penpot access). Decides which supplementary design material an agent receives; never changes the UI Spec's role.
 
 **Design Phase** — System Design, then UI Design (which builds on the System Design), then the Design Gate reviewing both together. Rejection may send work back to either agent.
@@ -60,7 +62,7 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **System Design Agent** — Produces the architecture, Mermaid UML diagrams and the API Contract for a Run.
 
-**UI Design Agent** — Produces the target application's screens in Penpot.
+**UI Design Agent** — Produces the target application's screens in Penpot, on the Run's page in the Penpot Workspace File.
 
 **Coding Agent** — Writes the application from a Task plus the System Design and UI Design. Works as either a **Backend Coding Agent** or a **Frontend Coding Agent** within a Slice.
 

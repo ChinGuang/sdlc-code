@@ -72,7 +72,7 @@ M4 and M5 overlap: the server API (T21) is started as soon as M3's domain events
 - Tests: validators with good/bad fixtures; agent run against recorded model responses.
 
 **T10 Penpot client + UI Design Agent** · Sep 26 – Sep 27
-- Penpot MCP client (from T02); one Penpot file per Run, one board per screen, configurable Penpot URL.
+- Penpot MCP client (from T02); one page per Run in the Penpot Workspace File ([ADR 0002](adr/0002-one-penpot-page-per-run.md)), one board per screen, configurable Penpot URL.
 - Produces UI Spec (screens, routes, components, API Contract endpoints used, states, design tokens) + board exports.
 - Validator: every UI Spec endpoint exists in the API Contract.
 - Tests: UI Spec validator; MCP client against a fake MCP server.
