@@ -1,0 +1,14 @@
+{
+  "startedAt": "2026-09-17T12:19:30.115Z",
+  "auth_listImages": {
+    "ok": false,
+    "wallMs": 3430,
+    "error": "Error: Sandbox API GET /images failed: 403 Insufficient permissions: list"
+  },
+  "node_image": {
+    "ok": false,
+    "wallMs": 3946,
+    "error": "Error: Sandbox API GET /images?tag=sdlc-code%2Fnode%3A22-slim failed: 403 Insufficient permissions: list"
+  },
+  "finishedAt": "2026-09-17T12:19:37.493Z"
+}
