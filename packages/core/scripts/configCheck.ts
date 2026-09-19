@@ -6,16 +6,15 @@ import { TokenFactoryChatClient } from "@sdlc-code/clients";
 import { fileURLToPath } from "node:url";
 import {
   AGENT_ROLES,
+  loadAgentConfig,
   modelEnvVar,
-  parseAgentConfig,
-  readConfigFile,
   verifyAgentConfig,
 } from "../src/index.js";
 
 const configPath = fileURLToPath(
   new URL("../../../sdlc-code.config.json", import.meta.url),
 );
-const config = parseAgentConfig(readConfigFile(configPath), process.env);
+const config = loadAgentConfig({ path: configPath, env: process.env });
 
 console.table(
   Object.fromEntries(

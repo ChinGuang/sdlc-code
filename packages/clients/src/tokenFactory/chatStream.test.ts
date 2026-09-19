@@ -99,6 +99,7 @@ describe("TokenFactoryChatClient.stream", () => {
       chunk({ role: "assistant", content: "" }),
       chunk({ content: "It's " }),
       chunk({ content: "18°C." }, "stop"),
+      `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 9, completion_tokens: 4 } })}\n\n`,
       "data: [DONE]\n\n",
     ]);
 
@@ -163,5 +164,175 @@ describe("TokenFactoryChatClient.stream", () => {
 
     const events = await collect(stream({ model: "m", messages: [] }));
     expect(events.at(-1)?.type).toBe("done");
+  });
+
+  it("emits a tool_call event when each tool call starts", async () => {
+    const { fetch } = sseFetch([TOOL_CALL_STREAM]);
+
+    const events = await collect(
+      makeClient({ ...base, fetch }).stream({ model: "m", messages: [] }),
+    );
+
+    expect(events.filter((e) => e.type === "tool_call")).toEqual([
+      {
+        type: "tool_call",
+        id: "chatcmpl-tool-b4273976e29e1cdd",
+        name: "get_weather",
+      },
+    ]);
+  });
+});
+
+describe("stream edge cases", () => {
+  const data = (payload: object) => `data: ${JSON.stringify(payload)}\n\n`;
+  const usage = { prompt_tokens: 5, completion_tokens: 2 };
+  const delta = (d: object, finish: string | null = null) => ({
+    choices: [{ index: 0, delta: d, finish_reason: finish }],
+  });
+
+  async function run(pieces: string[]) {
+    const { fetch } = sseFetch(pieces);
+    return collect(
+      makeClient({ ...base, fetch }).stream({ model: "m", messages: [] }),
+    );
+  }
+
+  it("assembles several tool calls by index", async () => {
+    const events = await run([
+      data(
+        delta({
+          tool_calls: [
+            {
+              index: 0,
+              id: "a",
+              function: { name: "read_file", arguments: '{"path":' },
+            },
+          ],
+        }),
+      ),
+      data(
+        delta({
+          tool_calls: [
+            {
+              index: 1,
+              id: "b",
+              function: { name: "read_file", arguments: '{"path":"y"}' },
+            },
+          ],
+        }),
+      ),
+      data(
+        delta(
+          { tool_calls: [{ index: 0, function: { arguments: '"x"}' } }] },
+          "tool_calls",
+        ),
+      ),
+      data({ choices: [], usage }),
+      "data: [DONE]\n\n",
+    ]);
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      response: {
+        toolCalls: [
+          { id: "a", name: "read_file", arguments: '{"path":"x"}' },
+          { id: "b", name: "read_file", arguments: '{"path":"y"}' },
+        ],
+      },
+    });
+  });
+
+  it("decodes a multi-byte character split across network chunks", async () => {
+    const bytes = new TextEncoder().encode(
+      data(delta({ content: "18°C ✓" }, "stop")) +
+        data({ choices: [], usage }) +
+        "data: [DONE]\n\n",
+    );
+    const cut = bytes.indexOf(0xc2) + 1; // between the two bytes of "°"
+    const fetch = (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes.slice(0, cut));
+            controller.enqueue(bytes.slice(cut));
+            controller.close();
+          },
+        }),
+      )) as unknown as typeof globalThis.fetch;
+
+    const events = await collect(
+      makeClient({ ...base, fetch }).stream({ model: "m", messages: [] }),
+    );
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      response: { content: "18°C ✓" },
+    });
+  });
+
+  it("ignores keep-alive comments and joins multi-line data fields", async () => {
+    const payload = JSON.stringify(delta({ content: "hi" }, "stop"), null, 2);
+    const multiLine = payload
+      .split("\n")
+      .map((line) => `data: ${line}`)
+      .join("\n");
+
+    const events = await run([
+      ": keep-alive\n\n",
+      `${multiLine}\n\n`,
+      data({ choices: [], usage }),
+      "data: [DONE]\n\n",
+    ]);
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      response: { content: "hi" },
+    });
+  });
+
+  it("processes a final event that has no trailing blank line", async () => {
+    const events = await run([
+      data(delta({ content: "hi" }, "stop")),
+      data({ choices: [], usage }),
+      "data: [DONE]",
+    ]);
+
+    expect(events.at(-1)?.type).toBe("done");
+  });
+
+  it("throws ChatStreamError when the stream ends before [DONE]", async () => {
+    await expect(
+      run([data(delta({ content: "partial" }))]),
+    ).rejects.toMatchObject({
+      name: "ChatStreamError",
+      message: expect.stringMatching(/ended before \[DONE\]/),
+    });
+  });
+
+  it("throws ChatStreamError when the stream reports no token usage", async () => {
+    await expect(
+      run([data(delta({ content: "hi" }, "stop")), "data: [DONE]\n\n"]),
+    ).rejects.toMatchObject({
+      name: "ChatStreamError",
+      message: expect.stringMatching(/usage/),
+    });
+  });
+
+  it("throws ChatStreamError for an error sent inside the stream", async () => {
+    await expect(
+      run([
+        data({ error: { message: "model overloaded" } }),
+        "data: [DONE]\n\n",
+      ]),
+    ).rejects.toMatchObject({
+      name: "ChatStreamError",
+      message: expect.stringMatching(/model overloaded/),
+    });
+  });
+
+  it("throws ChatStreamError for a malformed data payload", async () => {
+    await expect(run(["data: {not json\n\n"])).rejects.toMatchObject({
+      name: "ChatStreamError",
+    });
   });
 });

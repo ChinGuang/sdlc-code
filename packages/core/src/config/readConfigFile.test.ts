@@ -2,8 +2,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { AgentConfigError } from "./agentConfig.js";
-import { readConfigFile } from "./readConfigFile.js";
+import { AgentConfigError, NEMOTRON_SUPER } from "./agentConfig.js";
+import { loadAgentConfig, readConfigFile } from "./readConfigFile.js";
 
 const dir = mkdtempSync(join(tmpdir(), "sdlc-code-config-"));
 
@@ -27,5 +27,29 @@ describe("readConfigFile", () => {
 
     expect(() => readConfigFile(path)).toThrow(AgentConfigError);
     expect(() => readConfigFile(path)).toThrow(/bad\.json/);
+  });
+});
+
+describe("loadAgentConfig", () => {
+  it("combines the optional file with env overrides", () => {
+    const path = join(dir, "sdlc-code.config.json");
+    writeFileSync(path, '{ "roles": { "testing": { "thinking": true } } }');
+
+    const config = loadAgentConfig({
+      path,
+      env: { SDLC_MODEL_CODE_REVIEW: "nvidia/custom" },
+    });
+
+    expect(config.roles.testing).toMatchObject({
+      model: NEMOTRON_SUPER,
+      thinking: true,
+    });
+    expect(config.roles.codeReview.model).toBe("nvidia/custom");
+  });
+
+  it("uses the defaults when there is no file", () => {
+    const config = loadAgentConfig({ path: join(dir, "none.json"), env: {} });
+
+    expect(config.roles.testing.thinking).toBe(false);
   });
 });

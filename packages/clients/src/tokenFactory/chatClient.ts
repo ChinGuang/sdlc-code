@@ -10,7 +10,7 @@ import {
   type ChatStreamEvent,
 } from "./chatStream.js";
 
-export type { ChatStreamEvent } from "./chatStream.js";
+export { ChatStreamError, type ChatStreamEvent } from "./chatStream.js";
 
 export const TOKEN_FACTORY_DEFAULT_BASE_URL =
   "https://api.tokenfactory.nebius.com/v1";
