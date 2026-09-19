@@ -10,7 +10,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "config:check": "tsx --env-file-if-exists=../../.env scripts/configCheck.ts"
+    "config:check": "tsx --env-file-if-exists=../../.env scripts/configCheck.ts",
+    "agent:smoke": "tsx --env-file-if-exists=../../.env scripts/agentSmoke.ts"
   },
   "dependencies": {
     "@sdlc-code/clients": "workspace:*",

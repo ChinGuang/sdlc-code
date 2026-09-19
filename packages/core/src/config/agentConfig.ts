@@ -117,6 +117,11 @@ export function parseAgentConfig(
   return { roles: resolved };
 }
 
+/** Request fields that turn Nemotron reasoning off (spike T03 rule 7). */
+export const THINKING_OFF = {
+  chat_template_kwargs: { enable_thinking: false },
+};
+
 /** The ChatRequest fields a role contributes: its model and, if off, the thinking switch. */
 export function requestOptionsFor(
   settings: RoleSettings,
@@ -125,7 +130,7 @@ export function requestOptionsFor(
     ? { model: settings.model }
     : {
         model: settings.model,
-        extra: { chat_template_kwargs: { enable_thinking: false } },
+        extra: THINKING_OFF,
       };
 }
 
