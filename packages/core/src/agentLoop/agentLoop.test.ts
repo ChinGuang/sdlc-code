@@ -212,6 +212,39 @@ describe("ChatAgentLoop: tool call → result → final answer", () => {
 });
 
 describe("ChatAgentLoop: malformed and failing tool calls", () => {
+  it("does not run tool calls from a reply cut off at the output limit", async () => {
+    let ran = false;
+    const write = defineTool({
+      name: "write_ids",
+      description: "Records ids",
+      input: z.object({ ids: z.array(z.number()) }),
+      run: () => {
+        ran = true;
+        return "ok";
+      },
+    });
+    const { loop, requests } = makeLoop(
+      [
+        {
+          // Cut from [12,345,…]; JSON repair alone would turn it into [12,34].
+          toolCalls: [toolCall("write_ids", '{"ids":[12,34')],
+          finishReason: "length",
+        },
+        { content: "done" },
+        memoryReply,
+      ],
+      { tools: [write] },
+    );
+
+    const result = await loop.run(task);
+
+    expect(ran).toBe(false);
+    expect(result.failedToolCalls).toBe(1);
+    expect(requests[1]?.messages.at(-1)?.content).toMatch(
+      /write_ids was not run: your reply hit the output token limit/,
+    );
+  });
+
   it("returns malformed arguments, unknown tools and tool errors to the model and continues", async () => {
     const { loop, requests } = makeLoop([
       {

@@ -203,6 +203,38 @@ describe("LoopSystemDesignAgent", () => {
     );
   });
 
+  it("does not fall back to an older part after a rejected resubmission", async () => {
+    const broken = goodDesign();
+    broken.systemDesign.diagrams[0]!.mermaid = "flowchart TD\n  A -->";
+    const { agent, requests } = agentReplaying([
+      submitSystemDesign(goodDesign()),
+      submitSlicePlan(goodDesign()),
+      submitApiContract(goodDesign()),
+      submitSystemDesign(broken),
+      finish(),
+      answer("stop"),
+    ]);
+
+    const { design } = await agent.design(input);
+
+    expect(design).toBeNull();
+    expect(lastToolMessage(requests[5])).toMatch(
+      /Nothing valid saved yet from submit_system_design/,
+    );
+  });
+
+  it("withdraws an acceptance when a part changes after finish_design", async () => {
+    const { agent } = agentReplaying([
+      ...submitAll(goodDesign()).slice(0, 4),
+      submitSlicePlan(goodDesign()),
+      answer("changed my mind"),
+    ]);
+
+    const { design } = await agent.design(input);
+
+    expect(design).toBeNull();
+  });
+
   it("revises with the Design Gate comments and the previous design", async () => {
     const { agent, requests } = agentReplaying(submitAll(goodDesign()));
 

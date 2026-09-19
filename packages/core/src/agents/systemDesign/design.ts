@@ -1,7 +1,7 @@
 /**
  * What the System Design Agent hands back: the System Design (Mermaid), the
- * Slice Plan and the API Contract (OpenAPI). The agent submits all three in one
- * `submit_design` tool call, validated against this schema and validateDesign.
+ * Slice Plan and the API Contract (OpenAPI). The agent submits each part with its
+ * own tool (the *Part schemas below); validateDesign checks a whole design.
  */
 import { z } from "zod";
 

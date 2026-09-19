@@ -76,7 +76,7 @@ export class LoopSystemDesignAgent implements SystemDesignAgent {
     const drafts: Drafts = {};
     let accepted: Design | null = null;
     const tools = designTools(drafts, (design) => {
-      accepted = design;
+      accepted = design; // null whenever a part changes after finish_design
     });
     const loop = await this.#createLoop(tools).run({
       system: SYSTEM_DESIGN_PROMPT,
@@ -97,8 +97,23 @@ function verdict(part: string, problems: string[], saved: string): string {
 
 function designTools(
   drafts: Drafts,
-  accept: (design: Design) => void,
+  accept: (design: Design | null) => void,
 ): AgentTool[] {
+  /**
+   * Saves a part if it has no problems. A rejected part is cleared rather than
+   * keeping an older version, and any change withdraws an earlier acceptance:
+   * finish_design must then check the new combination.
+   */
+  const save = <Part extends keyof Design>(
+    part: Part,
+    value: Design[Part],
+    problems: string[],
+  ): void => {
+    accept(null);
+    if (problems.length === 0) drafts[part] = value;
+    else delete drafts[part];
+  };
+
   return [
     defineTool({
       name: DESIGN_TOOLS.systemDesign,
@@ -106,7 +121,7 @@ function designTools(
       input: SystemDesignPart,
       run: async (systemDesign) => {
         const problems = await systemDesignProblems(systemDesign);
-        if (problems.length === 0) drafts.systemDesign = systemDesign;
+        save("systemDesign", systemDesign, problems);
         return verdict("System Design", problems, "System Design saved.");
       },
     }),
@@ -117,7 +132,7 @@ function designTools(
       input: SlicePlanPart,
       run: ({ slices }) => {
         const problems = slicePlanProblems(slices);
-        if (problems.length === 0) drafts.slicePlan = slices;
+        save("slicePlan", slices, problems);
         return verdict("Slice Plan", problems, "Slice Plan saved.");
       },
     }),
@@ -128,10 +143,15 @@ function designTools(
       input: ApiContractPart,
       run: async ({ openapi }) => {
         const parsed = parseApiContract(openapi);
-        if ("problem" in parsed)
-          return verdict("API Contract", [parsed.problem], "");
-        const problems = await apiContractProblems(parsed.contract);
-        if (problems.length === 0) drafts.apiContract = parsed.contract;
+        const problems =
+          "problem" in parsed
+            ? [parsed.problem]
+            : await apiContractProblems(parsed.contract);
+        save(
+          "apiContract",
+          "contract" in parsed ? parsed.contract : {},
+          problems,
+        );
         return verdict("API Contract", problems, "API Contract saved.");
       },
     }),
