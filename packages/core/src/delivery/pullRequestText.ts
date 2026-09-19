@@ -4,18 +4,26 @@
  */
 
 /** A non-blocking Finding carried into the PR description. */
-export type PrFinding = { ruleId: string; location: string; message: string };
+export type PullRequestFinding = {
+  ruleId: string;
+  location: string;
+  message: string;
+  suggestion?: string;
+};
 
-type RunText = { runId: string; requestTitle: string; summary: string };
+type RunSummary = { runId: string; requestTitle: string; summary: string };
 
-export type PullRequestText =
-  | (RunText & {
+/** How a Run ended, with what its pull request must report. */
+export type RunOutcome =
+  | (RunSummary & {
       outcome: "complete";
       slices: string[];
-      findings: PrFinding[];
+      findings: PullRequestFinding[];
     })
-  | (RunText & {
+  | (RunSummary & {
       outcome: "aborted" | "failed";
+      /** Why the Run stopped, e.g. "Retry Budget exhausted on Todos CRUD". */
+      stopReason: string;
       /** Slices with a Slice Commit; the only code in the Draft PR. */
       passedSlices: string[];
       totalSlices: number;
@@ -26,59 +34,74 @@ export type PullRequestText =
 
 const TITLE_LIMIT = 256;
 const BODY_LIMIT = 65_536;
+const TRUNCATED = "\n\n…(truncated)";
 
-export function pullRequestTitle(pr: PullRequestText): string {
-  const title = oneLine(pr.requestTitle);
-  if (pr.outcome === "complete") return truncate(title, TITLE_LIMIT);
-  const label = pr.outcome === "aborted" ? "[Aborted]" : "[Failed]";
-  const progress = ` — ${pr.passedSlices.length} of ${pr.totalSlices} slices`;
+export function pullRequestTitle(run: RunOutcome): string {
+  const title = oneLine(run.requestTitle);
+  if (run.outcome === "complete") return truncate(title, TITLE_LIMIT);
+  const label = run.outcome === "aborted" ? "[Aborted]" : "[Failed]";
+  const progress = ` — ${run.passedSlices.length} of ${run.totalSlices} slices`;
   return `${label} ${truncate(title, TITLE_LIMIT - label.length - 1 - progress.length)}${progress}`;
 }
 
-export function pullRequestBody(pr: PullRequestText): string {
+export function pullRequestBody(run: RunOutcome): string {
   const sections =
-    pr.outcome === "complete"
+    run.outcome === "complete"
       ? [
           "## Summary",
-          pr.summary,
+          run.summary,
           "## Slices",
-          pr.slices.map((slice) => `- [x] ${slice}`).join("\n"),
+          run.slices.map(passedSlice).join("\n"),
           "## Non-blocking Findings",
-          pr.findings.length === 0
+          run.findings.length === 0
             ? "No non-blocking Findings."
-            : pr.findings.map(formatFinding).join("\n"),
+            : run.findings.map(formatFinding).join("\n"),
         ]
       : [
-          `> This Run was **${pr.outcome}** after ${pr.passedSlices.length} of ${pr.totalSlices} slices. Only Slices that passed testing are included; code from the unfinished Slice is not.`,
+          `> This Run was **${run.outcome}** after ${run.passedSlices.length} of ${run.totalSlices} slices. Only Slices that passed testing are included; code from the unfinished Slice is not.`,
+          "## Why it stopped",
+          run.stopReason,
           "## Summary",
-          pr.summary,
+          run.summary,
           "## Slices",
           [
-            ...pr.passedSlices.map((slice) => `- [x] ${slice}`),
-            ...(pr.failedSlice
-              ? [`- [ ] ${pr.failedSlice.name} (not included)`]
+            ...run.passedSlices.map(passedSlice),
+            ...(run.failedSlice
+              ? [`- [ ] ${run.failedSlice.name} (not included)`]
               : []),
           ].join("\n"),
-          ...(pr.failedSlice
+          ...(run.failedSlice
             ? [
                 "## Issue Reports",
-                pr.failedSlice.issueReports.length === 0
+                run.failedSlice.issueReports.length === 0
                   ? "None recorded."
-                  : pr.failedSlice.issueReports
+                  : run.failedSlice.issueReports
                       .map((issue) => `- ${issue}`)
                       .join("\n"),
               ]
             : []),
           "## Working Memory",
-          pr.workingMemory,
+          run.workingMemory,
         ];
-  const footer = `---\nOpened by sdlc-code Run \`${pr.runId}\` with NVIDIA Nemotron on Nebius Token Factory.`;
-  const body = noMentions(sections.join("\n\n"));
-  return `${truncate(body, BODY_LIMIT - footer.length - 20, "\n\n…(truncated)")}\n\n${footer}`;
+  const footer = `---\nOpened by sdlc-code Run \`${run.runId}\`.`;
+  const separator = "\n\n";
+  const body = truncate(
+    noMentions(sections.join(separator)),
+    BODY_LIMIT - separator.length - footer.length,
+    TRUNCATED,
+  );
+  return `${body}${separator}${footer}`;
 }
 
-function formatFinding(finding: PrFinding): string {
-  return `- **${finding.ruleId}** \`${finding.location}\` — ${finding.message}`;
+function passedSlice(slice: string): string {
+  return `- [x] ${slice}`;
+}
+
+function formatFinding(finding: PullRequestFinding): string {
+  const line = `- **${finding.ruleId}** \`${finding.location}\` — ${finding.message}`;
+  return finding.suggestion
+    ? `${line}\n  Suggestion: ${finding.suggestion}`
+    : line;
 }
 
 function oneLine(text: string): string {

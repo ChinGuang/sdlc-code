@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   pullRequestBody,
   pullRequestTitle,
-  type PullRequestText,
+  type RunOutcome,
 } from "./pullRequestText.js";
 
-const complete: PullRequestText = {
+const complete: RunOutcome = {
   outcome: "complete",
   runId: "run-1",
   requestTitle: "Todo app",
@@ -16,16 +16,18 @@ const complete: PullRequestText = {
       ruleId: "SC-4",
       location: "src/api/todos.ts:12",
       message: "Extract the date formatter into a pure helper.",
+      suggestion: "Move it to src/format.ts.",
     },
   ],
 };
 
-const aborted: PullRequestText = {
+const aborted: RunOutcome = {
   outcome: "aborted",
   runId: "run-2",
   requestTitle: "Todo app",
   summary: "A todo app with login.",
   passedSlices: ["Walking Skeleton"],
+  stopReason: "Aborted by the developer at an Escalation.",
   totalSlices: 3,
   failedSlice: {
     name: "Todos CRUD",
@@ -70,7 +72,8 @@ describe("pullRequestBody", () => {
     expect(body).toContain(
       "- **SC-4** `src/api/todos.ts:12` — Extract the date formatter into a pure helper.",
     );
-    expect(body).toContain("sdlc-code Run `run-1`");
+    expect(body).toContain("  Suggestion: Move it to src/format.ts.");
+    expect(body).toContain("Opened by sdlc-code Run `run-1`.");
   });
 
   it("says so when there are no Findings", () => {
@@ -83,6 +86,9 @@ describe("pullRequestBody", () => {
     const body = pullRequestBody(aborted);
 
     expect(body).toMatch(/aborted.*1 of 3 slices/i);
+    expect(body).toContain(
+      "## Why it stopped\n\nAborted by the developer at an Escalation.",
+    );
     expect(body).toContain("- [x] Walking Skeleton");
     expect(body).toContain("- [ ] Todos CRUD (not included)");
     expect(body).toContain("- POST /todos returns 500 when title is empty");
@@ -118,5 +124,6 @@ describe("pullRequestBody", () => {
 
     expect(body.length).toBeLessThanOrEqual(65_536);
     expect(body).toContain("(truncated)");
+    expect(body.endsWith("Opened by sdlc-code Run `run-2`.")).toBe(true);
   });
 });

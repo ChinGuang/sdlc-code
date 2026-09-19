@@ -266,7 +266,22 @@ describe("secrets", () => {
       "getRepo",
       "openPullRequest",
     ]);
+    expect("token" in client).toBe(false);
     expect(JSON.stringify(client)).not.toContain("ghp-secret-xyz");
+  });
+
+  it("logs nothing, even when a request fails", async () => {
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map(
+      (method) => vi.spyOn(console, method).mockImplementation(() => {}),
+    );
+    const { fetch } = fakeFetch([{ status: 500, body: { message: "boom" } }]);
+
+    await makeClient({ ...base, fetch })
+      .getRepo(repo)
+      .catch(() => {});
+
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 
   it("errors never include the token, even if GitHub echoes it", async () => {

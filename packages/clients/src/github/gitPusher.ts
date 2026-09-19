@@ -5,6 +5,7 @@
  * .git/config, and is redacted from any error.
  */
 import { execFile } from "node:child_process";
+import { redactSecrets } from "../redactSecrets.js";
 import type { RepoRef } from "./githubClient.js";
 
 export const GIT_DEFAULT_BASE_URL = "https://github.com";
@@ -80,9 +81,7 @@ export class TokenGitPusher implements GitPusher {
         cwd: repoDir,
         env: {
           GIT_TERMINAL_PROMPT: "0",
-          GIT_CONFIG_COUNT: "1",
-          GIT_CONFIG_KEY_0: `http.${this.#baseUrl}/.extraheader`,
-          GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${this.#basicAuth()}`,
+          ...this.#authConfig(),
         },
       },
     );
@@ -90,7 +89,10 @@ export class TokenGitPusher implements GitPusher {
       const output = (result.stderr || result.stdout).trim().slice(0, 1000);
       throw new GitPushError(
         result.exitCode,
-        this.#redact(`git push failed (exit ${result.exitCode}): ${output}`),
+        redactSecrets(`git push failed (exit ${result.exitCode}): ${output}`, [
+          this.#token,
+          this.#basicAuth(),
+        ]),
       );
     }
   };
@@ -99,11 +101,15 @@ export class TokenGitPusher implements GitPusher {
     return Buffer.from(`x-access-token:${this.#token}`).toString("base64");
   }
 
-  #redact(text: string): string {
-    if (this.#token === "") return text;
-    return text
-      .replaceAll(this.#token, "[redacted]")
-      .replaceAll(this.#basicAuth(), "[redacted]");
+  /** Appends the auth header after any GIT_CONFIG_* entries the user already set. */
+  #authConfig(): Record<string, string> {
+    const existing = Number(process.env.GIT_CONFIG_COUNT);
+    const index = Number.isInteger(existing) && existing > 0 ? existing : 0;
+    return {
+      GIT_CONFIG_COUNT: String(index + 1),
+      [`GIT_CONFIG_KEY_${index}`]: `http.${this.#baseUrl}/.extraheader`,
+      [`GIT_CONFIG_VALUE_${index}`]: `AUTHORIZATION: basic ${this.#basicAuth()}`,
+    };
   }
 }
 

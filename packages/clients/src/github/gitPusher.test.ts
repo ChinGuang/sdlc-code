@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GitPushError,
   TokenGitPusher,
@@ -60,6 +60,24 @@ describe("TokenGitPusher", () => {
     });
   });
 
+  it("keeps GIT_CONFIG_* entries the user already set", async () => {
+    vi.stubEnv("GIT_CONFIG_COUNT", "2");
+    const { runGit, calls } = fakeGit();
+
+    await makePusher({ token: TOKEN, runGit }).push({
+      repoDir: "/w",
+      repo,
+      branch: "b",
+    });
+    vi.unstubAllEnvs();
+
+    expect(calls[0]![1].env).toMatchObject({
+      GIT_CONFIG_COUNT: "3",
+      GIT_CONFIG_KEY_2: "http.https://github.com/.extraheader",
+    });
+    expect(calls[0]![1].env).not.toHaveProperty("GIT_CONFIG_KEY_0");
+  });
+
   it("force-pushes with a + refspec (run branch reset to its last Slice Commit)", async () => {
     const { runGit, calls } = fakeGit();
 
@@ -110,10 +128,25 @@ describe("TokenGitPusher", () => {
     expect(JSON.stringify(error)).not.toContain(TOKEN);
   });
 
+  it("logs nothing, even when the push fails", async () => {
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map(
+      (method) => vi.spyOn(console, method).mockImplementation(() => {}),
+    );
+    const { runGit } = fakeGit({ exitCode: 1, stdout: "", stderr: TOKEN });
+
+    await makePusher({ token: TOKEN, runGit })
+      .push({ repoDir: "/w", repo, branch: "b" })
+      .catch(() => {});
+
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
   it("never exposes the token", () => {
     const pusher = makePusher({ token: TOKEN });
 
     expect(Object.keys(pusher)).toEqual(["push"]);
+    expect("token" in pusher).toBe(false);
     expect(JSON.stringify(pusher)).not.toContain(TOKEN);
   });
 });

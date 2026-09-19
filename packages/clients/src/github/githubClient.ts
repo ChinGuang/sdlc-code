@@ -5,6 +5,8 @@
  * API reference: https://docs.github.com/en/rest
  */
 
+import { redactSecrets } from "../redactSecrets.js";
+
 export const GITHUB_DEFAULT_BASE_URL = "https://api.github.com";
 
 export type RepoRef = { owner: string; name: string };
@@ -14,9 +16,14 @@ export type RepoInfo = {
   defaultBranch: string;
   private: boolean;
   url: string;
-  /** False when the PAT lacks "Contents: write" on this repo. */
+  /**
+   * The account's role on the repo allows pushing. A fine-grained PAT can still
+   * lack "Contents: write"; the first push is the definitive check.
+   */
   canPush: boolean;
 };
+
+export type NewBranch = { branch: string; fromSha: string };
 
 export type NewPullRequest = {
   head: string;
@@ -46,10 +53,8 @@ export type GitHubClientOptions = {
 export interface GitHubClient {
   getRepo: (repo: RepoRef) => Promise<RepoInfo>;
   getBranchSha: (repo: RepoRef, branch: string) => Promise<string>;
-  createBranch: (
-    repo: RepoRef,
-    branch: { branch: string; fromSha: string },
-  ) => Promise<void>;
+  /** Creates a remote branch without a local clone; pushing a branch also creates it. */
+  createBranch: (repo: RepoRef, branch: NewBranch) => Promise<void>;
   openPullRequest: (
     repo: RepoRef,
     pullRequest: NewPullRequest,
@@ -130,7 +135,7 @@ export class RestGitHubClient implements GitHubClient {
 
   createBranch = async (
     repo: RepoRef,
-    { branch, fromSha }: { branch: string; fromSha: string },
+    { branch, fromSha }: NewBranch,
   ): Promise<void> => {
     await this.#request("POST", `${repoPath(repo)}/git/refs`, {
       ref: `refs/heads/${branch}`,
@@ -183,7 +188,9 @@ export class RestGitHubClient implements GitHubClient {
       throw new GitHubApiError(
         response.status,
         retryAfterSeconds(response.headers, this.#now()),
-        redact(`GitHub ${response.status}: ${errorMessage(text)}`, this.#token),
+        redactSecrets(`GitHub ${response.status}: ${errorMessage(text)}`, [
+          this.#token,
+        ]),
       );
     }
     return (text === "" ? undefined : JSON.parse(text)) as T;
@@ -235,8 +242,4 @@ function errorMessage(text: string): string {
     // not JSON: fall through to the raw text
   }
   return text.slice(0, 500);
-}
-
-function redact(text: string, token: string): string {
-  return token === "" ? text : text.replaceAll(token, "[redacted]");
 }

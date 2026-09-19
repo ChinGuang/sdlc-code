@@ -18,7 +18,7 @@ const repo = await client.getRepo({ owner, name });
 console.log(JSON.stringify(repo, null, 2));
 if (!repo.canPush) {
   console.error(
-    "The PAT cannot push here: grant Contents and Pull requests (read and write).",
+    "Your account cannot push here. Also make sure the fine-grained PAT has Contents and Pull requests (read and write): GitHub only reports the account role.",
   );
   process.exitCode = 1;
 }
