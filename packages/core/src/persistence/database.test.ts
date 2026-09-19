@@ -123,7 +123,7 @@ describe("inTransaction", () => {
       { x: 1 },
       { x: 2 },
     ]);
-    expect(db.isTransaction).toBe(false);
+    expect(db.inTransaction).toBe(false);
   });
 
   it("rolls back only the inner work when a nested call fails and is caught", () => {

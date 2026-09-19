@@ -1,21 +1,18 @@
-/**
- * The local SQLite database, via Node's built-in `node:sqlite` (ADR 0003):
- * no native addon to build, which pnpm blocks by default.
- */
-import { DatabaseSync } from "node:sqlite";
+/** The local SQLite database, via better-sqlite3 (ADR 0003). */
+import BetterSqlite3 from "better-sqlite3";
 import { MIGRATIONS } from "./migrations.js";
 
-export type Database = DatabaseSync;
+export type Database = BetterSqlite3.Database;
 
 /** Opens (creating if needed) the database at `path`, or ":memory:", and migrates it. */
 export function openDatabase(
   path: string,
   migrations: readonly string[] = MIGRATIONS,
 ): Database {
-  const db = new DatabaseSync(path);
+  const db = new BetterSqlite3(path);
   try {
-    db.exec("PRAGMA foreign_keys = ON");
-    if (path !== ":memory:") db.exec("PRAGMA journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    if (path !== ":memory:") db.pragma("journal_mode = WAL");
     migrate(db, migrations);
     return db;
   } catch (error) {
@@ -26,10 +23,7 @@ export function openDatabase(
 
 /** The number of migrations applied to `db`. */
 export function schemaVersion(db: Database): number {
-  const row = db.prepare("PRAGMA user_version").get() as {
-    user_version: number;
-  };
-  return row.user_version;
+  return db.pragma("user_version", { simple: true }) as number;
 }
 
 function migrate(db: Database, migrations: readonly string[]): void {
@@ -41,33 +35,15 @@ function migrate(db: Database, migrations: readonly string[]): void {
   migrations.slice(applied).forEach((sql, index) => {
     inTransaction(db, () => {
       db.exec(sql);
-      db.exec(`PRAGMA user_version = ${applied + index + 1}`);
+      db.pragma(`user_version = ${applied + index + 1}`);
     });
   });
 }
-
-let savepoints = 0;
 
 /**
  * Runs `work` in a transaction: all of it is saved, or none of it. Nested calls
  * become savepoints, so callers can combine several store calls into one unit.
  */
 export function inTransaction<T>(db: Database, work: () => T): T {
-  const nested = db.isTransaction;
-  const savepoint = `sp_${++savepoints}`;
-  db.exec(nested ? `SAVEPOINT ${savepoint}` : "BEGIN IMMEDIATE");
-  try {
-    const result = work();
-    db.exec(nested ? `RELEASE ${savepoint}` : "COMMIT");
-    return result;
-  } catch (error) {
-    // A failed rollback must not hide the error that caused it.
-    try {
-      if (nested) db.exec(`ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
-      else if (db.isTransaction) db.exec("ROLLBACK");
-    } catch {
-      // the original error is the useful one
-    }
-    throw error;
-  }
+  return db.transaction(work).immediate();
 }
