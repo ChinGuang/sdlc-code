@@ -65,7 +65,7 @@ An earlier attempt at the needle test built a **~303k-token** prompt by mistake 
 
 ## Rules for the agent loop (T08) and agents
 
-1. Build on `TokenFactoryChatClient` / `ChatToolLoop`. **T08 must add** what the spike loop does not: store `reasoning_content` in the Transcript (the spike only counts characters), Working Memory, Token Budget.
+1. Build on `TokenFactoryChatClient`. The spike's `ChatToolLoop` is replaced by `ChatAgentLoop` (T08), which adds what the spike loop did not: `reasoning_content` in the Transcript (the spike only counted characters), Working Memory and the Token Budget.
 2. **Offer batch tools** — e.g. `read_files(paths[])`, `write_files(files[])` — alongside single-item tools. Super and Nano will not parallelise on their own; batch tools remove most of their turn/token penalty.
 3. **Count turns and tokens per Step** against the Token Budget and keep contexts short; prompt cost grows with every turn.
 4. **Never rely on long-context recall for exact facts.** Give agents search/read tools (grep, read a range, read a file) instead of pasting whole codebases or long documents; keep a prompt well under ~100k tokens of dense data.

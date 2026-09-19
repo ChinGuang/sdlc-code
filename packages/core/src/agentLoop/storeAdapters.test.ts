@@ -5,6 +5,7 @@ import { SqliteTaskStore } from "../persistence/taskStore.js";
 import { databaseWithRun } from "../persistence/testDatabase.js";
 import {
   ChatAgentLoop,
+  type AgentLoop,
   type TokenBudget,
   type Transcript,
 } from "./agentLoop.js";
@@ -66,7 +67,7 @@ describe("ChatAgentLoop with the stores", () => {
   it("persists the Transcript and stops when the Run's budget is spent", async () => {
     const { runs, runId, tasks, stepId, transcript, budget } = setup();
     const requests: ChatRequest[] = [];
-    const loop = new ChatAgentLoop({
+    const loop: AgentLoop = new ChatAgentLoop({
       client: {
         complete: async (request) => {
           requests.push(request);

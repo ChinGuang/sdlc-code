@@ -3,14 +3,15 @@
  * Run: pnpm --filter @sdlc-code/core agent:smoke
  */
 import { TokenFactoryChatClient } from "@sdlc-code/clients";
-import { readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { relative, resolve } from "node:path";
 import { z } from "zod";
 import {
   ChatAgentLoop,
   defineTool,
   NEMOTRON_SUPER,
+  requestOptionsFor,
   type AgentLoop,
 } from "../src/index.js";
 
@@ -21,34 +22,51 @@ if (!apiKey) {
 }
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
-/** Resolves a repo-relative path, refusing anything outside the repo or secret files. */
-function inRepo(path: string): string {
-  const full = resolve(root, path);
-  const rel = relative(root, full);
-  if (rel.startsWith("..") || /(^|[\\/])\.env/.test(rel))
-    throw new Error(`not allowed: ${path}`);
-  return full;
-}
+
+/**
+ * The model may only see files git tracks. That excludes .env,
+ * sdlc-code.config.json, databases, node_modules and .git without a blocklist,
+ * which case-insensitive Windows paths and other drives can slip past.
+ */
+const tracked = new Set(
+  execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" })
+    .split("\0")
+    .filter(Boolean),
+);
+const normalise = (path: string) =>
+  path
+    .replaceAll("\\", "/")
+    .replace(/^\.(\/|$)/, "")
+    .replace(/\/+$/, "");
+const MAX_FILE_CHARS = 20_000;
 
 const listDir = defineTool({
   name: "list_dir",
   description: "List a directory of the sdlc-code repo (repo-relative path).",
   input: z.object({ path: z.string().describe('e.g. "packages/clients/src"') }),
-  run: ({ path }) =>
-    readdirSync(inRepo(path), { withFileTypes: true })
-      .filter(
-        (entry) =>
-          entry.name !== "node_modules" && !entry.name.startsWith(".env"),
-      )
-      .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
-      .join("\n"),
+  run: ({ path }) => {
+    const dir = normalise(path);
+    const prefix = dir === "" ? "" : `${dir}/`;
+    const entries = new Set<string>();
+    for (const file of tracked) {
+      if (!file.startsWith(prefix)) continue;
+      const [first, ...rest] = file.slice(prefix.length).split("/");
+      entries.add(rest.length > 0 ? `${first}/` : first!);
+    }
+    if (entries.size === 0) throw new Error(`no tracked directory: ${path}`);
+    return [...entries].sort().join("\n");
+  },
 });
 
 const readFile = defineTool({
   name: "read_file",
   description: "Read a file of the sdlc-code repo (repo-relative path).",
   input: z.object({ path: z.string() }),
-  run: ({ path }) => readFileSync(inRepo(path), "utf8"),
+  run: ({ path }) => {
+    const file = normalise(path);
+    if (!tracked.has(file)) throw new Error(`not a tracked file: ${path}`);
+    return readFileSync(`${root}/${file}`, "utf8").slice(0, MAX_FILE_CHARS);
+  },
 });
 
 const loop: AgentLoop = new ChatAgentLoop({
@@ -56,10 +74,11 @@ const loop: AgentLoop = new ChatAgentLoop({
     apiKey,
     baseUrl: process.env.NEBIUS_BASE_URL || undefined,
   }),
-  request: {
+  request: requestOptionsFor({
     model: process.env.SDLC_MODEL_BACKEND_CODING || NEMOTRON_SUPER,
-    extra: { chat_template_kwargs: { enable_thinking: false } },
-  },
+    thinking: false,
+    capabilities: { vision: false, penpotMcp: false },
+  }),
   tools: [listDir, readFile],
   maxIterations: 8,
   transcript: {

@@ -3,6 +3,10 @@
  * (one Step). Follows the rules from spike T03 (docs/spikes/nemotron-tools.md):
  * Transcript with reasoning, Token Budget checked every turn, empty answers are
  * failures, 429/5xx retried, and a Working Memory note at the end.
+ *
+ * The caller (the Orchestrator, T17) decides what a stop means: it stores the
+ * note with TaskStore.completeStep and retries the Step on "emptyAnswer" or
+ * "apiError".
  */
 import {
   ChatApiError,
@@ -13,6 +17,7 @@ import {
   type ToolCall,
   type Usage,
 } from "@sdlc-code/clients";
+import { THINKING_OFF } from "../config/agentConfig.js";
 import {
   executeToolCall,
   toolMap,
@@ -43,6 +48,7 @@ export type TranscriptEvent =
     }
   | { type: "usage"; promptTokens: number; completionTokens: number }
   | { type: "retry"; status: number; waitSeconds: number }
+  | { type: "apiError"; status: number; message: string }
   | { type: "workingMemory"; note: string };
 
 /** Where the Transcript goes; the Orchestrator stores it as Step events. */
@@ -74,7 +80,7 @@ export type AgentLoopOptions = {
 };
 
 export type StopReason =
-  "answered" | "maxIterations" | "tokenBudget" | "emptyAnswer";
+  "answered" | "maxIterations" | "tokenBudget" | "emptyAnswer" | "apiError";
 
 export type AgentLoopResult = {
   stopReason: StopReason;
@@ -88,6 +94,8 @@ export type AgentLoopResult = {
   failedToolCalls: number;
   /** All tokens spent, including the Working Memory request. */
   usage: Usage;
+  /** The Token Factory error, when stopReason is "apiError". */
+  error: string | null;
 };
 
 /** Runs one Step: an agent with tools, until it answers or hits a limit. */
@@ -98,11 +106,10 @@ export interface AgentLoop {
 const DEFAULT_MAX_TOOL_RESULT_CHARS = 20_000;
 const DEFAULT_MAX_API_ATTEMPTS = 3;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const WORKING_MEMORY_MAX_TOKENS = 500;
 
 export const WORKING_MEMORY_PROMPT =
   "Stop working now. Write your Working Memory for whoever continues this Task: what you tried, what failed and why, and what to try next. At most 5 short bullet points, no code.";
-
-const NO_THINKING = { chat_template_kwargs: { enable_thinking: false } };
 
 export class ChatAgentLoop implements AgentLoop {
   #options: AgentLoopOptions;
@@ -114,7 +121,6 @@ export class ChatAgentLoop implements AgentLoop {
   }
 
   run = async (task: AgentTask): Promise<AgentLoopResult> => {
-    const { maxIterations, budget } = this.#options;
     const messages: ChatMessage[] = [
       { role: "system", content: task.system },
       { role: "user", content: task.user },
@@ -129,15 +135,46 @@ export class ChatAgentLoop implements AgentLoop {
       toolCalls: 0,
       failedToolCalls: 0,
       usage: { promptTokens: 0, completionTokens: 0 },
+      error: null,
       lastCalls: [],
+      lastPromptTokens: 0,
     };
 
-    while (state.iterations < maxIterations) {
-      if (budget && budget.remaining() <= 0) {
+    try {
+      await this.#turns(state, messages);
+    } catch (error) {
+      // A failed call still ends the Step with a note, so its retry starts informed.
+      if (!(error instanceof ChatApiError)) throw error;
+      state.stopReason = "apiError";
+      state.error = error.message;
+      this.#record({
+        type: "apiError",
+        status: error.status,
+        message: error.message,
+      });
+    }
+
+    const workingMemory = await this.#workingMemory(state, messages);
+    this.#record({ type: "workingMemory", note: workingMemory });
+    return {
+      stopReason: state.stopReason,
+      answer: state.answer,
+      workingMemory,
+      iterations: state.iterations,
+      toolCalls: state.toolCalls,
+      failedToolCalls: state.failedToolCalls,
+      usage: state.usage,
+      error: state.error,
+    };
+  };
+
+  async #turns(state: LoopState, messages: ChatMessage[]): Promise<void> {
+    while (state.iterations < this.#options.maxIterations) {
+      if (this.#budgetSpent()) {
         state.stopReason = "tokenBudget";
-        break;
+        return;
       }
-      const response = await this.#complete(state, {
+      const response = await this.#complete({
         messages,
         tools: [...this.#tools.values()].map((tool) => tool.definition),
       });
@@ -155,82 +192,85 @@ export class ChatAgentLoop implements AgentLoop {
         // Spike rule 6: an empty answer is a failed Step, never a result.
         state.stopReason = answer === "" ? "emptyAnswer" : "answered";
         state.answer = answer === "" ? null : answer;
-        break;
+        return;
       }
-
-      messages.push({
-        role: "assistant",
-        content: response.content,
-        tool_calls: response.toolCalls.map((call) => ({
-          id: call.id,
-          type: "function",
-          function: { name: call.name, arguments: call.arguments },
-        })),
-      });
-      state.lastCalls = [];
-      for (const call of response.toolCalls) {
-        const outcome = await executeToolCall(this.#tools, call);
-        const content = this.#truncate(outcome.content);
-        state.toolCalls++;
-        if (outcome.problem) state.failedToolCalls++;
-        state.lastCalls.push({ name: call.name, problem: outcome.problem });
-        this.#record({
-          type: "toolResult",
-          toolCallId: call.id,
-          name: call.name,
-          content,
-          problem: outcome.problem,
-        });
-        messages.push({ role: "tool", tool_call_id: call.id, content });
+      // Results the model will never see are wasted work, and later tools write files.
+      if (this.#budgetSpent()) {
+        state.stopReason = "tokenBudget";
+        state.lastCalls = [];
+        return;
       }
+      await this.#runToolCalls(state, response, messages);
     }
+  }
 
-    if (
-      state.stopReason === "maxIterations" &&
-      budget &&
-      budget.remaining() <= 0
-    )
-      state.stopReason = "tokenBudget";
-    const workingMemory = await this.#workingMemory(state, messages);
-    this.#record({ type: "workingMemory", note: workingMemory });
-    return {
-      stopReason: state.stopReason,
-      answer: state.answer,
-      workingMemory,
-      iterations: state.iterations,
-      toolCalls: state.toolCalls,
-      failedToolCalls: state.failedToolCalls,
-      usage: state.usage,
-    };
-  };
+  async #runToolCalls(
+    state: LoopState,
+    response: ChatResponse,
+    messages: ChatMessage[],
+  ): Promise<void> {
+    messages.push({
+      role: "assistant",
+      content: response.content,
+      tool_calls: response.toolCalls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: call.arguments },
+      })),
+    });
+    state.lastCalls = [];
+    for (const call of response.toolCalls) {
+      const outcome = await executeToolCall(this.#tools, call);
+      const content = this.#truncate(outcome.content);
+      state.toolCalls++;
+      if (outcome.problem) state.failedToolCalls++;
+      state.lastCalls.push({ name: call.name, problem: outcome.problem });
+      this.#record({
+        type: "toolResult",
+        toolCallId: call.id,
+        name: call.name,
+        content,
+        problem: outcome.problem,
+      });
+      messages.push({ role: "tool", tool_call_id: call.id, content });
+    }
+  }
 
-  /** Asks the model for its note; falls back to a written-out one if it cannot. */
+  /**
+   * Asks the model for its note when another full prompt still fits in the
+   * budget; otherwise, or if it fails, writes one from facts.
+   */
   async #workingMemory(
     state: LoopState,
     messages: ChatMessage[],
   ): Promise<string> {
     const { budget } = this.#options;
-    if (!budget || budget.remaining() > 0) {
-      const response = await this.#complete(state, {
-        messages: [
-          ...messages,
-          { role: "user", content: WORKING_MEMORY_PROMPT },
-        ],
-        extra: { ...this.#options.request.extra, ...NO_THINKING },
-        maxTokens: 500,
-      });
-      this.#spend(state, response);
-      const note = response.content?.trim();
-      if (note) return note;
+    const needed = state.lastPromptTokens + WORKING_MEMORY_MAX_TOKENS;
+    if (
+      state.stopReason !== "apiError" &&
+      (!budget || budget.remaining() >= needed)
+    ) {
+      try {
+        const response = await this.#complete({
+          messages: [
+            ...messages,
+            { role: "user", content: WORKING_MEMORY_PROMPT },
+          ],
+          extra: { ...this.#options.request.extra, ...THINKING_OFF },
+          maxTokens: WORKING_MEMORY_MAX_TOKENS,
+        });
+        this.#spend(state, response);
+        const note = response.content?.trim();
+        if (note) return note;
+      } catch (error) {
+        if (!(error instanceof ChatApiError)) throw error;
+      }
     }
     return fallbackNote(state);
   }
 
   /** One model call, retrying rate limits and server errors. */
-  async #complete(
-    state: LoopState,
-    request: Omit<ChatRequest, "model">,
-  ): Promise<ChatResponse> {
+  async #complete(request: Omit<ChatRequest, "model">): Promise<ChatResponse> {
     const attempts = this.#options.maxApiAttempts ?? DEFAULT_MAX_API_ATTEMPTS;
     const sleep =
       this.#options.sleep ??
@@ -259,8 +299,14 @@ export class ChatAgentLoop implements AgentLoop {
     const { promptTokens, completionTokens } = response.usage;
     state.usage.promptTokens += promptTokens;
     state.usage.completionTokens += completionTokens;
+    state.lastPromptTokens = promptTokens;
     this.#options.budget?.spend(promptTokens + completionTokens);
     this.#record({ type: "usage", promptTokens, completionTokens });
+  }
+
+  #budgetSpent(): boolean {
+    const { budget } = this.#options;
+    return budget !== undefined && budget.remaining() <= 0;
   }
 
   #truncate(content: string): string {
@@ -276,15 +322,11 @@ export class ChatAgentLoop implements AgentLoop {
   }
 }
 
-type LoopState = {
-  stopReason: StopReason;
-  answer: string | null;
-  iterations: number;
-  toolCalls: number;
-  failedToolCalls: number;
-  usage: Usage;
+type LoopState = Omit<AgentLoopResult, "workingMemory"> & {
   /** The tool calls of the latest turn, for the fallback note. */
   lastCalls: Array<{ name: string; problem: ToolProblem | null }>;
+  /** Prompt size of the latest call: roughly what one more call will cost. */
+  lastPromptTokens: number;
 };
 
 const STOP_REASON_TEXT: Record<StopReason, string> = {
@@ -292,6 +334,7 @@ const STOP_REASON_TEXT: Record<StopReason, string> = {
   maxIterations: "iteration limit reached",
   tokenBudget: "Token Budget exhausted",
   emptyAnswer: "the model returned an empty answer",
+  apiError: "Token Factory error",
 };
 
 /** A Working Memory note built from facts, when the model cannot write one. */
@@ -304,5 +347,6 @@ function fallbackNote(state: LoopState): string {
       : state.lastCalls
           .map((call) => `${call.name} (${call.problem ?? "ok"})`)
           .join(", ");
-  return `Stopped: ${STOP_REASON_TEXT[state.stopReason]} after ${turns} and ${calls}. Last tool calls: ${last}.`;
+  const error = state.error ? ` Error: ${state.error}` : "";
+  return `Stopped: ${STOP_REASON_TEXT[state.stopReason]} after ${turns} and ${calls}. Last tool calls: ${last}.${error}`;
 }

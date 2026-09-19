@@ -259,23 +259,37 @@ describe("ChatAgentLoop: malformed and failing tool calls", () => {
 });
 
 describe("ChatAgentLoop: limits", () => {
-  it("stops at the Token Budget before calling the model again", async () => {
+  it("stops at the Token Budget without running the turn's tool calls", async () => {
     const budget = budgetOf(100);
-    const { loop, requests } = makeLoop(
+    const { loop, requests, events } = makeLoop(
       [{ toolCalls: [toolCall("read_file", { path: "a.ts" })] }],
       { budget },
     );
 
     const result = await loop.run(task);
 
-    expect(result.stopReason).toBe("tokenBudget");
+    expect(result).toMatchObject({ stopReason: "tokenBudget", toolCalls: 0 });
     expect(requests).toHaveLength(1);
     expect(budget.used()).toBe(110);
+    expect(events.some((event) => event.type === "toolResult")).toBe(false);
     // No tokens left for the model to write it, so the note is built in code.
     expect(result.workingMemory).toMatch(
-      /Stopped: Token Budget exhausted after 1 model turn/,
+      /Stopped: Token Budget exhausted after 1 model turn and 0 tool calls/,
     );
-    expect(result.workingMemory).toMatch(/read_file \(ok\)/);
+  });
+
+  it("writes the note in code when one more prompt would not fit the budget", async () => {
+    // 110 spent of 600: 490 left, less than the last prompt (100) + 500 for the note.
+    const { loop, requests } = makeLoop([{ content: "done" }], {
+      budget: budgetOf(600),
+    });
+
+    const result = await loop.run(task);
+
+    expect(requests).toHaveLength(1);
+    expect(result.workingMemory).toMatch(
+      /^Stopped: answered after 1 model turn/,
+    );
   });
 
   it("does not call the model at all when the budget is already spent", async () => {
@@ -353,19 +367,60 @@ describe("ChatAgentLoop: API errors", () => {
     expect(sleeps).toEqual([1000, 2000]);
   });
 
-  it("gives up after maxApiAttempts", async () => {
-    const error = new ChatApiError(503, null, "unavailable");
-    const { loop } = makeLoop([error, error], { maxApiAttempts: 2 });
+  it("gives up after maxApiAttempts and still ends the Step with a note", async () => {
+    const error = new ChatApiError(503, null, "Token Factory 503: unavailable");
+    const { loop, requests, events } = makeLoop([error, error], {
+      maxApiAttempts: 2,
+    });
 
-    await expect(loop.run(task)).rejects.toBe(error);
+    const result = await loop.run(task);
+
+    expect(result).toMatchObject({
+      stopReason: "apiError",
+      answer: null,
+      error: "Token Factory 503: unavailable",
+    });
+    expect(requests).toHaveLength(2);
+    expect(result.workingMemory).toMatch(
+      /^Stopped: Token Factory error after 0 model turns.*Error: Token Factory 503: unavailable$/,
+    );
+    expect(events).toContainEqual({
+      type: "apiError",
+      status: 503,
+      message: "Token Factory 503: unavailable",
+    });
   });
 
   it("does not retry client errors", async () => {
     const error = new ChatApiError(400, null, "bad request");
     const { loop, sleeps } = makeLoop([error]);
 
-    await expect(loop.run(task)).rejects.toBe(error);
+    await expect(loop.run(task)).resolves.toMatchObject({
+      stopReason: "apiError",
+      error: "bad request",
+    });
     expect(sleeps).toEqual([]);
+  });
+
+  it("rethrows errors that are not Token Factory errors (bugs)", async () => {
+    const bug = new TypeError("x is not a function");
+    const { loop } = makeLoop([bug]);
+
+    await expect(loop.run(task)).rejects.toBe(bug);
+  });
+
+  it("uses the written-out note when the note request itself fails", async () => {
+    const { loop } = makeLoop([
+      { content: "done" },
+      new ChatApiError(400, null, "too long"),
+    ]);
+
+    const result = await loop.run(task);
+
+    expect(result.stopReason).toBe("answered");
+    expect(result.workingMemory).toMatch(
+      /^Stopped: answered after 1 model turn/,
+    );
   });
 
   it("run works when passed as a callback", async () => {
