@@ -1,7 +1,16 @@
 /**
- * Chat completions against Nebius Token Factory (OpenAI-compatible API).
- * Spike quality: covers what the agent loop needs — tools, structured output, usage.
+ * Chat completions against Nebius Token Factory (OpenAI-compatible API):
+ * tools, structured output, streaming, usage and model listing.
  */
+import {
+  applyStreamChunk,
+  createStreamState,
+  finishStream,
+  readSseData,
+  type ChatStreamEvent,
+} from "./chatStream.js";
+
+export { ChatStreamError, type ChatStreamEvent } from "./chatStream.js";
 
 export const TOKEN_FACTORY_DEFAULT_BASE_URL =
   "https://api.tokenfactory.nebius.com/v1";
@@ -61,6 +70,8 @@ export type ChatClientOptions = {
 /** Chat completions used by agents. */
 export interface ChatClient {
   complete: (request: ChatRequest) => Promise<ChatResponse>;
+  /** Streams reasoning and content as they arrive; the last event is `done`. */
+  stream: (request: ChatRequest) => AsyncIterable<ChatStreamEvent>;
   listModels: () => Promise<ModelInfo[]>;
 }
 
@@ -123,6 +134,9 @@ export class TokenFactoryChatClient implements ChatClient {
     return fromCompletion(raw, this.#now() - started);
   };
 
+  stream = (request: ChatRequest): AsyncIterable<ChatStreamEvent> =>
+    this.#stream(request);
+
   listModels = async (): Promise<ModelInfo[]> => {
     const raw = await this.#request<{ data?: RawModel[] }>(
       "GET",
@@ -131,7 +145,31 @@ export class TokenFactoryChatClient implements ChatClient {
     return (raw.data ?? []).map(toModelInfo);
   };
 
+  async *#stream(request: ChatRequest): AsyncGenerator<ChatStreamEvent> {
+    const started = this.#now();
+    const response = await this.#send("POST", "/chat/completions", {
+      ...toRequestBody(request),
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    if (!response.body) throw new Error("Token Factory stream had no body");
+    const state = createStreamState();
+    for await (const chunk of readSseData(response.body)) {
+      yield* applyStreamChunk(state, chunk);
+    }
+    yield {
+      type: "done",
+      response: finishStream(state, this.#now() - started),
+    };
+  }
+
   async #request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const response = await this.#send(method, path, body);
+    return JSON.parse(await response.text()) as T;
+  }
+
+  /** Sends an authorised request; throws ChatApiError on a non-2xx status. */
+  async #send(method: string, path: string, body?: unknown): Promise<Response> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.#apiKey}`,
     };
@@ -141,8 +179,8 @@ export class TokenFactoryChatClient implements ChatClient {
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    const text = await response.text();
     if (!response.ok) {
+      const text = await response.text();
       const retryAfter = Number(response.headers.get("retry-after"));
       throw new ChatApiError(
         response.status,
@@ -150,7 +188,7 @@ export class TokenFactoryChatClient implements ChatClient {
         `Token Factory ${response.status}: ${errorMessage(text)}`,
       );
     }
-    return JSON.parse(text) as T;
+    return response;
   }
 }
 

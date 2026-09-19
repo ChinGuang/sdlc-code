@@ -1,0 +1,9 @@
+{
+  "roles": {
+    "frontendCoding": { "model": "nvidia/Nemotron-3-Ultra-550b-a55b" },
+    "testing": { "thinking": true }
+  },
+  "models": {
+    "nvidia/Nemotron-3-Ultra-550b-a55b": { "vision": false, "penpotMcp": true }
+  }
+}
