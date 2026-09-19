@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IllegalTransitionError } from "../domain/runLifecycle.js";
+import { IllegalTransitionError } from "../domain/illegalTransitionError.js";
 import { SqliteSliceStore, type SliceStore } from "./sliceStore.js";
 import { databaseWithRun } from "./testDatabase.js";
 

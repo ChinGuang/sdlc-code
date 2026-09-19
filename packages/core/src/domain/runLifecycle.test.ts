@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { IllegalTransitionError } from "./illegalTransitionError.js";
 import {
-  IllegalTransitionError,
   isFinished,
   nextRunStatus,
   RUN_EVENT_TYPES,

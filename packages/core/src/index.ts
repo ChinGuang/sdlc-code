@@ -15,3 +15,4 @@ export * from "./persistence/gateStore.js";
 export * from "./persistence/escalationStore.js";
 export * from "./persistence/sliceStore.js";
 export * from "./persistence/taskStore.js";
+export * from "./domain/illegalTransitionError.js";

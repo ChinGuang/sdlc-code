@@ -1,13 +1,13 @@
 /**
  * Slice progress inside the Run's "building" status (UML diagram 3, Building):
  * in progress → testing → committed, back to building when an issue is routed,
- * or skipped by a human at an Escalation.
+ * or skipped by a human at an Escalation (only the Slice being worked on).
  */
 import type { SliceStatus } from "./entities.js";
-import { IllegalTransitionError } from "./runLifecycle.js";
+import { IllegalTransitionError } from "./illegalTransitionError.js";
 
 const ALLOWED: Record<SliceStatus, readonly SliceStatus[]> = {
-  pending: ["building", "skipped"],
+  pending: ["building"],
   building: ["testing", "skipped"],
   testing: ["building", "passed", "skipped"],
   passed: [],

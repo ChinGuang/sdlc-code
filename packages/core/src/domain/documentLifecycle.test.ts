@@ -8,7 +8,7 @@ import {
   type DocumentKind,
   type DocumentStatus,
 } from "./documentLifecycle.js";
-import { IllegalTransitionError } from "./runLifecycle.js";
+import { IllegalTransitionError } from "./illegalTransitionError.js";
 
 /** Every legal transition in UML diagram 4; anything not listed is illegal. */
 const LEGAL: Array<[DocumentStatus, DocumentEvent, DocumentStatus]> = [

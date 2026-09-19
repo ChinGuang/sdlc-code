@@ -5,6 +5,7 @@ import type {
   RunPullRequest,
 } from "../domain/entities.js";
 import {
+  FINISHED_RUN_STATUSES,
   nextRunStatus,
   type RunEvent,
   type RunMode,
@@ -100,16 +101,19 @@ export class SqliteRunStore implements RunStore {
   listUnfinishedRuns = (): Run[] =>
     this.#ctx.db
       .prepare(
-        "SELECT * FROM runs WHERE status NOT IN ('done', 'failed', 'aborted') ORDER BY created_at, id",
+        `SELECT * FROM runs WHERE status NOT IN (${FINISHED_RUN_STATUSES.map(() => "?").join(", ")})
+         ORDER BY created_at, id`,
       )
-      .all()
+      .all(...FINISHED_RUN_STATUSES)
       .map((row) => toRun(row as RunRow));
 
   applyEvent = (id: string, event: RunEvent): Run =>
     inTransaction(this.#ctx.db, () => {
       const run = this.#require(id);
       const status = nextRunStatus(run.status, event, run.mode);
-      this.#update(id, "status = ?", status);
+      this.#ctx.db
+        .prepare("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?")
+        .run(status, this.#ctx.now(), id);
       return this.#require(id);
     });
 
@@ -118,33 +122,49 @@ export class SqliteRunStore implements RunStore {
       throw new RangeError(
         `tokens must be a non-negative integer, got ${tokens}`,
       );
-    this.#require(id);
-    this.#update(id, "tokens_used = tokens_used + ?", tokens);
-    return this.#require(id);
+    return inTransaction(this.#ctx.db, () => {
+      this.#require(id);
+      this.#ctx.db
+        .prepare(
+          "UPDATE runs SET tokens_used = tokens_used + ?, updated_at = ? WHERE id = ?",
+        )
+        .run(tokens, this.#ctx.now(), id);
+      return this.#require(id);
+    });
   };
 
-  setPullRequest = (id: string, pullRequest: RunPullRequest): Run => {
-    this.#require(id);
-    this.#update(
-      id,
-      "pr_number = ?, pr_url = ?, pr_draft = ?",
-      pullRequest.number,
-      pullRequest.url,
-      toFlag(pullRequest.draft),
-    );
-    return this.#require(id);
-  };
+  setPullRequest = (id: string, pullRequest: RunPullRequest): Run =>
+    inTransaction(this.#ctx.db, () => {
+      this.#require(id);
+      this.#ctx.db
+        .prepare(
+          "UPDATE runs SET pr_number = ?, pr_url = ?, pr_draft = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(
+          pullRequest.number,
+          pullRequest.url,
+          toFlag(pullRequest.draft),
+          this.#ctx.now(),
+          id,
+        );
+      return this.#require(id);
+    });
 
-  saveCheckpoint = (runId: string, payload: unknown): Checkpoint => {
-    this.#require(runId);
-    const id = this.#ctx.newId();
-    this.#ctx.db
-      .prepare(
-        "INSERT INTO checkpoints (id, run_id, payload, created_at) VALUES (?, ?, ?, ?)",
-      )
-      .run(id, runId, JSON.stringify(payload), this.#ctx.now());
-    return this.latestCheckpoint(runId)!;
-  };
+  saveCheckpoint = (runId: string, payload: unknown): Checkpoint =>
+    inTransaction(this.#ctx.db, () => {
+      this.#require(runId);
+      this.#ctx.db
+        .prepare(
+          "INSERT INTO checkpoints (id, run_id, payload, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          this.#ctx.newId(),
+          runId,
+          JSON.stringify(payload),
+          this.#ctx.now(),
+        );
+      return this.latestCheckpoint(runId)!;
+    });
 
   latestCheckpoint = (runId: string): Checkpoint | null => {
     const row = this.#ctx.db
@@ -166,12 +186,6 @@ export class SqliteRunStore implements RunStore {
     const run = this.getRun(id);
     if (!run) throw new NotFoundError("Run", id);
     return run;
-  }
-
-  #update(id: string, set: string, ...values: Array<string | number>): void {
-    this.#ctx.db
-      .prepare(`UPDATE runs SET ${set}, updated_at = ? WHERE id = ?`)
-      .run(...values, this.#ctx.now(), id);
   }
 }
 

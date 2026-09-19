@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DocumentKind } from "../domain/documentLifecycle.js";
-import { IllegalTransitionError } from "../domain/runLifecycle.js";
+import { IllegalTransitionError } from "../domain/illegalTransitionError.js";
 import { SqliteDocumentStore, type DocumentStore } from "./documentStore.js";
 import { databaseWithRun } from "./testDatabase.js";
 

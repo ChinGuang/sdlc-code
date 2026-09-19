@@ -47,7 +47,8 @@ export const MIGRATIONS: readonly string[] = [
   CREATE TABLE verdicts (
     id TEXT PRIMARY KEY,
     gate_id TEXT NOT NULL REFERENCES gates(id) ON DELETE CASCADE,
-    document_kind TEXT,
+    -- The document version judged; NULL for a PR Gate verdict on the whole PR.
+    document_id TEXT REFERENCES documents(id) ON DELETE CASCADE,
     decision TEXT NOT NULL CHECK (decision IN ('approve', 'requestChanges')),
     comments TEXT NOT NULL,
     created_at TEXT NOT NULL
@@ -81,6 +82,7 @@ export const MIGRATIONS: readonly string[] = [
     started_at TEXT NOT NULL,
     ended_at TEXT
   );
+  CREATE UNIQUE INDEX one_running_step_per_task ON steps (task_id) WHERE status = 'running';
 
   CREATE TABLE step_events (
     step_id TEXT NOT NULL REFERENCES steps(id) ON DELETE CASCADE,
@@ -102,6 +104,7 @@ export const MIGRATIONS: readonly string[] = [
     created_at TEXT NOT NULL,
     resolved_at TEXT
   );
+  CREATE UNIQUE INDEX one_open_escalation_per_run ON escalations (run_id) WHERE resolved_at IS NULL;
 
   CREATE TABLE checkpoints (
     id TEXT PRIMARY KEY,

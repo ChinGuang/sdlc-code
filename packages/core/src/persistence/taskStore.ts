@@ -86,21 +86,23 @@ export class SqliteTaskStore implements TaskStore {
     return this.#requireTask(id);
   };
 
-  setTaskStatus = (taskId: string, status: TaskStatus): Task => {
-    this.#requireTask(taskId);
-    this.#ctx.db
-      .prepare("UPDATE tasks SET status = ? WHERE id = ?")
-      .run(status, taskId);
-    return this.#requireTask(taskId);
-  };
+  setTaskStatus = (taskId: string, status: TaskStatus): Task =>
+    inTransaction(this.#ctx.db, () => {
+      this.#requireTask(taskId);
+      this.#ctx.db
+        .prepare("UPDATE tasks SET status = ? WHERE id = ?")
+        .run(status, taskId);
+      return this.#requireTask(taskId);
+    });
 
-  addRetry = (taskId: string): Task => {
-    this.#requireTask(taskId);
-    this.#ctx.db
-      .prepare("UPDATE tasks SET retries = retries + 1 WHERE id = ?")
-      .run(taskId);
-    return this.#requireTask(taskId);
-  };
+  addRetry = (taskId: string): Task =>
+    inTransaction(this.#ctx.db, () => {
+      this.#requireTask(taskId);
+      this.#ctx.db
+        .prepare("UPDATE tasks SET retries = retries + 1 WHERE id = ?")
+        .run(taskId);
+      return this.#requireTask(taskId);
+    });
 
   listTasks = (runId: string): Task[] =>
     this.#ctx.db
@@ -144,10 +146,12 @@ export class SqliteTaskStore implements TaskStore {
     });
 
   completeStep = (stepId: string, workingMemory: string): Step =>
-    this.#finish(stepId, "completed", workingMemory);
+    inTransaction(this.#ctx.db, () =>
+      this.#finish(stepId, "completed", workingMemory),
+    );
 
   discardStep = (stepId: string): Step =>
-    this.#finish(stepId, "discarded", null);
+    inTransaction(this.#ctx.db, () => this.#finish(stepId, "discarded", null));
 
   discardRunningSteps = (runId: string): Step[] =>
     inTransaction(this.#ctx.db, () => {

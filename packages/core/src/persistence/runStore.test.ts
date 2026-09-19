@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { NewRun } from "../domain/entities.js";
-import { IllegalTransitionError } from "../domain/runLifecycle.js";
+import { IllegalTransitionError } from "../domain/illegalTransitionError.js";
 import { openDatabase, type Database } from "./database.js";
 import { SqliteRunStore, type RunStore } from "./runStore.js";
 

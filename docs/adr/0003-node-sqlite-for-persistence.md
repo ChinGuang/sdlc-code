@@ -1,7 +1,7 @@
 # 3. Node's built-in `node:sqlite` for persistence
 
 - Status: Accepted
-- Date: 2026-09-20
+- Date: 2026-09-19
 - Supersedes: "better-sqlite3" in docs/PLAN.md T07
 
 ## Context

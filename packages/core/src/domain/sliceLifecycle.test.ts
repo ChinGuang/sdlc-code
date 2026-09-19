@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SLICE_STATUSES, type SliceStatus } from "./entities.js";
-import { IllegalTransitionError } from "./runLifecycle.js";
+import { IllegalTransitionError } from "./illegalTransitionError.js";
 import { assertSliceMove } from "./sliceLifecycle.js";
 
 const LEGAL: Array<[SliceStatus, SliceStatus]> = [
@@ -8,7 +8,6 @@ const LEGAL: Array<[SliceStatus, SliceStatus]> = [
   ["building", "testing"],
   ["testing", "building"],
   ["testing", "passed"],
-  ["pending", "skipped"],
   ["building", "skipped"],
   ["testing", "skipped"],
 ];

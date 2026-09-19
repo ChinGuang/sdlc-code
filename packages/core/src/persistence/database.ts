@@ -46,15 +46,28 @@ function migrate(db: Database, migrations: readonly string[]): void {
   });
 }
 
-/** Runs `work` in a transaction: all of it is saved, or none of it. */
+let savepoints = 0;
+
+/**
+ * Runs `work` in a transaction: all of it is saved, or none of it. Nested calls
+ * become savepoints, so callers can combine several store calls into one unit.
+ */
 export function inTransaction<T>(db: Database, work: () => T): T {
-  db.exec("BEGIN IMMEDIATE");
+  const nested = db.isTransaction;
+  const savepoint = `sp_${++savepoints}`;
+  db.exec(nested ? `SAVEPOINT ${savepoint}` : "BEGIN IMMEDIATE");
   try {
     const result = work();
-    db.exec("COMMIT");
+    db.exec(nested ? `RELEASE ${savepoint}` : "COMMIT");
     return result;
   } catch (error) {
-    db.exec("ROLLBACK");
+    // A failed rollback must not hide the error that caused it.
+    try {
+      if (nested) db.exec(`ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
+      else if (db.isTransaction) db.exec("ROLLBACK");
+    } catch {
+      // the original error is the useful one
+    }
     throw error;
   }
 }

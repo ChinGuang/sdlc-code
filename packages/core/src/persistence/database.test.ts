@@ -110,4 +110,48 @@ describe("inTransaction", () => {
 
     expect(db.prepare("SELECT * FROM a").all()).toEqual([]);
   });
+
+  it("nests as a savepoint: committed together with the outer work", () => {
+    const db = openDatabase(":memory:", ["CREATE TABLE a (x)"]);
+
+    inTransaction(db, () => {
+      db.prepare("INSERT INTO a VALUES (1)").run();
+      inTransaction(db, () => db.prepare("INSERT INTO a VALUES (2)").run());
+    });
+
+    expect(db.prepare("SELECT x FROM a ORDER BY x").all()).toEqual([
+      { x: 1 },
+      { x: 2 },
+    ]);
+    expect(db.isTransaction).toBe(false);
+  });
+
+  it("rolls back only the inner work when a nested call fails and is caught", () => {
+    const db = openDatabase(":memory:", ["CREATE TABLE a (x)"]);
+
+    inTransaction(db, () => {
+      db.prepare("INSERT INTO a VALUES (1)").run();
+      expect(() =>
+        inTransaction(db, () => {
+          db.prepare("INSERT INTO a VALUES (2)").run();
+          throw new Error("inner");
+        }),
+      ).toThrow("inner");
+    });
+
+    expect(db.prepare("SELECT x FROM a").all()).toEqual([{ x: 1 }]);
+  });
+
+  it("rolls back the inner work when the outer work fails", () => {
+    const db = openDatabase(":memory:", ["CREATE TABLE a (x)"]);
+
+    expect(() =>
+      inTransaction(db, () => {
+        inTransaction(db, () => db.prepare("INSERT INTO a VALUES (2)").run());
+        throw new Error("outer");
+      }),
+    ).toThrow("outer");
+
+    expect(db.prepare("SELECT x FROM a").all()).toEqual([]);
+  });
 });

@@ -21,13 +21,12 @@ export type EscalationDecision = {
   openDraftPrOnAbort?: boolean;
 };
 
+export type NewEscalation = { trigger: EscalationTrigger; summary: string };
+
 /** Escalations and how humans resolved them. */
 export interface EscalationStore {
   /** Opens an Escalation; a Run has at most one unresolved Escalation. */
-  openEscalation: (
-    runId: string,
-    escalation: { trigger: EscalationTrigger; summary: string },
-  ) => Escalation;
+  openEscalation: (runId: string, escalation: NewEscalation) => Escalation;
   getOpenEscalation: (runId: string) => Escalation | null;
   resolveEscalation: (id: string, decision: EscalationDecision) => Escalation;
   listEscalations: (runId: string) => Escalation[];
@@ -54,7 +53,7 @@ export class SqliteEscalationStore implements EscalationStore {
 
   openEscalation = (
     runId: string,
-    { trigger, summary }: { trigger: EscalationTrigger; summary: string },
+    { trigger, summary }: NewEscalation,
   ): Escalation =>
     inTransaction(this.#ctx.db, () => {
       if (this.getOpenEscalation(runId))

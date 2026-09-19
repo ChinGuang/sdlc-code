@@ -1,7 +1,8 @@
 /**
- * Domain entities from UML diagram 2 that the Orchestrator persists.
- * Test Runs, Issue Reports and Findings arrive with their tasks (T12, T13, T15)
- * as new migrations.
+ * Domain entities from UML diagram 2 that the Orchestrator persists. The rest
+ * arrive with the tasks that define them, as new migrations: Stack Profile (T12),
+ * Test Run (T13), Workspace (T14), Issue Report (T16), Rule, Review Standard and
+ * Finding (T19). Agent Config and Model Capabilities live in the config file (T05).
  */
 import type { AgentRole } from "../agentRoles.js";
 import type { DocumentKind, DocumentStatus } from "./documentLifecycle.js";
@@ -55,19 +56,21 @@ export type RunDocument = {
 
 export type GateKind = "design" | "pr";
 
+export type GateStatus = "open" | "passed";
+
 export type Gate = {
   id: string;
   runId: string;
   kind: GateKind;
-  status: "open" | "passed";
+  status: GateStatus;
   openedAt: string;
 };
 
 export type Verdict = {
   id: string;
   gateId: string;
-  /** The document judged; null for a PR Gate verdict on the pull request as a whole. */
-  documentKind: DocumentKind | null;
+  /** The document version judged; null for a PR Gate verdict on the whole PR. */
+  document: { id: string; kind: DocumentKind; version: number } | null;
   decision: "approve" | "requestChanges";
   comments: string;
   createdAt: string;
@@ -138,7 +141,10 @@ export type Escalation = {
   resolvedAt: string | null;
 };
 
-/** Everything needed to continue a Run after a restart (UML diagram 9). */
+/**
+ * Everything needed to continue a Run after a restart (UML diagram 9). The
+ * payload's shape (last Slice Commit, Working Memory, …) is defined by T18.
+ */
 export type Checkpoint = {
   id: string;
   runId: string;

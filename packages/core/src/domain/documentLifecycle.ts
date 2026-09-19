@@ -1,5 +1,5 @@
 /** Document lifecycle (UML diagram 4) and the Stale cascade, as pure functions. */
-import { IllegalTransitionError } from "./runLifecycle.js";
+import { IllegalTransitionError } from "./illegalTransitionError.js";
 
 /**
  * Documents reviewed at the Design Gate. The Penpot design gets a Verdict too,

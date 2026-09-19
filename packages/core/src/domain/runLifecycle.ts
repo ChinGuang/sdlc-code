@@ -1,3 +1,5 @@
+import { IllegalTransitionError } from "./illegalTransitionError.js";
+
 /**
  * Run lifecycle (UML diagram 3) as a pure function. Slice-level progress inside
  * "building" (in progress → testing → committed) lives on each Slice's status.
@@ -50,13 +52,6 @@ export const RUN_EVENT_TYPES = [
   "limitHit",
   "escalationResolved",
 ] as const satisfies ReadonlyArray<RunEvent["type"]>;
-
-export class IllegalTransitionError extends Error {
-  constructor(entity: string, status: string, event: string) {
-    super(`${entity} cannot handle "${event}" while "${status}"`);
-    this.name = "IllegalTransitionError";
-  }
-}
 
 /** Limits that can stop a review; loops and owner routing only happen while building. */
 const REVIEW_LIMITS: ReadonlySet<EscalationTrigger> = new Set([
@@ -122,6 +117,13 @@ export function nextRunStatus(
   return next;
 }
 
+/** Statuses a Run never leaves. */
+export const FINISHED_RUN_STATUSES: readonly RunStatus[] = [
+  "done",
+  "failed",
+  "aborted",
+];
+
 export function isFinished(status: RunStatus): boolean {
-  return status === "done" || status === "failed" || status === "aborted";
+  return FINISHED_RUN_STATUSES.includes(status);
 }
