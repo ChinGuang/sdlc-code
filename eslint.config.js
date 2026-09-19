@@ -37,10 +37,11 @@ export default tseslint.config(
         },
         {
           // Direct methods only (`> ClassBody >`), so nested helper classes are not flagged.
+          // NestJS @Controller classes are exempt: route handlers are decorated methods.
           selector: ["ClassDeclaration", "ClassExpression"]
             .map(
               (node) =>
-                `${node}[implements.length>0] > ClassBody > MethodDefinition[kind='method'][static=false]:not([key.type='PrivateIdentifier']):not([accessibility='protected']):not([accessibility='private'])`,
+                `${node}[implements.length>0]:not(:has(> Decorator[expression.callee.name='Controller'])) > ClassBody > MethodDefinition[kind='method'][static=false]:not([key.type='PrivateIdentifier']):not([accessibility='protected']):not([accessibility='private'])`,
             )
             .join(", "),
           message:
