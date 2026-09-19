@@ -43,7 +43,7 @@ Details on how each is used will be added as the project is built.
 
 ## Development
 
-Requires Node.js 22.12+ and pnpm 10.
+Requires Node.js 22.13+ and pnpm 10.
 
 ```bash
 pnpm install

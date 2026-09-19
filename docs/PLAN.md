@@ -58,7 +58,7 @@ M4 and M5 overlap: the server API (T21) is started as soon as M3's domain events
 
 **T07 Domain model + SQLite persistence** · Sep 22
 - Entities from UML diagram 2; Run/Document state machines from diagrams 3 and 4 as pure functions.
-- SQLite (better-sqlite3 + migrations), event rows for every Step.
+- SQLite (`node:sqlite`, see ADR 0003) + migrations, event rows for every Step.
 - Tests: every legal and illegal state transition; repository round-trips.
 
 **T08 Agent loop** · Sep 23
