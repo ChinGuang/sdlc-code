@@ -11,6 +11,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "sandbox:whoami": "tsx --env-file-if-exists=../../.env scripts/sandboxWhoami.ts",
-    "models:list": "tsx --env-file-if-exists=../../.env scripts/listModels.ts"
+    "models:list": "tsx --env-file-if-exists=../../.env scripts/listModels.ts",
+    "github:access": "tsx --env-file-if-exists=../../.env scripts/githubAccess.ts"
   }
 }
