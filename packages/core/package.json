@@ -9,9 +9,11 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "config:check": "tsx --env-file-if-exists=../../.env scripts/configCheck.ts"
   },
   "dependencies": {
-    "@sdlc-code/clients": "workspace:*"
+    "@sdlc-code/clients": "workspace:*",
+    "zod": "^4.6.5"
   }
 }

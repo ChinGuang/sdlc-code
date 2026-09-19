@@ -54,6 +54,18 @@ pnpm --filter @sdlc-code/web dev
 pnpm --filter @sdlc-code/cli sdlccode --help
 ```
 
+### Agent models
+
+Each agent role uses an NVIDIA Nemotron model on Token Factory: **Ultra** (`nvidia/Nemotron-3-Ultra-550b-a55b`) for Orchestrator, System Design and Code Review; **Super** (`nvidia/nemotron-3-super-120b-a12b`) for UI Design, Coding and Testing. Testing runs with reasoning off.
+
+Override per role in `sdlc-code.config.json` (copy `sdlc-code.config.example.json`) or with `SDLC_MODEL_<ROLE>` env vars, then check:
+
+```bash
+pnpm --filter @sdlc-code/core config:check          # each role's model, thinking, capabilities + live check
+pnpm --filter @sdlc-code/clients models:list        # NVIDIA models your key can use
+pnpm --filter @sdlc-code/clients sandbox:whoami     # Sandbox permissions (Early Access)
+```
+
 Full setup instructions come with T26.
 
 ## License

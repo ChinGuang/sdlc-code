@@ -212,7 +212,11 @@ describe("TokenFactoryChatClient.complete", () => {
   it("never exposes the API key", () => {
     const client = makeClient({ ...base, apiKey: "secret-xyz" });
 
-    expect(Object.keys(client).sort()).toEqual(["complete", "listModels"]);
+    expect(Object.keys(client).sort()).toEqual([
+      "complete",
+      "listModels",
+      "stream",
+    ]);
     expect("apiKey" in client).toBe(false);
     expect(JSON.stringify(client)).not.toContain("secret-xyz");
   });
