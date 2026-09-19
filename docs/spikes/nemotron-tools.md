@@ -1,7 +1,7 @@
 # Spike T03 — Nemotron tool calling on Token Factory
 
 - **Date:** 2026-09-18
-- **Code:** spike code (removed from `main`; kept at commit [`e51a607`](https://github.com/ChinGuang/sdlc-code/tree/e51a607/spikes/t03-nemotron-tools)) — `chatClient.ts`, `toolLoop.ts`, `probe.ts` (live probe), `models.ts`. **Maintained code:** `packages/clients/src/tokenFactory` (`TokenFactoryChatClient`, `listModels`) and `packages/core/src/agentLoop` (`ChatToolLoop`); model listing: `pnpm --filter @sdlc-code/clients models:list`
+- **Code:** spike code (removed from `main`; kept at commit [`e51a607`](https://github.com/ChinGuang/sdlc-code/tree/e51a607/spikes/t03-nemotron-tools)) — `chatClient.ts`, `toolLoop.ts`, `probe.ts` (live probe), `models.ts`. **Maintained code:** `packages/clients/src/tokenFactory` (`TokenFactoryChatClient`, `listModels`) and `packages/core/src/agentLoop` (`ChatAgentLoop`, T08); model listing: `pnpm --filter @sdlc-code/clients models:list`
 - **Result:** ✅ All four NVIDIA Nemotron models on Token Factory do OpenAI-style tool calling and JSON-schema output reliably: **0 malformed arguments in 521 tool calls** over 48 tool-using runs, and **16/16 schema-valid** structured outputs. They differ sharply in **parallel tool calls**, **multi-step accuracy** and **long-context recall** — which is what the agent loop has to design around.
 - **Spec coverage:** the task asked for Ultra + Super; Lightning and Nano were added because they appeared in the model listing and cost ~nothing to test.
 
