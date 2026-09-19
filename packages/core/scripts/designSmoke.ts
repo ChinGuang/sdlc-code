@@ -14,7 +14,7 @@ import {
   ChatAgentLoop,
   designDocuments,
   loadAgentConfig,
-  NemotronSystemDesignAgent,
+  LoopSystemDesignAgent,
   requestOptionsFor,
   type SystemDesignAgent,
   type TranscriptEvent,
@@ -44,13 +44,13 @@ const client = new TokenFactoryChatClient({
 });
 const replies: Array<Extract<TranscriptEvent, { type: "assistant" }>> = [];
 
-const agent: SystemDesignAgent = new NemotronSystemDesignAgent({
+const agent: SystemDesignAgent = new LoopSystemDesignAgent({
   createLoop: (tools) =>
     new ChatAgentLoop({
       client,
       request: requestOptionsFor(settings),
       tools,
-      maxIterations: 8,
+      maxIterations: 12,
       transcript: {
         record: (event) => {
           if (event.type === "assistant") {
@@ -59,7 +59,9 @@ const agent: SystemDesignAgent = new NemotronSystemDesignAgent({
             console.log(`  model turn: ${calls || "answer"}`);
           }
           if (event.type === "toolResult")
-            console.log(`  ${event.name}: ${event.content.split("\n")[0]}`);
+            console.log(
+              `  ${event.name}: ${event.content.slice(0, 500).replaceAll("\n", " | ")}`,
+            );
         },
       },
     }),

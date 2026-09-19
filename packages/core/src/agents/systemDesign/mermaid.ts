@@ -1,7 +1,8 @@
 /**
  * Parses Mermaid in Node. Mermaid's sanitiser (DOMPurify) wants a DOM when it
- * loads, so a tiny linkedom DOM is lent to it for the import only and removed
- * afterwards: nothing else in the process ever sees a global `window`.
+ * loads, so a tiny linkedom DOM is lent to it while the module loads (once per
+ * process, ~1.5s) and removed afterwards. Code running during that load could
+ * see the global `window`; parsing afterwards needs none.
  */
 type Mermaid = { parse: (text: string) => Promise<unknown> };
 
@@ -19,6 +20,9 @@ function loadMermaid(): Promise<Mermaid> {
       const { default: mermaid } = await import("mermaid");
       mermaid.initialize({ startOnLoad: false });
       return mermaid;
+    } catch (error) {
+      loading = undefined; // let the next validation try again
+      throw error;
     } finally {
       if (lendDom) {
         const global = globalThis as { window?: unknown; document?: unknown };

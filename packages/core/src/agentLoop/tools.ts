@@ -4,6 +4,7 @@
  * before the tool runs.
  */
 import {
+  parseJsonLeniently,
   parseToolArguments,
   type ToolCall,
   type ToolDefinition,
@@ -50,7 +51,7 @@ function parseJsonStrings(
       if (typeof value !== "string" || !field || !expectsStructure(field))
         return [key, value];
       try {
-        const parsed: unknown = JSON.parse(value);
+        const parsed: unknown = parseJsonLeniently(value);
         return [
           key,
           typeof parsed === "object" && parsed !== null ? parsed : value,
@@ -63,10 +64,13 @@ function parseJsonStrings(
 }
 
 function expectsStructure(field: z.ZodType): boolean {
-  const inner =
-    field instanceof z.ZodOptional || field instanceof z.ZodDefault
-      ? (field.unwrap() as z.ZodType)
-      : field;
+  let inner = field;
+  while (
+    inner instanceof z.ZodOptional ||
+    inner instanceof z.ZodNullable ||
+    inner instanceof z.ZodDefault
+  )
+    inner = inner.unwrap() as z.ZodType;
   return (
     inner instanceof z.ZodObject ||
     inner instanceof z.ZodRecord ||

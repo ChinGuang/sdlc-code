@@ -1,25 +1,48 @@
 /**
- * Domain checks on a submitted design (spike T03 rule 5: validate in code).
- * Each problem is phrased for the model, which gets them back to fix.
+ * Domain checks on a design (spike T03 rule 5: validate in code), one function
+ * per part so each submit tool reports only its own problems. Each problem is
+ * phrased for the model, which gets them back to fix.
  */
 import { Validator } from "@seriousme/openapi-schema-validator";
-import type { Design } from "./design.js";
+import { parse as parseYaml } from "yaml";
+import {
+  HEALTH_ENDPOINT,
+  HTTP_METHODS,
+  type Design,
+  type DesignSlice,
+} from "./design.js";
 import { mermaidProblem } from "./mermaid.js";
 
-const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
+type ApiContract = Record<string, unknown>;
 
-/** Every problem with `design`; empty when it is valid. */
+/** Every problem with a whole design; empty when it is valid. */
 export async function validateDesign(design: Design): Promise<string[]> {
   return [
-    ...(await diagramProblems(design)),
-    ...(await contractProblems(design)),
-    ...slicePlanProblems(design),
+    ...(await systemDesignProblems(design.systemDesign)),
+    ...(await apiContractProblems(design.apiContract)),
+    ...slicePlanProblems(design.slicePlan),
+    ...sliceContractProblems(design.slicePlan, design.apiContract),
   ];
 }
 
-async function diagramProblems(design: Design): Promise<string[]> {
+/** Diagram kinds every System Design needs, by their Mermaid keyword. */
+const REQUIRED_DIAGRAMS: Record<string, RegExp> = {
+  "a component flowchart": /^\s*(flowchart|graph)\b/,
+  "a classDiagram of the domain": /^\s*classDiagram\b/,
+};
+
+export async function systemDesignProblems(
+  systemDesign: Design["systemDesign"],
+): Promise<string[]> {
+  // A fenced diagram gets its own problem below, not a second "missing" one.
+  const sources = systemDesign.diagrams.map((diagram) =>
+    diagram.mermaid.replace(/^\s*```\w*\s*/, ""),
+  );
+  const missing = Object.entries(REQUIRED_DIAGRAMS)
+    .filter(([, keyword]) => !sources.some((source) => keyword.test(source)))
+    .map(([kind]) => `The System Design needs ${kind}.`);
   const problems = await Promise.all(
-    design.systemDesign.diagrams.map(async (diagram) => {
+    systemDesign.diagrams.map(async (diagram) => {
       if (/^\s*```/.test(diagram.mermaid))
         return `Diagram "${diagram.title}": send Mermaid source without \`\`\` fences.`;
       const problem = await mermaidProblem(diagram.mermaid);
@@ -28,16 +51,38 @@ async function diagramProblems(design: Design): Promise<string[]> {
         : null;
     }),
   );
-  return problems.filter((problem) => problem !== null);
+  return [...missing, ...problems.filter((problem) => problem !== null)];
 }
 
-async function contractProblems(design: Design): Promise<string[]> {
-  const contract = design.apiContract;
+/** Reads the contract text the model sent (YAML or JSON). */
+export function parseApiContract(
+  text: string,
+): { contract: ApiContract } | { problem: string } {
+  try {
+    const parsed: unknown = parseYaml(text);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
+      return { contract: parsed as ApiContract };
+    return {
+      problem: "The API Contract must be an OpenAPI document (a mapping).",
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      problem: `The API Contract is not valid YAML or JSON: ${message.split("\n")[0]}`,
+    };
+  }
+}
+
+export async function apiContractProblems(
+  contract: ApiContract,
+): Promise<string[]> {
   if (
     typeof contract.openapi !== "string" ||
     !contract.openapi.startsWith("3.")
   )
-    return ['API Contract: "openapi" must be "3.1.0" (OpenAPI 3.x).'];
+    return [
+      'API Contract: "openapi" must be an OpenAPI 3 version; use "3.1.0".',
+    ];
   const result = await new Validator().validate(contract);
   if (result.valid) return [];
   const errors = Array.isArray(result.errors) ? result.errors : [result.errors];
@@ -51,21 +96,21 @@ async function contractProblems(design: Design): Promise<string[]> {
 }
 
 /** "GET /todos" for every operation in the contract's paths. */
-export function contractEndpoints(contract: Record<string, unknown>): string[] {
+export function contractEndpoints(contract: ApiContract): string[] {
   const paths = (contract.paths ?? {}) as Record<
     string,
     Record<string, unknown>
   >;
   return Object.entries(paths).flatMap(([path, item]) =>
-    HTTP_METHODS.filter((method) => item?.[method] !== undefined).map(
-      (method) => `${method.toUpperCase()} ${path}`,
-    ),
+    HTTP_METHODS.filter(
+      (method) => item?.[method.toLowerCase()] !== undefined,
+    ).map((method) => `${method} ${path}`),
   );
 }
 
-function slicePlanProblems(design: Design): string[] {
+/** Rules on the Slice Plan alone. */
+export function slicePlanProblems(slices: DesignSlice[]): string[] {
   const problems: string[] = [];
-  const slices = design.slicePlan;
   const [first] = slices;
 
   // CONTEXT.md "Walking Skeleton": always first, and only infrastructure.
@@ -80,10 +125,10 @@ function slicePlanProblems(design: Design): string[] {
       );
   });
   if (first?.isWalkingSkeleton) {
-    if (!first.endpoints.includes("GET /health"))
-      problems.push('The Walking Skeleton must include "GET /health".');
+    if (!first.endpoints.includes(HEALTH_ENDPOINT))
+      problems.push(`The Walking Skeleton must include "${HEALTH_ENDPOINT}".`);
     const features = first.endpoints.filter(
-      (endpoint) => !/^GET \/health\b/.test(endpoint),
+      (endpoint) => endpoint !== HEALTH_ENDPOINT,
     );
     if (features.length > 0)
       problems.push(
@@ -103,10 +148,19 @@ function slicePlanProblems(design: Design): string[] {
         `Slice ${index + 1} "${slice.title}" has no API Contract endpoints.`,
       );
   }
+  return problems;
+}
 
-  // Every endpoint a Slice builds is in the contract, and every contract
-  // operation is built by exactly one Slice.
-  const inContract = new Set(contractEndpoints(design.apiContract));
+/**
+ * Every endpoint a Slice builds is in the contract, and every contract
+ * operation is built by exactly one Slice.
+ */
+export function sliceContractProblems(
+  slices: DesignSlice[],
+  contract: ApiContract,
+): string[] {
+  const problems: string[] = [];
+  const inContract = new Set(contractEndpoints(contract));
   const owners = new Map<string, string[]>();
   for (const slice of slices)
     for (const endpoint of slice.endpoints) {

@@ -5,8 +5,24 @@
  */
 import { z } from "zod";
 
+/** HTTP methods an OpenAPI path item can hold, as Slices write them. */
+export const HTTP_METHODS = [
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+] as const;
+
 /** An API Contract operation as Slices reference it, e.g. "GET /todos/{id}". */
-export const ENDPOINT_PATTERN = /^(GET|POST|PUT|PATCH|DELETE) \/\S*$/;
+export const ENDPOINT_PATTERN = new RegExp(
+  String.raw`^(${HTTP_METHODS.join("|")}) /\S*$`,
+);
+
+/** The Walking Skeleton's one endpoint (CONTEXT.md "Walking Skeleton"). */
+export const HEALTH_ENDPOINT = "GET /health";
 
 const Diagram = z.object({
   title: z.string().min(1).describe('e.g. "Components"'),
@@ -35,22 +51,42 @@ const DesignSlice = z.object({
     ),
 });
 
-export const DesignSubmission = z.object({
-  systemDesign: z.object({
-    overview: z
-      .string()
-      .min(1)
-      .describe("Architecture in a few paragraphs of Markdown"),
-    diagrams: z.array(Diagram).min(1),
-  }),
-  slicePlan: z
+/** Input of submit_system_design. */
+export const SystemDesignPart = z.object({
+  overview: z
+    .string()
+    .min(1)
+    .describe("Architecture in a few paragraphs of Markdown"),
+  diagrams: z.array(Diagram).min(1),
+});
+
+/** Input of submit_slice_plan. */
+export const SlicePlanPart = z.object({
+  slices: z
     .array(DesignSlice)
     .min(1)
     .describe("Ordered Slices; the first is always the Walking Skeleton"),
-  apiContract: z
-    .record(z.string(), z.unknown())
-    .describe("OpenAPI 3.1 document covering every endpoint of every Slice"),
 });
 
-export type Design = z.infer<typeof DesignSubmission>;
+/**
+ * Input of submit_api_contract. The contract travels as text: Nemotron breaks
+ * large JSON objects nested inside tool arguments (seen live in T09), and YAML
+ * has no braces to balance.
+ */
+export const ApiContractPart = z.object({
+  openapi: z
+    .string()
+    .min(1)
+    .describe(
+      "The OpenAPI 3.1.0 document as YAML (preferred) or JSON text, covering every endpoint of every Slice",
+    ),
+});
+
+export const DesignSchema = z.object({
+  systemDesign: SystemDesignPart,
+  slicePlan: SlicePlanPart.shape.slices,
+  apiContract: z.record(z.string(), z.unknown()),
+});
+
+export type Design = z.infer<typeof DesignSchema>;
 export type DesignSlice = z.infer<typeof DesignSlice>;

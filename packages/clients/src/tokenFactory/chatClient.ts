@@ -12,6 +12,8 @@ import {
 
 export { ChatStreamError, type ChatStreamEvent } from "./chatStream.js";
 
+import { parseJsonLeniently } from "./lenientJson.js";
+
 export const TOKEN_FACTORY_DEFAULT_BASE_URL =
   "https://api.tokenfactory.nebius.com/v1";
 
@@ -292,7 +294,7 @@ export type ParsedArguments =
 export function parseToolArguments(raw: string): ParsedArguments {
   if (raw.trim() === "") return { ok: true, value: {} };
   try {
-    const value: unknown = JSON.parse(raw);
+    const value: unknown = parseJsonLeniently(raw);
     if (typeof value !== "object" || value === null || Array.isArray(value))
       return { ok: false, error: "arguments must be a JSON object" };
     return { ok: true, value: value as Record<string, unknown> };

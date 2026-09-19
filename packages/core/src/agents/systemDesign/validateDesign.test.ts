@@ -59,7 +59,7 @@ describe("validateDesign", () => {
     design.apiContract.openapi = "2.0";
 
     expect(await validateDesign(design)).toContain(
-      'API Contract: "openapi" must be "3.1.0" (OpenAPI 3.x).',
+      'API Contract: "openapi" must be an OpenAPI 3 version; use "3.1.0".',
     );
   });
 
@@ -93,6 +93,39 @@ describe("validateDesign", () => {
       expect.stringMatching(
         /Walking Skeleton is infrastructure only.*move GET \/todos/,
       ),
+    ]);
+  });
+
+  it("treats anything but exactly GET /health as a feature endpoint", async () => {
+    const design = goodDesign();
+    design.slicePlan[0]!.endpoints.push("GET /health/users");
+
+    expect(await validateDesign(design)).toContain(
+      "The Walking Skeleton is infrastructure only (template, database, health check, one empty screen); move GET /health/users to a feature Slice.",
+    );
+  });
+
+  it("requires a component flowchart and a classDiagram", async () => {
+    const design = goodDesign();
+    design.systemDesign.diagrams = [
+      { title: "Flow", mermaid: "sequenceDiagram\n  A->>B: hi" },
+    ];
+
+    expect(await validateDesign(design)).toEqual([
+      "The System Design needs a component flowchart.",
+      "The System Design needs a classDiagram of the domain.",
+    ]);
+  });
+
+  it("gives HEAD and OPTIONS operations an owner too", async () => {
+    const design = goodDesign();
+    (design.apiContract.paths as Record<string, object>)["/health"] = {
+      get: { responses: { "200": { description: "ok" } } },
+      head: { responses: { "200": { description: "ok" } } },
+    };
+
+    expect(await validateDesign(design)).toEqual([
+      "API Contract operation HEAD /health is not in any Slice.",
     ]);
   });
 
