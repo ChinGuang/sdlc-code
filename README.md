@@ -63,6 +63,7 @@ Override per role in `sdlc-code.config.json` (copy `sdlc-code.config.example.jso
 ```bash
 pnpm --filter @sdlc-code/core config:check          # each role's model, thinking, capabilities + live check
 pnpm --filter @sdlc-code/core agent:smoke          # one real agent-loop Step on Nemotron Super
+pnpm --filter @sdlc-code/core design:smoke "Build a todo app"  # System Design Agent: design + Slice Plan + API Contract
 pnpm --filter @sdlc-code/clients models:list        # NVIDIA models your key can use
 pnpm --filter @sdlc-code/clients sandbox:whoami     # Sandbox permissions (Early Access)
 pnpm --filter @sdlc-code/clients github:access owner/repo  # PAT can push and open PRs on the Target Repo

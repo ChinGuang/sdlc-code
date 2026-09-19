@@ -23,6 +23,7 @@ import {
   toolMap,
   type AgentTool,
   type ToolMap,
+  type ToolOutcome,
   type ToolProblem,
 } from "./tools.js";
 
@@ -219,8 +220,16 @@ export class ChatAgentLoop implements AgentLoop {
       })),
     });
     state.lastCalls = [];
+    // A reply cut off at the output limit has truncated arguments; running them,
+    // even after JSON repair, would act on wrong values.
+    const cutOff = response.finishReason === "length";
     for (const call of response.toolCalls) {
-      const outcome = await executeToolCall(this.#tools, call);
+      const outcome: ToolOutcome = cutOff
+        ? {
+            content: `Error: ${call.name} was not run: your reply hit the output token limit, so its arguments are incomplete. Send smaller arguments.`,
+            problem: "invalidArguments",
+          }
+        : await executeToolCall(this.#tools, call);
       const content = this.#truncate(outcome.content);
       state.toolCalls++;
       if (outcome.problem) state.failedToolCalls++;

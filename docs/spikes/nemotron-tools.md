@@ -63,6 +63,8 @@ An earlier attempt at the needle test built a **~303k-token** prompt by mistake 
    - *Added 2026-09-19 (T05, streaming):* with thinking **off**, Super writes its planning into the normal `content` alongside the tool call (e.g. `We need get_weather(city="Paris", unit="celsius").`); with thinking **on**, that text goes to `reasoning_content` and `content` is empty. Never treat `content` as a final answer while tool calls are present. When streaming, reasoning arrives in both `delta.reasoning` and `delta.reasoning_content` with the same text — read only one.
 8. **Answers need checking in code.** Nano once read 11/12 files and answered confidently; Lightning confidently answered the wrong quantity; Super/Ultra sometimes return empty content.
 
+9. **Large nested tool arguments break (found in T09).** When Ultra sent a whole design (~8k characters of nested objects) in one tool call, 2 of 3 live runs failed. Nested objects arrived as JSON strings, often with one closing bracket too many or too few at the end (`…}]]`). Fixes that made 3 of 3 runs pass first time: split big submissions into one tool per part; send large documents (the OpenAPI contract) as YAML text; parse JSON-string arguments; repair only the closers at the end (`parseJsonLeniently`).
+
 ## Rules for the agent loop (T08) and agents
 
 1. Build on `TokenFactoryChatClient`. The spike's `ChatToolLoop` is replaced by `ChatAgentLoop` (T08), which adds what the spike loop did not: `reasoning_content` in the Transcript (the spike only counted characters), Working Memory and the Token Budget.

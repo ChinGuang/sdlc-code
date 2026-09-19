@@ -18,3 +18,7 @@ export * from "./persistence/escalationStore.js";
 export * from "./persistence/sliceStore.js";
 export * from "./persistence/taskStore.js";
 export * from "./domain/illegalTransitionError.js";
+export * from "./agents/systemDesign/design.js";
+export * from "./agents/systemDesign/validateDesign.js";
+export * from "./agents/systemDesign/designDocuments.js";
+export * from "./agents/systemDesign/systemDesignAgent.js";

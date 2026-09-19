@@ -11,11 +11,16 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "config:check": "tsx --env-file-if-exists=../../.env scripts/configCheck.ts",
-    "agent:smoke": "tsx --env-file-if-exists=../../.env scripts/agentSmoke.ts"
+    "agent:smoke": "tsx --env-file-if-exists=../../.env scripts/agentSmoke.ts",
+    "design:smoke": "tsx --env-file-if-exists=../../.env scripts/designSmoke.ts"
   },
   "dependencies": {
     "@sdlc-code/clients": "workspace:*",
+    "@seriousme/openapi-schema-validator": "^2.10.0",
     "better-sqlite3": "^13.0.3",
+    "linkedom": "^0.18.13",
+    "mermaid": "^11.17.2",
+    "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
