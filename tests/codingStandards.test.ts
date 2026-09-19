@@ -127,3 +127,40 @@ describe("SC-2 also covers abstract and accessor members", () => {
     expect(messages).toEqual([expect.stringMatching(/^SC-2/)]);
   });
 });
+
+describe("SC-3 exception: NestJS controller handlers", () => {
+  it("allows decorated handler methods on a @Controller class, even one that implements an interface", async () => {
+    const messages = await standardsViolations(`
+      declare function Controller(path?: string): ClassDecorator;
+      declare function Get(path?: string): MethodDecorator;
+      interface HealthApi { health: () => unknown }
+      @Controller("health")
+      export class HealthController implements HealthApi {
+        @Get() health(): unknown { return {}; }
+      }
+    `);
+    expect(messages).toEqual([]);
+  });
+
+  it("still requires arrow-function methods on an @Injectable service", async () => {
+    const messages = await standardsViolations(`
+      declare function Injectable(): ClassDecorator;
+      interface Health { status: () => string }
+      @Injectable()
+      export class HealthService implements Health { status(): string { return "ok"; } }
+    `);
+    expect(messages).toEqual([expect.stringMatching(/^SC-3/)]);
+  });
+
+  it("still forbids TypeScript private constructor injection in a controller", async () => {
+    const messages = await standardsViolations(`
+      declare function Controller(path?: string): ClassDecorator;
+      class HealthService {}
+      @Controller("health")
+      export class HealthController {
+        constructor(private readonly health: HealthService) {}
+      }
+    `);
+    expect(messages).toEqual([expect.stringMatching(/^SC-2/)]);
+  });
+});

@@ -37,7 +37,7 @@ Details on how each is used will be added as the project is built.
 |---|---|
 | `packages/core` | Domain logic (agents, Orchestrator, Runs) |
 | `packages/clients` | Token Factory, Sandboxes and Penpot MCP clients |
-| `apps/server` | Local HTTP API (127.0.0.1 only) |
+| `apps/server` | Local HTTP API on NestJS (127.0.0.1 only) |
 | `apps/web` | Dashboard (Vite + React) |
 | `apps/cli` | `sdlccode` command line |
 

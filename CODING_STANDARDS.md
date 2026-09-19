@@ -47,6 +47,8 @@ executeCode = async <T = unknown>(code: string): Promise<T> => { … };
 
 Private `#methods` may be ordinary methods; they are never handed out as callbacks.
 
+**Exception — NestJS controllers.** Route handlers on a `@Controller()` class may be ordinary decorated methods (`@Get() health() { … }`), because Nest's route decorators only apply to methods. Keep controllers thin: they delegate to an `@Injectable()` service, and that service still follows SC-1 to SC-3. Inject dependencies without parameter properties (SC-2): `constructor(health: HealthService) { this.#health = health; }`.
+
 ### SC-4 Pure helpers stay functions
 
 Stateless, pure helpers (parsing, formatting, classification, redaction) remain plain exported functions, e.g. `redactToken`, `classifyPenpotError`, `decodeStream`. Do not wrap them in a class.
@@ -65,6 +67,6 @@ Prettier with default settings for code and config (`pnpm format:check`). Line e
 | Rule | Enforced by (proved in `tests/codingStandards.test.ts`) |
 |---|---|
 | SC-2 no `private` / parameter properties | ESLint `no-restricted-syntax` on `[accessibility="private"]` (fields, methods, accessors, abstract members) and `TSParameterProperty` |
-| SC-3 public methods are arrow properties | ESLint `no-restricted-syntax` on methods declared directly in a class declaration or expression that `implements` an interface; constructors, getters/setters, static, protected and `#private` methods are excluded. A service written without `implements` is caught by SC-1 in review. |
+| SC-3 public methods are arrow properties | ESLint `no-restricted-syntax` on methods declared directly in a class declaration or expression that `implements` an interface; constructors, getters/setters, static, protected and `#private` methods, and methods of `@Controller` classes, are excluded. A service written without `implements` is caught by SC-1 in review. |
 | SC-1, SC-4, SC-5 | Code review |
 | Formatting | `pnpm format:check` in CI (`.github/workflows/ci.yml`) |
