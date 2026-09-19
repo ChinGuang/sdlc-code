@@ -108,4 +108,56 @@ describe("executeToolCall", () => {
       problem: "toolError",
     });
   });
+
+  it("parses a nested object or array the model sent as a JSON string", async () => {
+    const nested = toolMap([
+      defineTool({
+        name: "submit",
+        description: "Nested input",
+        input: z.object({
+          plan: z.object({ steps: z.array(z.string()) }),
+          tags: z.array(z.string()).optional(),
+          note: z.string(),
+        }),
+        run: ({ plan, tags, note }) =>
+          JSON.stringify({ steps: plan.steps, tags, note }),
+      }),
+    ]);
+
+    const outcome = await executeToolCall(
+      nested,
+      call(
+        "submit",
+        JSON.stringify({
+          plan: JSON.stringify({ steps: ["a", "b"] }),
+          tags: '["x"]',
+          note: '{"stays":"a string"}',
+        }),
+      ),
+    );
+
+    expect(outcome).toEqual({
+      content: JSON.stringify({
+        steps: ["a", "b"],
+        tags: ["x"],
+        note: '{"stays":"a string"}',
+      }),
+      problem: null,
+    });
+  });
+
+  it("still rejects a string that is not JSON where an object is expected", async () => {
+    const nested = toolMap([
+      defineTool({
+        name: "submit",
+        description: "Nested input",
+        input: z.object({ plan: z.object({ steps: z.array(z.string()) }) }),
+        run: () => "ok",
+      }),
+    ]);
+
+    expect(
+      await executeToolCall(nested, call("submit", '{"plan":"steps: a, b"}')),
+    ).toMatchObject({ problem: "invalidArguments" });
+  });
 });

@@ -31,8 +31,47 @@ export function defineTool<Input extends z.ZodObject>(spec: {
       description: spec.description,
       parameters,
     },
-    run: async (args) => spec.run(spec.input.parse(args)),
+    run: async (args) =>
+      spec.run(spec.input.parse(parseJsonStrings(spec.input, args))),
   };
+}
+
+/**
+ * Nemotron sometimes sends a nested object or array as a JSON string (seen live
+ * in T09). Where the schema expects an object, record or array, parse it.
+ */
+function parseJsonStrings(
+  schema: z.ZodObject,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(args).map(([key, value]) => {
+      const field = schema.shape[key];
+      if (typeof value !== "string" || !field || !expectsStructure(field))
+        return [key, value];
+      try {
+        const parsed: unknown = JSON.parse(value);
+        return [
+          key,
+          typeof parsed === "object" && parsed !== null ? parsed : value,
+        ];
+      } catch {
+        return [key, value];
+      }
+    }),
+  );
+}
+
+function expectsStructure(field: z.ZodType): boolean {
+  const inner =
+    field instanceof z.ZodOptional || field instanceof z.ZodDefault
+      ? (field.unwrap() as z.ZodType)
+      : field;
+  return (
+    inner instanceof z.ZodObject ||
+    inner instanceof z.ZodRecord ||
+    inner instanceof z.ZodArray
+  );
 }
 
 export type ToolMap = ReadonlyMap<string, AgentTool>;
