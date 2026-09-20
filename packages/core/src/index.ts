@@ -22,3 +22,8 @@ export * from "./agents/systemDesign/design.js";
 export * from "./agents/systemDesign/validateDesign.js";
 export * from "./agents/systemDesign/designDocuments.js";
 export * from "./agents/systemDesign/systemDesignAgent.js";
+export * from "./agents/uiDesign/uiSpec.js";
+export * from "./agents/uiDesign/validateUiSpec.js";
+export * from "./agents/uiDesign/penpotRender.js";
+export * from "./agents/uiDesign/uiCanvas.js";
+export * from "./agents/uiDesign/uiDesignAgent.js";
