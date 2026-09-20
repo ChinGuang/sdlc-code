@@ -24,6 +24,8 @@ import {
   PenpotUiCanvas,
   requestOptionsFor,
   runPageName,
+  type AgentLoop,
+  type AgentTool,
   type AgentRole,
   type TranscriptEvent,
 } from "../src/index.js";
@@ -53,30 +55,32 @@ const client: ChatClient = new TokenFactoryChatClient({
   baseUrl: process.env.NEBIUS_BASE_URL || undefined,
 });
 
-const loopFor = (role: AgentRole, maxIterations: number) => (tools: never) =>
-  new ChatAgentLoop({
-    client,
-    request: requestOptionsFor(config.roles[role]),
-    tools,
-    maxIterations,
-    transcript: {
-      record: (event: TranscriptEvent) => {
-        if (event.type === "assistant")
-          console.log(
-            `  ${role}: ${event.toolCalls.map((call) => call.name).join(", ") || "answer"}`,
-          );
-        if (event.type === "toolResult")
-          console.log(
-            `    ${event.name}: ${event.content.slice(0, 200).replaceAll("\n", " | ")}`,
-          );
+const loopFor =
+  (role: AgentRole, maxIterations: number) =>
+  (tools: AgentTool[]): AgentLoop =>
+    new ChatAgentLoop({
+      client,
+      request: requestOptionsFor(config.roles[role]),
+      tools,
+      maxIterations,
+      transcript: {
+        record: (event: TranscriptEvent) => {
+          if (event.type === "assistant")
+            console.log(
+              `  ${role}: ${event.toolCalls.map((call) => call.name).join(", ") || "answer"}`,
+            );
+          if (event.type === "toolResult")
+            console.log(
+              `    ${event.name}: ${event.content.slice(0, 200).replaceAll("\n", " | ")}`,
+            );
+        },
       },
-    },
-  });
+    });
 
 const started = Date.now();
 console.log(`System Design Agent on ${config.roles.systemDesign.model}`);
 const { design, loop: designLoop } = await new LoopSystemDesignAgent({
-  createLoop: loopFor("systemDesign", 12) as never,
+  createLoop: loopFor("systemDesign", 12),
 }).design({
   projectRequest,
   stackProfile:
@@ -109,7 +113,7 @@ console.log(
 try {
   const { spec, screens, loop } = await new LoopUiDesignAgent({
     canvas,
-    createLoop: loopFor("uiDesign", 10) as never,
+    createLoop: loopFor("uiDesign", 10),
   }).design({
     projectRequest,
     pageName,

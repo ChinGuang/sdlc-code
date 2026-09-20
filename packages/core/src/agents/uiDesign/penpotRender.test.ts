@@ -8,8 +8,10 @@ import { goodUiSpec } from "./fixtures/goodUiSpec.js";
 import {
   CONNECTION_CHECK_CODE,
   ensurePageCode,
+  penpotPageUrl,
   runPageName,
   screenCode,
+  sweepBoardsCode,
 } from "./penpotRender.js";
 import { BOARD_WIDTH } from "./uiSpec.js";
 
@@ -39,6 +41,7 @@ describe("CONNECTION_CHECK_CODE", () => {
 
     expect(await runPenpotCode(fake, CONNECTION_CHECK_CODE)).toEqual({
       file: "sdlc-code runs",
+      fileId: "file-abc",
       page: null,
     });
   });
@@ -50,7 +53,7 @@ describe("ensurePageCode", () => {
 
     const result = await runPenpotCode(fake, ensurePageCode(PAGE));
 
-    expect(result).toMatchObject({ created: true });
+    expect(result).toMatchObject({ created: true, fileId: "file-abc" });
     expect(fake.pages.map((page) => page.name)).toEqual([PAGE]);
     expect(fake.currentPageName()).toBe(PAGE);
   });
@@ -169,12 +172,77 @@ describe("screenCode", () => {
     expect(countShapes(boards[0]!)).toBe(before);
   });
 
+  it("fails the Step when Penpot cannot create a text shape", async () => {
+    const fake = fakePenpot();
+    await runPenpotCode(fake, ensurePageCode(PAGE));
+    (fake.penpot as { createText: unknown }).createText = () => null;
+
+    await expect(runPenpotCode(fake, drawScreen(0))).rejects.toThrow(
+      /could not create the text/,
+    );
+  });
+
   it("refuses to draw when the Run's page is missing", async () => {
     const fake = fakePenpot();
 
     await expect(runPenpotCode(fake, drawScreen(0))).rejects.toThrow(
       /Page .* is missing/,
     );
+  });
+});
+
+describe("sweepBoardsCode", () => {
+  it("removes boards of screens the design no longer has", async () => {
+    const fake = fakePenpot();
+    await runPenpotCode(fake, ensurePageCode(PAGE));
+    await runPenpotCode(fake, drawScreen(0));
+    await runPenpotCode(fake, drawScreen(1));
+
+    const result = await runPenpotCode(
+      fake,
+      sweepBoardsCode(PAGE, ["Todo list"]),
+    );
+
+    expect(result).toEqual({ removed: ["Screen: Health"] });
+    expect(fake.boards(PAGE).map((board) => board.name)).toEqual([
+      "Screen: Todo list",
+    ]);
+  });
+
+  it("leaves boards nobody drew for this Run alone", async () => {
+    const fake = fakePenpot();
+    await runPenpotCode(fake, ensurePageCode(PAGE));
+    await runPenpotCode(fake, drawScreen(0));
+    await runPenpotCode(
+      fake,
+      `const page = penpotUtils.getPageByName(${JSON.stringify(PAGE)});
+       const board = penpot.createBoard();
+       board.name = "Notes by the designer";
+       return null;`,
+    );
+
+    await runPenpotCode(fake, sweepBoardsCode(PAGE, ["Health"]));
+
+    expect(fake.boards(PAGE).map((board) => board.name)).toEqual([
+      "Screen: Health",
+      "Notes by the designer",
+    ]);
+  });
+
+  it("does nothing when the page does not exist", async () => {
+    const fake = fakePenpot();
+
+    expect(await runPenpotCode(fake, sweepBoardsCode(PAGE, []))).toEqual({
+      removed: [],
+    });
+  });
+});
+
+describe("penpotPageUrl", () => {
+  it("links to the Run's page in the workspace", () => {
+    expect(
+      penpotPageUrl("https://design.penpot.app/", "file-1", "page-2"),
+    ).toBe("https://design.penpot.app/#/workspace/file-1?page-id=page-2");
   });
 });
 

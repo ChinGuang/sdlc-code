@@ -5,6 +5,7 @@
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   McpPenpotClient,
   redactToken,
@@ -24,14 +25,17 @@ export type ConnectPenpotOptions = {
   /** PENPOT_MCP_URL, e.g. https://design.penpot.app/mcp/stream?userToken=… */
   url: string;
   clientName?: string;
+  /** Tests connect to an in-memory server instead of the real one. */
+  createTransport?: (url: URL) => Transport;
 };
 
 export async function connectPenpotMcp({
   url,
   clientName = "sdlc-code",
+  createTransport = (target) => new StreamableHTTPClientTransport(target),
 }: ConnectPenpotOptions): Promise<PenpotConnection> {
   const client = new Client({ name: clientName, version: "0.0.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(url));
+  const transport = createTransport(new URL(url));
   try {
     await client.connect(transport);
   } catch (error) {

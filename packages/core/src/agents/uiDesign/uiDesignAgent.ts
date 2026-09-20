@@ -31,11 +31,22 @@ export type DrawnScreen = {
   export: ExportedImage | null;
 };
 
+/** The Run's Penpot page, which the Design Gate links to (ADR 0002). */
+export type RunPageLink = {
+  name: string;
+  pageId: string;
+  fileId: string | null;
+  /** Boards of screens an earlier version had, removed by this design. */
+  removedBoards: string[];
+};
+
 export type UiDesignResult = {
   /** The UI Spec that passed validation; null if none did. */
   spec: UiSpec | null;
   /** What was drawn in Penpot; empty when no spec passed. */
   screens: DrawnScreen[];
+  /** Where it was drawn; null when no spec passed. */
+  page: RunPageLink | null;
   loop: AgentLoopResult;
 };
 
@@ -106,12 +117,16 @@ export class LoopUiDesignAgent implements UiDesignAgent {
       user: userMessage(input),
     });
     const spec: UiSpec | null = accepted;
-    const screens = spec ? await this.#draw(input.pageName, spec) : [];
-    return { spec, screens, loop };
+    if (!spec) return { spec: null, screens: [], page: null, loop };
+    const { screens, page } = await this.#draw(input.pageName, spec);
+    return { spec, screens, page, loop };
   };
 
-  async #draw(pageName: string, spec: UiSpec): Promise<DrawnScreen[]> {
-    await this.#canvas.ensurePage(pageName);
+  async #draw(
+    pageName: string,
+    spec: UiSpec,
+  ): Promise<{ screens: DrawnScreen[]; page: RunPageLink }> {
+    const runPage = await this.#canvas.ensurePage(pageName);
     const drawn: DrawnScreen[] = [];
     for (const [index, screen] of spec.screens.entries()) {
       const board = await this.#canvas.drawScreen({
@@ -128,7 +143,20 @@ export class LoopUiDesignAgent implements UiDesignAgent {
           : null,
       });
     }
-    return drawn;
+    // A revision may have renamed or dropped screens; their boards must go.
+    const removed = await this.#canvas.sweepBoards(
+      pageName,
+      spec.screens.map((screen) => screen.name),
+    );
+    return {
+      screens: drawn,
+      page: {
+        name: pageName,
+        pageId: runPage.pageId,
+        fileId: runPage.fileId,
+        removedBoards: removed,
+      },
+    };
   }
 }
 

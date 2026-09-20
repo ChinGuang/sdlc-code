@@ -17,24 +17,38 @@ import {
 /** Gap between screen boards on the Run's page. */
 const BOARD_GAP = 80;
 
+/** Prefix of every screen board, so a sweep only touches boards we drew. */
+const BOARD_PREFIX = "Screen: ";
+
 /** The Run's page in the Penpot Workspace File (ADR 0002: one page per Run). */
 export function runPageName(runId: string, requestTitle: string): string {
   const title = requestTitle.replace(/\s+/g, " ").trim().slice(0, 60);
   return `${runId} ${title}`.trim();
 }
 
-/** A JS literal for `value`, safe inside generated code. */
+/**
+ * U+2028 and U+2029 are valid in a JSON string but are line terminators in
+ * JavaScript source, so generated code escapes them. Built with new RegExp
+ * because the characters themselves cannot appear in a regex literal.
+ */
+const LINE_SEPARATORS = new RegExp("[\\u2028\\u2029]", "g");
+
+/**
+ * A JS literal for `value`, safe inside generated code: JSON.stringify escapes
+ * quotes and backslashes, and the line separators above are escaped too.
+ */
 function literal(value: unknown): string {
-  return JSON.stringify(value ?? null)
-    .replaceAll(" ", "\\u2028")
-    .replaceAll(" ", "\\u2029");
+  return JSON.stringify(value ?? null).replace(
+    LINE_SEPARATORS,
+    (separator) => `\\u${separator.charCodeAt(0).toString(16)}`,
+  );
 }
 
 /** Reads the connected file, to check the plugin is there before designing. */
 export const CONNECTION_CHECK_CODE = `
 const file = penpot.currentFile;
 if (!file) throw new Error("No Penpot file is open in the plugin.");
-return { file: file.name, page: penpot.currentPage?.name ?? null };
+return { file: file.name, fileId: file.id ?? null, page: penpot.currentPage?.name ?? null };
 `;
 
 /** Opens the Run's page, creating it if this Run has none yet. */
@@ -48,8 +62,40 @@ if (!page) {
   page.name = name;
 }
 await penpot.openPage(page);
-return { pageId: page.id, created };
+return { pageId: page.id, fileId: penpot.currentFile?.id ?? null, created };
 `;
+}
+
+/**
+ * Removes boards of screens the design no longer has, so a revision that
+ * renames or drops a screen leaves nothing behind.
+ */
+export function sweepBoardsCode(
+  pageName: string,
+  keepScreens: string[],
+): string {
+  const keep = keepScreens.map((name) => `${BOARD_PREFIX}${name}`);
+  return `
+const pageName = ${literal(pageName)};
+const keep = new Set(${literal(keep)});
+const prefix = ${literal(BOARD_PREFIX)};
+const page = penpotUtils.getPageByName(pageName);
+if (!page) return { removed: [] };
+const stale = [...(page.root.children ?? [])].filter(
+  (shape) => shape.type === "board" && shape.name.startsWith(prefix) && !keep.has(shape.name),
+);
+for (const board of stale) board.remove();
+return { removed: stale.map((board) => board.name) };
+`;
+}
+
+/** The workspace link to a Run's page, for the Design Gate (ADR 0002). */
+export function penpotPageUrl(
+  origin: string,
+  fileId: string,
+  pageId: string,
+): string {
+  return `${origin.replace(/\/+$/, "")}/#/workspace/${fileId}?page-id=${pageId}`;
 }
 
 /** Draws one screen as a board, replacing what an earlier attempt left behind. */
@@ -64,6 +110,7 @@ export function screenCode(request: {
 const pageName = ${literal(pageName)};
 const screen = ${literal(screen)};
 const tokens = ${literal(tokens)};
+const prefix = ${literal(BOARD_PREFIX)};
 const boardX = ${index * (BOARD_WIDTH + BOARD_GAP)};
 const boardWidth = ${BOARD_WIDTH};
 const boardHeight = ${BOARD_HEIGHT};
@@ -72,7 +119,7 @@ const page = penpotUtils.getPageByName(pageName);
 if (!page) throw new Error("Page " + pageName + " is missing; create it first.");
 await penpot.openPage(page);
 
-const boardName = "Screen: " + screen.name;
+const boardName = prefix + screen.name;
 let board = penpotUtils.findShape((s) => s.type === "board" && s.name === boardName, page.root);
 if (board) {
   // Redraw from scratch: a partly finished attempt must not leave old shapes.
@@ -96,7 +143,8 @@ function place(shape, element) {
 
 function addText(element, text, size, color) {
   const shape = penpot.createText(text);
-  if (!shape) return null;
+  // A screen missing its text must fail the Step, not be reported as drawn.
+  if (!shape) throw new Error("Penpot could not create the text " + JSON.stringify(text));
   shape.name = element.kind + ": " + element.label;
   place(shape, element);
   shape.growType = "auto-width";
@@ -173,16 +221,13 @@ for (const element of screen.elements) {
   }
 }
 
-const caption = penpot.createText(screen.route + "  ·  " + screen.states.join(" / "));
-if (caption) {
-  board.appendChild(caption);
-  caption.x = boardX + 64;
-  caption.y = boardHeight - 56;
-  caption.growType = "auto-width";
-  caption.fontSize = "14";
-  caption.fontFamily = tokens.fontFamily;
-  caption.fills = fill(tokens.text);
-}
+const caption = addText(
+  { kind: "caption", label: screen.route, x: 64, y: boardHeight - 56 },
+  screen.route + "  ·  " + screen.states.join(" / "),
+  14,
+  tokens.text,
+);
+caption.name = "caption";
 
 return { boardId: board.id, name: boardName };
 `;

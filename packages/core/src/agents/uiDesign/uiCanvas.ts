@@ -7,10 +7,23 @@ import {
   CONNECTION_CHECK_CODE,
   ensurePageCode,
   screenCode,
+  sweepBoardsCode,
 } from "./penpotRender.js";
 import type { DesignTokens, Screen } from "./uiSpec.js";
 
-export type PenpotConnection = { file: string; page: string | null };
+/** The Penpot Workspace File the plugin is connected to. */
+export type PenpotFileInfo = {
+  file: string;
+  fileId: string | null;
+  page: string | null;
+};
+
+export type RunPage = {
+  pageId: string;
+  fileId: string | null;
+  created: boolean;
+};
+
 export type DrawnBoard = { boardId: string; name: string };
 
 export type DrawScreenRequest = {
@@ -24,12 +37,12 @@ export type DrawScreenRequest = {
 /** Draws a Run's screens in the Penpot Workspace File. */
 export interface UiCanvas {
   /** Reads the connected file; throws PenpotError when no plugin is there. */
-  checkConnection: () => Promise<PenpotConnection>;
+  checkConnection: () => Promise<PenpotFileInfo>;
   /** Opens the Run's page, creating it on the first Design Phase. */
-  ensurePage: (
-    pageName: string,
-  ) => Promise<{ pageId: string; created: boolean }>;
+  ensurePage: (pageName: string) => Promise<RunPage>;
   drawScreen: (request: DrawScreenRequest) => Promise<DrawnBoard>;
+  /** Removes boards of screens the design no longer has; returns their names. */
+  sweepBoards: (pageName: string, keepScreens: string[]) => Promise<string[]>;
   exportBoard: (boardId: string) => Promise<ExportedImage>;
 }
 
@@ -40,16 +53,24 @@ export class PenpotUiCanvas implements UiCanvas {
     this.#penpot = penpot;
   }
 
-  checkConnection = (): Promise<PenpotConnection> =>
-    this.#penpot.executeCode<PenpotConnection>(CONNECTION_CHECK_CODE);
+  checkConnection = (): Promise<PenpotFileInfo> =>
+    this.#penpot.executeCode<PenpotFileInfo>(CONNECTION_CHECK_CODE);
 
-  ensurePage = (
-    pageName: string,
-  ): Promise<{ pageId: string; created: boolean }> =>
-    this.#penpot.executeCode(ensurePageCode(pageName));
+  ensurePage = (pageName: string): Promise<RunPage> =>
+    this.#penpot.executeCode<RunPage>(ensurePageCode(pageName));
 
   drawScreen = (request: DrawScreenRequest): Promise<DrawnBoard> =>
     this.#penpot.executeCode<DrawnBoard>(screenCode(request));
+
+  sweepBoards = async (
+    pageName: string,
+    keepScreens: string[],
+  ): Promise<string[]> => {
+    const { removed } = await this.#penpot.executeCode<{ removed: string[] }>(
+      sweepBoardsCode(pageName, keepScreens),
+    );
+    return removed;
+  };
 
   exportBoard = (boardId: string): Promise<ExportedImage> =>
     this.#penpot.exportShape(boardId, "png");

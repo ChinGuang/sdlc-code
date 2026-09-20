@@ -17,9 +17,22 @@ type Reply = { content: string | null; toolCalls: ToolCall[] };
 function fakeCanvas(overrides: Partial<UiCanvas> = {}) {
   const drawn: DrawScreenRequest[] = [];
   const exported: string[] = [];
+  const swept: string[][] = [];
   const canvas: UiCanvas = {
-    checkConnection: async () => ({ file: "sdlc-code runs", page: "Page 1" }),
-    ensurePage: async () => ({ pageId: "page-1", created: true }),
+    checkConnection: async () => ({
+      file: "sdlc-code runs",
+      fileId: "file-1",
+      page: "Page 1",
+    }),
+    ensurePage: async () => ({
+      pageId: "page-1",
+      fileId: "file-1",
+      created: true,
+    }),
+    sweepBoards: async (_page, keep) => {
+      swept.push(keep);
+      return [];
+    },
     drawScreen: async (request) => {
       drawn.push(request);
       return {
@@ -33,7 +46,7 @@ function fakeCanvas(overrides: Partial<UiCanvas> = {}) {
     },
     ...overrides,
   };
-  return { canvas, drawn, exported };
+  return { canvas, drawn, exported, swept };
 }
 
 function agentReplaying(replies: Reply[], canvas: UiCanvas) {
@@ -126,6 +139,31 @@ describe("LoopUiDesignAgent", () => {
     ]);
   });
 
+  it("returns the Run's page for the Design Gate, and sweeps boards it no longer needs", async () => {
+    const { canvas } = fakeCanvas({
+      sweepBoards: async () => ["Screen: Old screen"],
+    });
+    const { agent } = agentReplaying([submit(goodUiSpec()), answer()], canvas);
+
+    const { page } = await agent.design(input);
+
+    expect(page).toEqual({
+      name: "#run-1 Todo app",
+      pageId: "page-1",
+      fileId: "file-1",
+      removedBoards: ["Screen: Old screen"],
+    });
+  });
+
+  it("keeps exactly the screens of the accepted spec when sweeping", async () => {
+    const { canvas, swept } = fakeCanvas();
+    const { agent } = agentReplaying([submit(goodUiSpec()), answer()], canvas);
+
+    await agent.design(input);
+
+    expect(swept).toEqual([["Health", "Todo list"]]);
+  });
+
   it("gives the model the Slice Plan and the API Contract operations", async () => {
     const { canvas } = fakeCanvas();
     const { agent, requests } = agentReplaying(
@@ -174,11 +212,12 @@ describe("LoopUiDesignAgent", () => {
       canvas,
     );
 
-    const { spec, screens } = await agent.design(input);
+    const { spec, screens, page } = await agent.design(input);
 
     expect(spec).toBeNull();
     expect(screens).toEqual([]);
     expect(drawn).toEqual([]);
+    expect(page).toBeNull();
   });
 
   it("checks the Penpot plugin before spending a Step", async () => {

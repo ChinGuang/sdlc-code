@@ -87,7 +87,7 @@ export function fakePenpot(fileName = "sdlc-code runs"): FakePenpot {
 
   const penpot = {
     get currentFile() {
-      return { name: fileName };
+      return { name: fileName, id: "file-abc" };
     },
     get currentPage() {
       return current;
