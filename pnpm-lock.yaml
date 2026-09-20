@@ -132,6 +132,12 @@ importers:
         specifier: ^9.6.0
         version: 9.6.0
 
+  packages/stack-profiles:
+    dependencies:
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
 packages:
 
   '@antfu/install-pkg@2.1.0':

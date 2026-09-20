@@ -5,7 +5,15 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/node_modules/**", "docs/**"] },
+  {
+    // Template apps are shipped to generated projects, not built here.
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "docs/**",
+      "packages/stack-profiles/templates/**",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
