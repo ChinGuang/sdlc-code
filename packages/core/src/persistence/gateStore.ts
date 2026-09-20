@@ -27,7 +27,8 @@ export interface GateStore {
   getOpenGate: (runId: string) => Gate | null;
   recordVerdict: (gateId: string, verdict: NewVerdict) => Verdict;
   listVerdicts: (gateId: string) => Verdict[];
-  passGate: (gateId: string) => Gate;
+  /** Closes an open Gate with what was decided. */
+  closeGate: (gateId: string, status: Exclude<GateStatus, "open">) => Gate;
 }
 
 type GateRow = {
@@ -120,12 +121,12 @@ export class SqliteGateStore implements GateStore {
       .all(gateId)
       .map((row) => toVerdict(row as VerdictRow));
 
-  passGate = (gateId: string): Gate =>
+  closeGate = (gateId: string, status: Exclude<GateStatus, "open">): Gate =>
     inTransaction(this.#ctx.db, () => {
       this.#requireOpen(gateId);
       this.#ctx.db
-        .prepare("UPDATE gates SET status = 'passed' WHERE id = ?")
-        .run(gateId);
+        .prepare("UPDATE gates SET status = ? WHERE id = ?")
+        .run(status, gateId);
       return this.#require(gateId);
     });
 
@@ -139,7 +140,8 @@ export class SqliteGateStore implements GateStore {
 
   #requireOpen(id: string): Gate {
     const gate = this.#require(id);
-    if (gate.status !== "open") throw new Error(`Gate ${id} is already passed`);
+    if (gate.status !== "open")
+      throw new Error(`Gate ${id} is already decided (${gate.status})`);
     return gate;
   }
 }

@@ -38,7 +38,7 @@ describe("SqliteGateStore", () => {
       decision: "approve",
       comments: "",
     });
-    const passed = store.passGate(gate.id);
+    const passed = store.closeGate(gate.id, "passed");
 
     expect(gate).toMatchObject({ runId, kind: "design", status: "open" });
     expect(passed.status).toBe("passed");
@@ -121,7 +121,7 @@ describe("SqliteGateStore", () => {
   it("refuses Verdicts and passing once a Gate is passed", () => {
     const { store, runId } = setup();
     const gate = store.openGate(runId, "design");
-    store.passGate(gate.id);
+    store.closeGate(gate.id, "passed");
 
     expect(() =>
       store.recordVerdict(gate.id, {
@@ -129,14 +129,16 @@ describe("SqliteGateStore", () => {
         decision: "approve",
         comments: "",
       }),
-    ).toThrow(/already passed/);
-    expect(() => store.passGate(gate.id)).toThrow(/already passed/);
+    ).toThrow("is already decided (passed)");
+    expect(() => store.closeGate(gate.id, "passed")).toThrow(/already decided/);
     expect(store.openGate(runId, "pr").kind).toBe("pr");
   });
 
   it("throws NotFoundError for an unknown Gate", () => {
     const { store } = setup();
 
-    expect(() => store.passGate("nope")).toThrow(/Gate nope not found/);
+    expect(() => store.closeGate("nope", "passed")).toThrow(
+      /Gate nope not found/,
+    );
   });
 });

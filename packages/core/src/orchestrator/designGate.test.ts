@@ -43,7 +43,7 @@ function setup(mode: RunMode = "gated") {
     documents,
     gates,
   });
-  return { gate, runs, documents, gates, runId };
+  return { gate, runs, documents, gates, db, runId };
 }
 
 const statuses = (
@@ -55,6 +55,14 @@ const statuses = (
       .listLatest(runId)
       .map((document) => [document.kind, document.status]),
   ) as Record<DocumentKind, string>;
+
+/** What a decided Gate recorded; GateStore only reads the open one. */
+const gateStatus = (db: ReturnType<typeof setup>["db"], gateId: string) =>
+  (
+    db.prepare("SELECT status FROM gates WHERE id = ?").get(gateId) as {
+      status: string;
+    }
+  ).status;
 
 const approveAll = (kinds: readonly DocumentKind[] = DOCUMENT_KINDS) =>
   kinds.map((documentKind) => ({
@@ -239,7 +247,76 @@ describe("DocumentDesignGate.decide", () => {
       { documentKind: "uiSpec", decision: "requestChanges", comments: "x" },
     ]);
 
-    expect(() => gate.open(runId)).toThrow(/uiSpec still awaits its revision/);
+    expect(() => gate.open(runId)).toThrow(
+      "uiSpec (changesRequested) still awaits its revision",
+    );
+  });
+
+  it("refuses to re-open the Gate while a Stale document has not been redone", () => {
+    const { gate, documents, runId } = setup();
+    gate.open(runId);
+    gate.decide(runId, [
+      ...approveAll(["systemDesign", "slicePlan", "uiSpec", "penpotDesign"]),
+      {
+        documentKind: "apiContract",
+        decision: "requestChanges",
+        comments: "x",
+      },
+    ]);
+    // The System Design Agent revises the contract, but the UI is still Stale.
+    documents.applyEvent(runId, "apiContract", "ownerRevises");
+
+    expect(() => gate.open(runId)).toThrow(
+      "uiSpec (stale), penpotDesign (stale) still awaits its revision",
+    );
+
+    for (const kind of ["uiSpec", "penpotDesign"] as const)
+      documents.applyEvent(runId, kind, "redo");
+    expect(gate.open(runId).gateId).not.toBeNull();
+  });
+
+  it("records what the Gate decided, for the Run's history", () => {
+    const { gate, gates, db, runId } = setup();
+    const first = gate.open(runId);
+    gate.decide(runId, [
+      ...approveAll([
+        "systemDesign",
+        "slicePlan",
+        "apiContract",
+        "penpotDesign",
+      ]),
+      { documentKind: "uiSpec", decision: "requestChanges", comments: "x" },
+    ]);
+
+    expect(gates.getOpenGate(runId)).toBeNull();
+    expect(gates.listVerdicts(first.gateId!)).toHaveLength(5);
+    expect(gateStatus(db, first.gateId!)).toBe("changesRequested");
+  });
+
+  it("checkpoints the Approved Documents when the Gate passes (diagram 5)", () => {
+    const { gate, runs, runId } = setup();
+    gate.open(runId);
+
+    gate.decide(runId, approveAll());
+
+    expect(runs.latestCheckpoint(runId)?.payload).toEqual({
+      reason: "Approved Documents",
+      documents: DOCUMENT_KINDS.map((kind) => ({
+        kind,
+        version: 1,
+        status: "approved",
+      })),
+    });
+  });
+
+  it("checkpoints the accepted documents in auto mode", () => {
+    const { gate, runs, runId } = setup("auto");
+
+    gate.open(runId);
+
+    expect(runs.latestCheckpoint(runId)?.payload).toMatchObject({
+      reason: "documents accepted (auto mode)",
+    });
   });
 
   it("refuses a verdict for a document that was not judged, or judged twice", () => {

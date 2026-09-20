@@ -56,7 +56,8 @@ export type RunDocument = {
 
 export type GateKind = "design" | "pr";
 
-export type GateStatus = "open" | "passed";
+/** A Gate is open until it is decided: passed, or sent back with comments. */
+export type GateStatus = "open" | "passed" | "changesRequested";
 
 export type Gate = {
   id: string;

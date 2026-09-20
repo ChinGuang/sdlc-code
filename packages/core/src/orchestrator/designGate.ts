@@ -80,10 +80,16 @@ export class DocumentDesignGate implements DesignGate {
 
   open = (runId: string): GateOpened =>
     this.#inRun(runId, (run) => {
+      // CONTEXT.md "Stale": documents sent back or made Stale are redone
+      // before the Gate re-opens.
       const unrevised = this.#documents
         .listLatest(runId)
-        .filter((document) => document.status === "changesRequested")
-        .map((document) => document.kind);
+        .filter(
+          (document) =>
+            document.status === "changesRequested" ||
+            document.status === "stale",
+        )
+        .map((document) => `${document.kind} (${document.status})`);
       if (unrevised.length > 0)
         throw new Error(
           `Run ${runId} cannot open the Design Gate: ${unrevised.join(", ")} still awaits its revision.`,
@@ -94,6 +100,7 @@ export class DocumentDesignGate implements DesignGate {
         for (const kind of this.#awaitingVerdict(runId))
           this.#documents.applyEvent(runId, kind, "approved");
         this.#runs.applyEvent(runId, { type: "documentsReady" });
+        this.#checkpoint(runId, "documents accepted (auto mode)");
         return { mode: "auto", gateId: null };
       }
       this.#runs.applyEvent(runId, { type: "documentsReady" });
@@ -128,15 +135,16 @@ export class DocumentDesignGate implements DesignGate {
           verdict.decision === "approve" ? "approved" : "changesRequested",
         );
       }
-      this.#gates.passGate(gate.id);
-
       const changed = verdicts.filter(
         (verdict) => verdict.decision === "requestChanges",
       );
       if (changed.length === 0) {
+        this.#gates.closeGate(gate.id, "passed");
         this.#runs.applyEvent(runId, { type: "designApproved" });
+        this.#checkpoint(runId, "Approved Documents");
         return { outcome: "approved", revisions: [], staleDocuments: [] };
       }
+      this.#gates.closeGate(gate.id, "changesRequested");
 
       const stale = changed.flatMap((verdict) =>
         this.#documents.markUpstreamChanged(runId, verdict.documentKind),
@@ -155,17 +163,31 @@ export class DocumentDesignGate implements DesignGate {
     });
 
   documentChanged = (runId: string, kind: DocumentKind): DocumentChanged =>
-    this.#inRun(runId, () => {
+    this.#inRun(runId, (run) => {
       // A new version of an Approved Document: it goes back to drafting…
       this.#documents.applyEvent(runId, kind, "changedAfterApproval");
       // …and whatever was built on it is Stale (CONTEXT.md "Stale").
       const stale = this.#documents.markUpstreamChanged(runId, kind);
-      this.#runs.applyEvent(runId, { type: "issueOwnedByDesignAgent" });
+      // Only a Run that is building needs sending back; one that is already
+      // designing (or escalated, where the human chose to edit documents) is
+      // there for this very reason.
+      if (run.status === "building")
+        this.#runs.applyEvent(runId, { type: "issueOwnedByDesignAgent" });
       return {
         staleDocuments: stale,
         revisions: stale.map((staleKind) => revisionFor(staleKind, "")),
       };
     });
+
+  /** Everything needed to continue this Run, at a Design Phase boundary (T18 defines the shape). */
+  #checkpoint(runId: string, reason: string): void {
+    this.#runs.saveCheckpoint(runId, {
+      reason,
+      documents: this.#documents
+        .listLatest(runId)
+        .map(({ kind, version, status }) => ({ kind, version, status })),
+    });
+  }
 
   /** The documents a human still has to judge: everything now in review. */
   #awaitingVerdict(runId: string): DocumentKind[] {
@@ -185,9 +207,12 @@ export class DocumentDesignGate implements DesignGate {
 
   /** One transaction per Gate action: a rejected step must change nothing. */
   #inRun<T>(runId: string, work: (run: Run) => T): T {
-    const run = this.#runs.getRun(runId);
-    if (!run) throw new NotFoundError("Run", runId);
-    return inTransaction(this.#db, () => work(run));
+    // Read inside the transaction: the Run must not change under the decision.
+    return inTransaction(this.#db, () => {
+      const run = this.#runs.getRun(runId);
+      if (!run) throw new NotFoundError("Run", runId);
+      return work(run);
+    });
   }
 }
 
