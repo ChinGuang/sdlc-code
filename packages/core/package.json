@@ -12,7 +12,10 @@
     "typecheck": "tsc --noEmit",
     "config:check": "tsx --env-file-if-exists=../../.env scripts/configCheck.ts",
     "agent:smoke": "tsx --env-file-if-exists=../../.env scripts/agentSmoke.ts",
-    "design:smoke": "tsx --env-file-if-exists=../../.env scripts/designSmoke.ts"
+    "design:smoke": "tsx --env-file-if-exists=../../.env scripts/designSmoke.ts",
+    "design-phase:smoke": "tsx --env-file-if-exists=../../.env scripts/designPhaseSmoke.ts",
+    "penpot:smoke": "tsx --env-file-if-exists=../../.env scripts/penpotSmoke.ts",
+    "penpot:probe": "tsx --env-file-if-exists=../../.env scripts/penpotSuspendProbe.ts"
   },
   "dependencies": {
     "@sdlc-code/clients": "workspace:*",

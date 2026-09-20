@@ -13,5 +13,11 @@
     "sandbox:whoami": "tsx --env-file-if-exists=../../.env scripts/sandboxWhoami.ts",
     "models:list": "tsx --env-file-if-exists=../../.env scripts/listModels.ts",
     "github:access": "tsx --env-file-if-exists=../../.env scripts/githubAccess.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "devDependencies": {
+    "zod": "^4.6.5"
   }
 }
