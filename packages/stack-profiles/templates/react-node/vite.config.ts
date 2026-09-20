@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
@@ -13,8 +13,9 @@ export default defineConfig({
     },
   },
   test: {
-    // jsdom suits both sides: server tests call the app through supertest.
+    // Screens need a DOM; the API and its tests belong in Node.
     environment: "jsdom",
+    environmentMatchGlobs: [["server/**", "node"]],
     include: ["server/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["./src/testSetup.ts"],
   },

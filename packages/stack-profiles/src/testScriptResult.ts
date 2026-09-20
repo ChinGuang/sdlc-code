@@ -11,12 +11,22 @@ export const RESULT_MARKER = "SDLC_RESULT ";
 export const TEST_STEPS = ["install", "unit", "boot", "smoke", "stop"] as const;
 export type TestStepName = (typeof TEST_STEPS)[number];
 
+/** A test the step reported as failing, for an Issue Report (T16). */
+const TestFailure = z.object({
+  /** Full name, e.g. "GET /health > reports the API and its database". */
+  test: z.string().min(1),
+  file: z.string().default(""),
+  message: z.string().default(""),
+});
+
 const TestStep = z.object({
-  name: z.string().min(1),
+  name: z.enum(TEST_STEPS),
   ok: z.boolean(),
   durationMs: z.number().min(0),
-  /** The tail of the step's output; the whole log stays in the Test Run. */
+  /** The tail of the output of the step; the whole log stays in the Test Run. */
   output: z.string().default(""),
+  /** Named failures, where the step can report them (the unit tests). */
+  failures: z.array(TestFailure).default([]),
 });
 
 export const TestScriptResultSchema = z.object({
@@ -26,6 +36,7 @@ export const TestScriptResultSchema = z.object({
   durationMs: z.number().min(0),
 });
 
+export type TestFailure = z.infer<typeof TestFailure>;
 export type TestStep = z.infer<typeof TestStep>;
 export type TestScriptResult = z.infer<typeof TestScriptResultSchema>;
 
@@ -64,4 +75,17 @@ export function parseTestScriptOutput(output: string): ParsedTestScript {
 /** The steps that failed, for an Issue Report (T16). */
 export function failedSteps(result: TestScriptResult): TestStep[] {
   return result.steps.filter((step) => !step.ok);
+}
+
+/**
+ * What went wrong, as short stable lines. A Loop is an Issue Report matching an
+ * earlier one (CONTEXT.md "Loop"), so this names the failing tests where the
+ * step could report them, and the step itself otherwise.
+ */
+export function failureSignature(result: TestScriptResult): string[] {
+  return failedSteps(result).flatMap((step) =>
+    step.failures.length > 0
+      ? step.failures.map((failure) => `${step.name}: ${failure.test}`)
+      : [`${step.name}: step failed`],
+  );
 }

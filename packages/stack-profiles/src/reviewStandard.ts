@@ -1,7 +1,8 @@
 /**
  * The baseline Review Standard of a Stack Profile (CONTEXT.md "Review Standard"):
- * the Rules linting and the Code Review Agent cite. A user's own standards layer
- * on top of these in T19; only blocking Findings send work back.
+ * the Rules the Code Review Agent cites. T19 runs ESLint and tsc first, so
+ * these deliberately cover what a linter cannot see. A user adds their own
+ * standards on top in T19; only blocking Findings send work back.
  */
 
 export const RULE_SEVERITIES = ["minor", "major", "blocking"] as const;
@@ -34,13 +35,13 @@ export const BASELINE_RULES: readonly Rule[] = [
   {
     id: "CLEAN-02",
     description:
-      "No commented-out code, unused exports, unused variables or leftover console.log.",
+      "No commented-out code, dead files or exports nothing imports; linters see unused locals, not these.",
     severity: "minor",
   },
   {
     id: "CLEAN-03",
     description:
-      "A function does one thing; extract a helper rather than nesting more than three levels.",
+      "A function does one thing: its name describes the whole of what it does, without an 'and'.",
     severity: "minor",
   },
   {

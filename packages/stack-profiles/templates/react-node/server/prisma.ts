@@ -1,7 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-/** Local SQLite file unless the environment names another database. */
-export const databaseUrl = process.env.DATABASE_URL ?? "file:./dev.db";
-
-/** One client per process; tests reuse it (STRUCT-03: server only). */
-export const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
+/** One client per process, on the database the environment names (STRUCT-03). */
+export const prisma = new PrismaClient({
+  datasourceUrl: process.env.DATABASE_URL ?? "file:./dev.db",
+});

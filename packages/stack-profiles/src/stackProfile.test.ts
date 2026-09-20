@@ -86,7 +86,8 @@ describe("templateFiles", () => {
   it("serves GET /health from the template, as the Walking Skeleton requires", () => {
     const app = files.find((file) => file.path === "server/app.ts")!.contents;
 
-    expect(app).toContain('app.get("/health"');
+    expect(app).toContain('"/health"');
+    expect(app).toContain('database === "up"');
   });
 
   it("keeps secrets out of the template (SEC-01)", () => {
@@ -142,7 +143,15 @@ describe("parseTestScriptOutput", () => {
   const result = {
     profile: "react-node",
     passed: true,
-    steps: [{ name: "unit", ok: true, durationMs: 12, output: "2 passed" }],
+    steps: [
+      {
+        name: "unit" as const,
+        ok: true,
+        durationMs: 12,
+        output: "2 passed",
+        failures: [],
+      },
+    ],
     durationMs: 1200,
   };
   const line = `${RESULT_MARKER}${JSON.stringify(result)}`;
