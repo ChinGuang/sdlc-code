@@ -27,3 +27,4 @@ export * from "./agents/uiDesign/validateUiSpec.js";
 export * from "./agents/uiDesign/penpotRender.js";
 export * from "./agents/uiDesign/uiCanvas.js";
 export * from "./agents/uiDesign/uiDesignAgent.js";
+export * from "./orchestrator/designGate.js";
