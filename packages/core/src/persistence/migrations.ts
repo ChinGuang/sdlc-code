@@ -113,4 +113,18 @@ export const MIGRATIONS: readonly string[] = [
     created_at TEXT NOT NULL
   );
   `,
+
+  /* 2: a closed Gate records what was decided, not just that it is over */ `
+  CREATE TABLE gates_new (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('design', 'pr')),
+    status TEXT NOT NULL CHECK (status IN ('open', 'passed', 'changesRequested')),
+    opened_at TEXT NOT NULL
+  );
+  INSERT INTO gates_new SELECT id, run_id, kind, status, opened_at FROM gates;
+  DROP TABLE gates;
+  ALTER TABLE gates_new RENAME TO gates;
+  CREATE UNIQUE INDEX one_open_gate_per_run ON gates (run_id) WHERE status = 'open';
+  `,
 ];
