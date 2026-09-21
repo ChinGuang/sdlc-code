@@ -36,6 +36,7 @@ Details on how each is used will be added as the project is built.
 | Path | What |
 |---|---|
 | `packages/core` | Domain logic (agents, Orchestrator, Runs) |
+| `packages/stack-profiles` | Starter templates, their test script and baseline Review Standard |
 | `packages/clients` | Token Factory, Sandboxes and Penpot MCP clients |
 | `apps/server` | Local HTTP API on NestJS (127.0.0.1 only) |
 | `apps/web` | Dashboard (Vite + React) |
