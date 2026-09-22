@@ -48,3 +48,4 @@ export * from "./orchestrator/ownerResolution.js";
 export * from "./orchestrator/ownerJudge.js";
 export * from "./orchestrator/retryPolicy.js";
 export * from "./orchestrator/issueRouting.js";
+export * from "./orchestrator/sliceRunner.js";
