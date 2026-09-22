@@ -8,7 +8,7 @@ import { REACT_NODE, templateFiles } from "@sdlc-code/stack-profiles";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatAgentLoop } from "../../agentLoop/agentLoop.js";
 import {
   GitWorkspaceManager,
@@ -23,6 +23,11 @@ import {
   type CodingAgentOptions,
   type CodingInput,
 } from "./codingAgent.js";
+
+// These tests drive real git (many process spawns per test): 2-4s each alone on
+// Windows, and far longer when every Vitest project runs at once. The time is
+// real work, so this file alone gets a longer timeout than the 5s default.
+vi.setConfig({ testTimeout: 60_000 });
 
 type Reply = { content?: string | null; toolCalls?: ToolCall[] };
 
