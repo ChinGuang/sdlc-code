@@ -43,6 +43,7 @@ describe("SqliteRunStore runs", () => {
       status: "designing",
       tokensUsed: 0,
       pullRequest: null,
+      failure: null,
       createdAt: "2026-09-20T00:00:00.000Z",
       updatedAt: "2026-09-20T00:00:00.000Z",
     });
@@ -115,6 +116,27 @@ describe("SqliteRunStore runs", () => {
       url: "https://github.com/ChinGuang/sdlc-code-demo-todo/pull/12",
       draft: true,
     });
+  });
+
+  it("records why a Run failed, apart from its Checkpoints", () => {
+    const store = makeStore();
+    const { id } = store.createRun(newRun);
+
+    const run = store.recordFailure(id, {
+      trigger: "loop",
+      summary: "The same failure came back after a fix.",
+      slice: "Todos",
+      reports: [{ step: "unit" }],
+    });
+
+    expect(run.failure).toEqual({
+      trigger: "loop",
+      summary: "The same failure came back after a fix.",
+      slice: "Todos",
+      reports: [{ step: "unit" }],
+    });
+    expect(store.latestCheckpoint(id)).toBeNull();
+    expect(store.createRun(newRun).failure).toBeNull();
   });
 
   it("throws NotFoundError for an unknown Run", () => {

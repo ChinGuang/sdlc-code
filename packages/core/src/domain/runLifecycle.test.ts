@@ -14,6 +14,7 @@ import {
 const LEGAL: Array<[RunStatus, RunEvent, RunMode, RunStatus]> = [
   ["designing", { type: "documentsReady" }, "gated", "awaitingDesignGate"],
   ["designing", { type: "documentsReady" }, "auto", "building"],
+  ["designing", { type: "designFailed" }, "auto", "failed"],
   [
     "awaitingDesignGate",
     { type: "designChangesRequested" },
@@ -75,6 +76,7 @@ const LEGAL: Array<[RunStatus, RunEvent, RunMode, RunStatus]> = [
 /** One sample of every event shape, including every payload variant. */
 const ALL_EVENTS: RunEvent[] = [
   { type: "documentsReady" },
+  { type: "designFailed" },
   { type: "designChangesRequested" },
   { type: "designApproved" },
   { type: "issueOwnedByDesignAgent" },

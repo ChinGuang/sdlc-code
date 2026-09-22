@@ -5,6 +5,7 @@ import { assertSliceMove } from "./sliceLifecycle.js";
 
 const LEGAL: Array<[SliceStatus, SliceStatus]> = [
   ["pending", "building"],
+  ["pending", "skipped"],
   ["building", "testing"],
   ["testing", "building"],
   ["testing", "passed"],

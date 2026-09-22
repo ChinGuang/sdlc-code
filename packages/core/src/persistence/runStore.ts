@@ -2,6 +2,7 @@ import type {
   Checkpoint,
   NewRun,
   Run,
+  RunFailure,
   RunPullRequest,
 } from "../domain/entities.js";
 import {
@@ -31,6 +32,8 @@ export interface RunStore {
   applyEvent: (id: string, event: RunEvent) => Run;
   addTokensUsed: (id: string, tokens: number) => Run;
   setPullRequest: (id: string, pullRequest: RunPullRequest) => Run;
+  /** Records why the Run failed; it is not a Checkpoint, nothing resumes from it. */
+  recordFailure: (id: string, failure: RunFailure) => Run;
   saveCheckpoint: (runId: string, payload: unknown) => Checkpoint;
   latestCheckpoint: (runId: string) => Checkpoint | null;
 }
@@ -50,6 +53,7 @@ type RunRow = {
   pr_number: number | null;
   pr_url: string | null;
   pr_draft: number | null;
+  failure: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -133,6 +137,15 @@ export class SqliteRunStore implements RunStore {
     });
   };
 
+  recordFailure = (id: string, failure: RunFailure): Run =>
+    inTransaction(this.#ctx.db, () => {
+      this.#require(id);
+      this.#ctx.db
+        .prepare("UPDATE runs SET failure = ?, updated_at = ? WHERE id = ?")
+        .run(JSON.stringify(failure), this.#ctx.now(), id);
+      return this.#require(id);
+    });
+
   setPullRequest = (id: string, pullRequest: RunPullRequest): Run =>
     inTransaction(this.#ctx.db, () => {
       this.#require(id);
@@ -212,6 +225,8 @@ function toRun(row: RunRow): Run {
             url: row.pr_url,
             draft: fromFlag(row.pr_draft),
           },
+    failure:
+      row.failure === null ? null : (JSON.parse(row.failure) as RunFailure),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

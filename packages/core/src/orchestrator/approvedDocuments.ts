@@ -5,7 +5,7 @@
  */
 import type { ApprovedDocuments } from "../agents/coding/codingContext.js";
 import type { Design } from "../agents/systemDesign/design.js";
-import { UiSpecSchema, type UiSpec } from "../agents/uiDesign/uiSpec.js";
+import { UiSpecSchema } from "../agents/uiDesign/uiSpec.js";
 import type { DocumentKind } from "../domain/documentLifecycle.js";
 import type { DocumentStore } from "../persistence/documentStore.js";
 
@@ -21,17 +21,25 @@ export function loadApprovedDocuments(
   documents: DocumentStore,
   runId: string,
 ): ApprovedDocuments {
-  const content = (kind: DocumentKind): string => {
-    const document = documents.getLatest(runId, kind);
-    if (!document) throw new MissingDocumentError(runId, kind);
-    return document.content;
-  };
+  const content = (kind: DocumentKind) =>
+    documentContent(documents, runId, kind);
   return {
     systemDesign: content("systemDesign"),
     slicePlan: JSON.parse(content("slicePlan")) as Design["slicePlan"],
     apiContract: JSON.parse(content("apiContract")) as Design["apiContract"],
-    uiSpec: UiSpecSchema.parse(JSON.parse(content("uiSpec"))) as UiSpec,
+    uiSpec: UiSpecSchema.parse(JSON.parse(content("uiSpec"))),
   };
+}
+
+/** The latest version's content; throws when the Run has no such document. */
+export function documentContent(
+  documents: DocumentStore,
+  runId: string,
+  kind: DocumentKind,
+): string {
+  const document = documents.getLatest(runId, kind);
+  if (!document) throw new MissingDocumentError(runId, kind);
+  return document.content;
 }
 
 /**

@@ -35,7 +35,7 @@ import type {
   GateDecision,
   Revision,
 } from "./designGate.js";
-import type { DesignPhase } from "./designPhase.js";
+import { DesignPhaseError, type DesignPhase } from "./designPhase.js";
 import type { SliceHistory, SliceRunner } from "./sliceRunner.js";
 
 /** Where a Run stopped, and why. */
@@ -144,17 +144,16 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     runId: string,
     resolution: EscalationResolution,
   ): void => {
-    const { escalations, runs, slices, gate } = this.#options;
+    const { escalations, runs, slices } = this.#options;
     const escalation = escalations.getOpenEscalation(runId);
     if (!escalation) throw new Error(`Run ${runId} has no open Escalation.`);
     // Check everything before changing anything.
     if (resolution.choice === "retryWithHint" && !resolution.hint.trim())
       throw new Error("A retry needs a hint for the Coding Agents.");
-    if (
-      resolution.choice === "editDocuments" &&
-      resolution.edits.every((edit) => !edit.comments.trim())
-    )
-      throw new Error("Say what to change in at least one document.");
+    const edits =
+      resolution.choice === "editDocuments"
+        ? this.#editsToMake(runId, resolution.edits)
+        : [];
     const current = this.#currentSlice(runId);
 
     escalations.resolveEscalation(escalation.id, {
@@ -177,28 +176,85 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       case "skipSlice":
         if (current) {
           slices.moveSlice(current.id, "skipped");
-          this.#closeTasks(runId, current.id, "failed");
+          this.#failTasks(runId, current.id);
         }
         return;
       case "editDocuments":
-        for (const edit of resolution.edits.filter((e) => e.comments.trim())) {
-          gate.documentChanged(runId, edit.documentKind);
-          memory.revisions.push({
-            agentRole: documentOwner(edit.documentKind),
-            documentKind: edit.documentKind,
-            comments: edit.comments,
-          });
-        }
+        for (const edit of edits) this.#reopen(runId, edit);
         return;
       case "abort":
-        if (current) this.#closeTasks(runId, current.id, "failed");
+        if (current) this.#failTasks(runId, current.id);
         return;
     }
   };
 
+  /**
+   * A person's document edits, checked before anything changes: one Revision
+   * per document, and only the text documents (the Penpot design follows the
+   * UI Spec).
+   */
+  #editsToMake(
+    runId: string,
+    edits: ReadonlyArray<{ documentKind: DocumentKind; comments: string }>,
+  ): Revision[] {
+    const byKind = new Map<DocumentKind, string[]>();
+    for (const { documentKind, comments } of edits) {
+      if (!comments.trim()) continue;
+      if (documentKind === "penpotDesign")
+        throw new Error(
+          "Edit the UI Spec instead; the Penpot design is redrawn from it.",
+        );
+      if (!this.#options.documents.getLatest(runId, documentKind))
+        throw new Error(`Run ${runId} has no ${documentKind} to edit.`);
+      byKind.set(documentKind, [
+        ...(byKind.get(documentKind) ?? []),
+        comments.trim(),
+      ]);
+    }
+    if (byKind.size === 0)
+      throw new Error("Say what to change in at least one document.");
+    return [...byKind].map(([documentKind, comments]) => ({
+      agentRole: documentOwner(documentKind),
+      documentKind,
+      comments: comments.join("\n"),
+    }));
+  }
+
+  /**
+   * Sends a document back to its owner. An Approved Document goes back to
+   * drafting, which makes the documents built on it Stale; one already Stale
+   * or sent back is revised as it is. Either way the Run goes to designing.
+   */
+  #reopen(runId: string, revision: Revision): void {
+    if (
+      this.#options.documents.getLatest(runId, revision.documentKind)
+        ?.status === "approved"
+    )
+      this.#options.gate.documentChanged(runId, revision.documentKind);
+    if (this.#run(runId).status === "building")
+      this.#options.runs.applyEvent(runId, { type: "issueOwnedByDesignAgent" });
+    this.#memoryOf(runId).revisions.push(revision);
+  }
+
   async #design(run: Run): Promise<void> {
     const memory = this.#memoryOf(run.id);
-    const result = await this.#options.designPhase.run(run, memory.revisions);
+    let result;
+    try {
+      result = await this.#options.designPhase.run(run, memory.revisions);
+    } catch (error) {
+      if (!(error instanceof DesignPhaseError)) throw error;
+      // With a person, the Run waits in designing, its revisions kept, and
+      // advance tries again; with no one to ask, the Run fails.
+      if (run.mode === "gated") throw error;
+      this.#options.runs.applyEvent(run.id, { type: "designFailed" });
+      this.#options.runs.recordFailure(run.id, {
+        trigger: "design",
+        summary: error.message,
+        slice: null,
+        reports: [],
+      });
+      return;
+    }
     memory.revisions = [];
     if (result.screenImages.size > 0) memory.screenImages = result.screenImages;
   }
@@ -251,13 +307,10 @@ export class AgentRunOrchestrator implements RunOrchestrator {
         return;
       case "designIssue":
         memory.histories.set(current.id, outcome.history);
-        for (const { owner, reports } of outcome.revisions) {
-          const kind = REVISED_DOCUMENT[owner];
-          // Moves the Run back to designing, and makes dependants Stale.
-          this.#options.gate.documentChanged(run.id, kind);
-          memory.revisions.push({
+        for (const { owner, reports } of outcome.revisions)
+          this.#reopen(run.id, {
             agentRole: owner,
-            documentKind: kind,
+            documentKind: REVISED_DOCUMENT[owner],
             comments: reports
               .map(
                 (report) =>
@@ -265,7 +318,6 @@ export class AgentRunOrchestrator implements RunOrchestrator {
               )
               .join("\n"),
           });
-        }
         return;
     }
   }
@@ -287,14 +339,13 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       return;
     }
     const current = this.#currentSlice(run.id);
-    if (current) this.#closeTasks(run.id, current.id, "failed");
+    if (current) this.#failTasks(run.id, current.id);
     // The failure report the Draft PR will carry (T20).
-    runs.saveCheckpoint(run.id, {
-      reason: "Run failed",
+    runs.recordFailure(run.id, {
       trigger,
       summary,
       slice: current?.title ?? null,
-      reports,
+      reports: [...reports],
     });
   }
 
@@ -309,10 +360,11 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     );
   }
 
-  #closeTasks(runId: string, sliceId: string, status: "failed"): void {
+  /** The Slice's unfinished Tasks end as failed: it was skipped or the Run ended. */
+  #failTasks(runId: string, sliceId: string): void {
     for (const task of this.#options.tasks.listTasks(runId))
       if (task.sliceId === sliceId && task.status === "running")
-        this.#options.tasks.setTaskStatus(task.id, status);
+        this.#options.tasks.setTaskStatus(task.id, "failed");
   }
 
   #run(runId: string): Run {

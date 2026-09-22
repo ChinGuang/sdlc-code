@@ -69,6 +69,10 @@ function setup(options: {
   mode?: RunMode;
   /** What the Slice runner returns, call by call; passes when it runs out. */
   outcomes?: SliceOutcome[];
+  /** The Slice Plan a revision of the System Design comes back with. */
+  revisedPlan?: Design["slicePlan"];
+  /** Design calls that fail (no valid design), by call number from 1. */
+  failDesign?: number[];
 }) {
   const db = openDatabase(":memory:");
   const store = { db };
@@ -101,7 +105,14 @@ function setup(options: {
   const systemDesign: SystemDesignAgent = {
     design: async (input) => {
       designCalls.push(input);
+      if (options.failDesign?.includes(designCalls.length))
+        return {
+          design: null,
+          loop: { ...loop, workingMemory: "- mermaid kept failing" },
+        };
       const design: Design = goodDesign();
+      if (input.revision && options.revisedPlan)
+        design.slicePlan = options.revisedPlan;
       // A revision changes the Contract's title, so it is a new version.
       if (input.revision)
         (design.apiContract.info as { title: string }).title =
@@ -432,8 +443,7 @@ describe("AgentRunOrchestrator: Escalations", () => {
 
     expect(progress).toEqual({ finished: "failed" });
     expect(escalations.listEscalations(runId)).toEqual([]);
-    expect(runs.latestCheckpoint(runId)?.payload).toMatchObject({
-      reason: "Run failed",
+    expect(runs.getRun(runId)!.failure).toMatchObject({
       trigger: "loop",
       slice: "Walking Skeleton",
     });
@@ -476,5 +486,195 @@ describe("AgentRunOrchestrator: a Slice finds a design problem", () => {
       plan: { title: "Todos" },
       history: HISTORY,
     });
+  });
+});
+
+// Scenarios from the T17c review, each broken in the first version.
+describe("AgentRunOrchestrator: revisions that touch several documents", () => {
+  it("revises both the API Contract and the UI Spec when a Slice blames both", async () => {
+    const { orchestrator, runId, status, designCalls, uiCalls } =
+      await approved({
+        outcomes: [
+          { status: "passed", commit: "c1", attempts: 1 },
+          {
+            status: "designIssue",
+            revisions: [
+              {
+                owner: "systemDesign",
+                reports: [issueReport({ error: "no DELETE" })],
+              },
+              {
+                owner: "uiDesign",
+                reports: [issueReport({ error: "no delete button" })],
+              },
+            ],
+            history: HISTORY,
+          },
+        ],
+      });
+
+    await expect(orchestrator.advance(runId)).resolves.toEqual({
+      waitingFor: "designGate",
+    });
+    expect(status()).toBe("awaitingDesignGate");
+    expect(designCalls.at(-1)!.revision?.comments[0]).toContain("no DELETE");
+    expect(uiCalls.at(-1)!.revision?.comments[0]).toContain("no delete button");
+  });
+
+  it("edits several documents at once, merging repeated ones", async () => {
+    const { orchestrator, runId, designCalls, uiCalls } = await approved({
+      outcomes: [escalatedWith()],
+    });
+    await orchestrator.advance(runId);
+
+    orchestrator.resolveEscalation(runId, {
+      choice: "editDocuments",
+      edits: [
+        { documentKind: "apiContract", comments: "Add DELETE /todos/{id}." },
+        { documentKind: "uiSpec", comments: "Add a delete button." },
+        { documentKind: "apiContract", comments: "Return 204." },
+      ],
+    });
+    await expect(orchestrator.advance(runId)).resolves.toEqual({
+      waitingFor: "designGate",
+    });
+
+    expect(designCalls.at(-1)!.revision?.comments).toEqual([
+      "Add DELETE /todos/{id}.\nReturn 204.",
+    ]);
+    expect(uiCalls.at(-1)!.revision?.comments).toEqual([
+      "Add a delete button.",
+    ]);
+  });
+
+  it("refuses to edit the Penpot design, changing nothing", async () => {
+    const { orchestrator, runId, status } = await approved({
+      outcomes: [escalatedWith()],
+    });
+    await orchestrator.advance(runId);
+
+    expect(() =>
+      orchestrator.resolveEscalation(runId, {
+        choice: "editDocuments",
+        edits: [
+          { documentKind: "uiSpec", comments: "Bigger buttons." },
+          { documentKind: "penpotDesign", comments: "Move the logo." },
+        ],
+      }),
+    ).toThrow(/Edit the UI Spec instead/);
+    expect(status()).toBe("escalated");
+  });
+
+  it("only asks the UI Design Agent when only the UI Spec is sent back", async () => {
+    const { orchestrator, runId, designCalls, uiCalls } = setup({});
+    await orchestrator.advance(runId);
+
+    orchestrator.decideDesign(runId, [
+      ...approveAll([
+        "systemDesign",
+        "slicePlan",
+        "apiContract",
+        "penpotDesign",
+      ]),
+      {
+        documentKind: "uiSpec",
+        decision: "requestChanges",
+        comments: "Darker.",
+      },
+    ]);
+    await orchestrator.advance(runId);
+
+    expect(designCalls).toHaveLength(1);
+    expect(uiCalls).toHaveLength(2);
+  });
+});
+
+describe("AgentRunOrchestrator: a revised Slice Plan", () => {
+  it("asks about a started Slice the plan dropped, then builds the plan's new one", async () => {
+    const { orchestrator, runId, sliceStatuses, runnerCalls, documents } =
+      await approved({
+        revisedPlan: [
+          goodDesign().slicePlan[0]!,
+          { ...goodDesign().slicePlan[1]!, title: "Todo list" },
+        ],
+        outcomes: [
+          { status: "passed", commit: "c1", attempts: 1 },
+          {
+            status: "designIssue",
+            revisions: [{ owner: "systemDesign", reports: [issueReport()] }],
+            history: HISTORY,
+          },
+        ],
+      });
+    await orchestrator.advance(runId);
+    // Approve whatever the Gate re-opened for.
+    const inReview = DOCUMENT_KINDS.filter(
+      (kind) => documents.getLatest(runId, kind)?.status === "inReview",
+    );
+    orchestrator.decideDesign(runId, approveAll(inReview));
+
+    // "Todos" had started, so it keeps its record, and a person decides.
+    await expect(orchestrator.advance(runId)).resolves.toMatchObject({
+      waitingFor: "escalation",
+      escalation: {
+        summary: expect.stringContaining(
+          '"Todos" is no longer in the Slice Plan',
+        ),
+      },
+    });
+
+    orchestrator.resolveEscalation(runId, { choice: "skipSlice" });
+    await expect(orchestrator.advance(runId)).resolves.toEqual({
+      waitingFor: "codeReview",
+    });
+    expect(sliceStatuses()).toEqual([
+      ["Walking Skeleton", "passed"],
+      ["Todos", "skipped"],
+      ["Todo list", "passed"],
+    ]);
+    expect(runnerCalls.at(-1)!.plan.title).toBe("Todo list");
+  });
+});
+
+describe("AgentRunOrchestrator: a design agent fails", () => {
+  it("fails the Run in auto mode, saying why", async () => {
+    const { orchestrator, runId, runs } = setup({
+      mode: "auto",
+      failDesign: [1],
+    });
+
+    await expect(orchestrator.advance(runId)).resolves.toEqual({
+      finished: "failed",
+    });
+    expect(runs.getRun(runId)!.failure).toMatchObject({
+      trigger: "design",
+      slice: null,
+      summary: expect.stringContaining("mermaid kept failing"),
+    });
+  });
+
+  it("waits in designing with a person, and tries again with the same revisions", async () => {
+    const { orchestrator, runId, status, designCalls } = setup({
+      failDesign: [2],
+    });
+    await orchestrator.advance(runId);
+    orchestrator.decideDesign(runId, [
+      ...approveAll(["systemDesign", "slicePlan", "uiSpec", "penpotDesign"]),
+      {
+        documentKind: "apiContract",
+        decision: "requestChanges",
+        comments: "Add paging.",
+      },
+    ]);
+
+    await expect(orchestrator.advance(runId)).rejects.toThrow(
+      /no valid design/,
+    );
+    expect(status()).toBe("designing");
+
+    await expect(orchestrator.advance(runId)).resolves.toEqual({
+      waitingFor: "designGate",
+    });
+    expect(designCalls.at(-1)!.revision?.comments).toEqual(["Add paging."]);
   });
 });

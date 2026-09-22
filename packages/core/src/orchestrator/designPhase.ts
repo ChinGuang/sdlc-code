@@ -14,8 +14,8 @@ import type { DocumentKind } from "../domain/documentLifecycle.js";
 import type { Run } from "../domain/entities.js";
 import type { DocumentStore } from "../persistence/documentStore.js";
 import type { SliceStore } from "../persistence/sliceStore.js";
-import { storedDesign } from "./approvedDocuments.js";
-import type { DesignGate, GateOpened, Revision } from "./designGate.js";
+import { documentContent, storedDesign } from "./approvedDocuments.js";
+import type { DesignGate, Revision } from "./designGate.js";
 
 const SYSTEM_DESIGN_KINDS: readonly DocumentKind[] = [
   "systemDesign",
@@ -25,7 +25,6 @@ const SYSTEM_DESIGN_KINDS: readonly DocumentKind[] = [
 const UI_DESIGN_KINDS: readonly DocumentKind[] = ["uiSpec", "penpotDesign"];
 
 export type DesignPhaseResult = {
-  gate: GateOpened;
   /** The boards the UI Design Agent exported, by screen name (for `vision`). */
   screenImages: Map<string, ExportedImage>;
 };
@@ -79,7 +78,12 @@ export class AgentDesignPhase implements DesignPhase {
       revisions.some((revision) => kinds.includes(revision.documentKind)) ||
       kinds.some((kind) => {
         const status = documents.getLatest(run.id, kind)?.status;
-        return status === "stale" || status === "changesRequested";
+        // Drafting: sent back after approval, and not rewritten yet.
+        return (
+          status === "stale" ||
+          status === "changesRequested" ||
+          status === "drafting"
+        );
       });
 
     if (needs(SYSTEM_DESIGN_KINDS)) {
@@ -92,8 +96,11 @@ export class AgentDesignPhase implements DesignPhase {
               // The UI Spec is not needed here, and may not exist yet.
               previous: storedDesign({
                 ...loadDesignForUi(documents, run.id),
-                systemDesign:
-                  documents.getLatest(run.id, "systemDesign")?.content ?? "",
+                systemDesign: documentContent(
+                  documents,
+                  run.id,
+                  "systemDesign",
+                ),
               }),
               comments: comments(SYSTEM_DESIGN_KINDS),
             },
@@ -150,7 +157,8 @@ export class AgentDesignPhase implements DesignPhase {
       );
     }
 
-    return { gate: this.#options.gate.open(run.id), screenImages };
+    this.#options.gate.open(run.id);
+    return { screenImages };
   };
 
   /**
@@ -178,7 +186,7 @@ export class AgentDesignPhase implements DesignPhase {
     documents.saveContent(runId, kind, content);
   }
 
-  /** The Slices to build, saved while none has started. */
+  /** The Slices to build; once building began, the ones not started follow the plan. */
   #planSlices(
     runId: string,
     plan: ReadonlyArray<{ title: string; isWalkingSkeleton: boolean }>,
@@ -187,26 +195,19 @@ export class AgentDesignPhase implements DesignPhase {
     const started = slices
       .listSlices(runId)
       .some((slice) => slice.status !== "pending");
-    // Once building has begun, the Slices keep their records; a revised plan
-    // is matched to them by title when they are built.
-    if (!started)
-      slices.saveSlices(
-        runId,
-        plan.map(({ title, isWalkingSkeleton }) => ({
-          title,
-          isWalkingSkeleton,
-        })),
-      );
+    const planned = plan.map(({ title, isWalkingSkeleton }) => ({
+      title,
+      isWalkingSkeleton,
+    }));
+    if (started) slices.reconcileSlices(runId, planned);
+    else slices.saveSlices(runId, planned);
   }
 }
 
 /** The Slice Plan and API Contract the UI Design Agent designs against. */
 function loadDesignForUi(documents: DocumentStore, runId: string) {
-  const content = (kind: DocumentKind) => {
-    const document = documents.getLatest(runId, kind);
-    if (!document) throw new DesignPhaseError(`Run ${runId} has no ${kind}.`);
-    return document.content;
-  };
+  const content = (kind: DocumentKind) =>
+    documentContent(documents, runId, kind);
   return {
     slicePlan: JSON.parse(content("slicePlan")),
     apiContract: JSON.parse(content("apiContract")),

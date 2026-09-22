@@ -48,6 +48,32 @@ describe("SqliteSliceStore", () => {
     expect(() => store.saveSlices(runId, plan)).toThrow(/started building/);
   });
 
+  it("reconciles a revised plan: started Slices stay, the rest follow the plan", () => {
+    const { store, runId } = setup();
+    const [skeleton] = store.saveSlices(runId, plan);
+    store.moveSlice(skeleton!.id, "building");
+
+    const slices = store.reconcileSlices(runId, [
+      { title: "Walking Skeleton", isWalkingSkeleton: true },
+      { title: "Todos CRUD", isWalkingSkeleton: false },
+      { title: "Tags", isWalkingSkeleton: false },
+    ]);
+
+    expect(slices.map((s) => [s.order, s.title, s.status])).toEqual([
+      [1, "Walking Skeleton", "building"],
+      [2, "Todos CRUD", "pending"],
+      [3, "Tags", "pending"],
+    ]);
+    expect(slices[0]!.id).toBe(skeleton!.id);
+  });
+
+  it("lets a person skip a Slice that has not started", () => {
+    const { store, runId } = setup();
+    const [skeleton] = store.saveSlices(runId, plan);
+
+    expect(store.moveSlice(skeleton!.id, "skipped").status).toBe("skipped");
+  });
+
   it("passes a Slice with its Slice Commit", () => {
     const { store, runId } = setup();
     const [first] = store.saveSlices(runId, plan);
