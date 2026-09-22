@@ -28,3 +28,7 @@ export * from "./agents/uiDesign/penpotRender.js";
 export * from "./agents/uiDesign/uiCanvas.js";
 export * from "./agents/uiDesign/uiDesignAgent.js";
 export * from "./orchestrator/designGate.js";
+export * from "./persistence/snapshotStore.js";
+export * from "./testRuns/sandboxFiles.js";
+export * from "./testRuns/baseSnapshots.js";
+export * from "./testRuns/testRunner.js";

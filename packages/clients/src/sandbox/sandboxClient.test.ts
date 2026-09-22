@@ -139,14 +139,14 @@ describe("SandboxClient", () => {
 
   it("retries when the API cannot be reached at all", async () => {
     let attempts = 0;
-    const fetch = vi.fn(async () => {
+    const flaky = vi.fn(async () => {
       attempts++;
       if (attempts === 1) throw new TypeError("fetch failed");
       return new Response(JSON.stringify({ images: [] }), { status: 200 });
     }) as unknown as typeof fetch;
 
     await expect(
-      makeClient({ ...base, fetch, sleep: async () => {} }).listImages(),
+      makeClient({ ...base, fetch: flaky, sleep: async () => {} }).listImages(),
     ).resolves.toEqual({ images: [] });
     expect(attempts).toBe(2);
   });

@@ -127,4 +127,14 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE gates_new RENAME TO gates;
   CREATE UNIQUE INDEX one_open_gate_per_run ON gates (run_id) WHERE status = 'open';
   `,
+
+  /* 3: Base Snapshots, built once per Stack Profile template and reused */ `
+  CREATE TABLE base_snapshots (
+    profile_id TEXT NOT NULL,
+    template_hash TEXT NOT NULL,
+    image_uuid TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, template_hash)
+  );
+  `,
 ];

@@ -28,6 +28,7 @@ describe("openDatabase", () => {
       .all()
       .map((row) => (row as { name: string }).name);
     expect(tables).toEqual([
+      "base_snapshots",
       "checkpoints",
       "documents",
       "escalations",
