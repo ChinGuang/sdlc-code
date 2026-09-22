@@ -1,0 +1,52 @@
+
+=== install ===
+ok in 3ms
+
+=== unit ===
+prisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to "openssl-1.1.x".
+Please manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v6.19.3) to ./node_modules/@prisma/client in 58ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Interested in query caching in just a few lines of code? Try Accelerate today! https://pris.ly/tip-3-accelerate
+
+prisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to "openssl-1.1.x".
+Please manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": SQLite database "sdlc-test.db" at "file:./sdlc-test.db"
+
+SQLite database sdlc-test.db created at file:./sdlc-test.db
+
+🚀  Your database is now in sync with your Prisma schema. Done in 9ms
+
+
+ RUN  v2.1.9 /app
+
+stderr | server/app.test.ts > GET /health > reports the API and its database
+prisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to "openssl-1.1.x".
+Please manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.
+
+ ✓ server/app.test.ts (3 tests) 95ms
+ ✓ src/App.test.tsx (2 tests) 40ms
+
+ Test Files  2 passed (2)
+      Tests  5 passed (5)
+   Start at  06:09:31
+   Duration  1.66s (transform 102ms, setup 221ms, collect 391ms, tests 135ms, environment 860ms, prepare 824ms)
+
+JSON report written to /app/.sdlc/vitest.json
+ok in 5851ms
+
+=== boot ===
+ok in 789ms
+
+=== smoke ===
+ok in 6ms
+
+=== stop ===
+ok in 11ms
+
+SDLC_RESULT {"profile":"react-node","passed":true,"steps":[{"name":"install","ok":true,"durationMs":3,"output":"dependencies already installed from this package.json","failures":[]},{"name":"unit","ok":true,"durationMs":5851,"output":"\n RUN  v2.1.9 /app\n\nstderr | server/app.test.ts > GET /health > reports the API and its database\nprisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to \"openssl-1.1.x\".\nPlease manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.\n\n ✓ server/app.test.ts (3 tests) 95ms\n ✓ src/App.test.tsx (2 tests) 40ms\n\n Test Files  2 passed (2)\n      Tests  5 passed (5)\n   Start at  06:09:31\n   Duration  1.66s (transform 102ms, setup 221ms, collect 391ms, tests 135ms, environment 860ms, prepare 824ms)\n\nJSON report written to /app/.sdlc/vitest.json\n","failures":[]},{"name":"boot","ok":true,"durationMs":789,"output":"API on http://127.0.0.1:3100\nprisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to \"openssl-1.1.x\".\nPlease manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.\n","failures":[]},{"name":"smoke","ok":true,"durationMs":6,"output":"GET /health -> {\"status\":\"ok\",\"database\":\"up\"}\nGET /definitely-not-here -> 404","failures":[]},{"name":"stop","ok":true,"durationMs":11,"output":"server stopped","failures":[]}],"durationMs":6660}
