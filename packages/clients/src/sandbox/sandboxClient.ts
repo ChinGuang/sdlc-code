@@ -77,7 +77,28 @@ export type SandboxClientOptions = {
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /** Attempts per request when the API fails transiently. Default 3. */
+  maxAttempts?: number;
 };
+
+export class SandboxApiError extends Error {
+  /** 0 when the request never reached the API. */
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "SandboxApiError";
+    this.status = status;
+  }
+}
+
+/** Spike T01 finding 6: 504s and network blips happen; the next call works. */
+function isTransient(error: unknown): boolean {
+  return (
+    error instanceof SandboxApiError &&
+    (error.status === 0 || error.status === 429 || error.status >= 500)
+  );
+}
 
 const TERMINAL: ReadonlySet<OperationStatus> = new Set([
   "SUCCESS",
@@ -152,6 +173,7 @@ export class NebiusSandboxClient implements SandboxClient {
   #fetch: typeof fetch;
   #sleep: (ms: number) => Promise<void>;
   #now: () => number;
+  #maxAttempts: number;
 
   constructor(options: SandboxClientOptions) {
     this.#token = options.token;
@@ -164,6 +186,7 @@ export class NebiusSandboxClient implements SandboxClient {
     this.#sleep =
       options.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
     this.#now = options.now ?? Date.now;
+    this.#maxAttempts = options.maxAttempts ?? 3;
   }
 
   listImages = (tagPrefix?: string): Promise<ImageList> => {
@@ -227,11 +250,29 @@ export class NebiusSandboxClient implements SandboxClient {
     return { permissions: who.permissions ?? {}, limits: who.limits ?? {} };
   };
 
+  /**
+   * One request, retried on a transient failure with 1s, 2s, 4s… backoff.
+   * A retried POST /instances can start the run twice if the first reply was
+   * lost; a duplicate disposable run is wasteful but harmless, and losing a
+   * Test Run to a 504 is not.
+   */
   async #request<T>(
     method: string,
     path: string,
     body?: RequestBody,
   ): Promise<T> {
+    const attempts = this.#maxAttempts;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.#send<T>(method, path, body);
+      } catch (error) {
+        if (attempt >= attempts || !isTransient(error)) throw error;
+        await this.#sleep(1000 * 2 ** (attempt - 1));
+      }
+    }
+  }
+
+  async #send<T>(method: string, path: string, body?: RequestBody): Promise<T> {
     const headers = new Headers({
       Authorization: `Bearer ${this.#token}`,
       Project: this.#project,
@@ -248,14 +289,24 @@ export class NebiusSandboxClient implements SandboxClient {
           : new Blob([new Uint8Array(body.bytes)]);
     }
 
-    const response = await this.#fetch(`${this.#baseUrl}${path}`, {
-      method,
-      headers,
-      body: payload,
-    });
-    const text = await response.text();
+    let response: Response;
+    let text: string;
+    try {
+      response = await this.#fetch(`${this.#baseUrl}${path}`, {
+        method,
+        headers,
+        body: payload,
+      });
+      text = await response.text();
+    } catch (error) {
+      throw new SandboxApiError(
+        0,
+        `Sandbox API ${method} ${path} could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     if (!response.ok) {
-      throw new Error(
+      throw new SandboxApiError(
+        response.status,
         `Sandbox API ${method} ${path} failed: ${response.status} ${errorMessage(text)}`,
       );
     }

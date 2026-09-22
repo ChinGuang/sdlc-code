@@ -68,6 +68,16 @@ All numbers below come from the probe's saved results (gitignored `results/`), m
 - Poll at ~250 ms (or use the SSE event stream); set `timeout` per Test Run (e.g. 600 s).
 - Upload files in parallel (3 uploads took 0.7 s) and skip re-uploading unchanged files by sha256.
 
+### What T13 built, and where it differs
+
+Code: `packages/core/src/testRuns` (`SandboxBaseSnapshots`, `SandboxTestRunner`); live check: `NEBIUS_LIVE=1 pnpm --filter @sdlc-code/core test testRuns.live`.
+
+- **No `set_image_tag`.** It is a permission name in `/whoami`, but the REST path to tag an image is not documented, so we do not guess one. The Base Snapshot's image UUID is kept in our SQLite database (`base_snapshots`, keyed by profile and a hash of the template files, the build command and the base image). It is rebuilt after 150 days, before the 180-day retention can drop it, and when a Test Run is refused with 404/410. *Assumption, not yet seen live:* an expired image is reported as 404/410 on spawn.
+- **Install only when the manifest changes.** The template's test script stamps `node_modules` with a hash of `package.json` + `package-lock.json`; a Slice that adds a dependency triggers `npm install`, anything else reuses the Snapshot's.
+- **Per-run timeout 1,800 s, not 600 s,** so the script's own step limits (worst case ~1,600 s) always fire first and it still prints its result; the log goes to a file and only its last 60 kB is printed, so the `SDLC_RESULT` line survives any output truncation.
+- **Secrets:** `.env` files (not `.env.example`) are never uploaded, for Snapshots or Test Runs.
+- **Measured (2026-09-22):** cold (import check + Snapshot build + two Test Runs) 62 s; warm Test Run of the template ~13 s, of a Slice with one failing test ~7 s. Node 22 slim has no OpenSSL; Prisma warns and falls back to openssl-1.1.x, which works.
+
 ## Appendix: what the real server returned
 
 `GET /whoami` permissions before and after Early Access approval (limits identical):

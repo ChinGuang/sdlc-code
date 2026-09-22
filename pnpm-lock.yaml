@@ -109,6 +109,9 @@ importers:
       '@sdlc-code/clients':
         specifier: workspace:*
         version: link:../clients
+      '@sdlc-code/stack-profiles':
+        specifier: workspace:*
+        version: link:../stack-profiles
       '@seriousme/openapi-schema-validator':
         specifier: ^2.10.0
         version: 2.10.0

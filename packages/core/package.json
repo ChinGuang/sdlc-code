@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@sdlc-code/clients": "workspace:*",
+    "@sdlc-code/stack-profiles": "workspace:*",
     "@seriousme/openapi-schema-validator": "^2.10.0",
     "better-sqlite3": "^13.0.3",
     "linkedom": "^0.18.13",

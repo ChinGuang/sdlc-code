@@ -28,7 +28,7 @@ describe("stackProfile", () => {
     for (const profile of STACK_PROFILES) {
       expect(profile.summary).toMatch(/\w/);
       expect(profile.testCommand).toMatch(/\w/);
-      expect(profile.baseSnapshotTag).toMatch(/^sdlc-code\/.+:.+$/);
+      expect(profile.snapshotCommand).toMatch(/\w/);
     }
   });
 });

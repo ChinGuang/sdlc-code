@@ -5,12 +5,20 @@
  *   SDLC_RESULT {"profile":"react-node","passed":true,"steps":[…]}
  *
  * Steps: install → unit tests → boot the API → smoke tests → stop.
+ * `--install-only` stops after install: it builds a Base Snapshot.
  * Every step is bounded by a timeout, a failing step stops the run, and the
  * script always prints its result. Exit code 0 means every step passed.
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -26,6 +34,9 @@ const STEP_TIMEOUT_MS = { install: 600_000, unit: 600_000 };
 const DEFAULT_STEP_TIMEOUT_MS = 120_000;
 const OUTPUT_TAIL = 2000;
 const VITEST_REPORT = ".sdlc/vitest.json";
+/** What node_modules was installed from; install again when it changes. */
+const INSTALL_STAMP = "node_modules/.sdlc-installed";
+const INSTALL_ONLY = process.argv.includes("--install-only");
 
 // Run from the application's root whatever the caller's directory is.
 process.chdir(join(dirname(fileURLToPath(import.meta.url)), ".."));
@@ -114,6 +125,14 @@ async function step(name, work) {
   return outcome.ok;
 }
 
+/** The manifest the dependencies come from. */
+function manifestHash() {
+  const hash = createHash("sha256");
+  for (const file of ["package.json", "package-lock.json"])
+    if (existsSync(file)) hash.update(file).update(readFileSync(file));
+  return hash.digest("hex");
+}
+
 const portIsFree = () =>
   new Promise((resolve) => {
     const probe = createServer()
@@ -121,6 +140,15 @@ const portIsFree = () =>
       .once("listening", () => probe.close(() => resolve(true)))
       .listen(PORT, "127.0.0.1");
   });
+
+/** The API's own process can outlive its npx parent for a moment. */
+async function portFreed(deadline) {
+  while (!(await portIsFree())) {
+    if (Date.now() >= deadline) return false;
+    await sleep(100);
+  }
+  return true;
+}
 
 /** Waits for the API to answer, so the smoke tests do not race the boot. */
 async function waitForHealth(deadline) {
@@ -159,23 +187,21 @@ let server;
 let passed = true;
 
 try {
-  if (existsSync("node_modules")) {
-    steps.push({
-      name: "install",
-      ok: true,
-      durationMs: 0,
-      output: "node_modules present",
-      failures: [],
+  // A Base Snapshot has the template's dependencies; a Slice that adds one
+  // changes package.json, and only then does the install run again.
+  passed = await step("install", async () => {
+    const wanted = manifestHash();
+    if (existsSync(INSTALL_STAMP) && readFileSync(INSTALL_STAMP, "utf8") === wanted)
+      return { ok: true, output: "dependencies already installed from this package.json" };
+    const installed = await asStep("npm", ["install", "--no-audit", "--no-fund"], {
+      timeoutMs: STEP_TIMEOUT_MS.install,
     });
-  } else {
-    passed = await step("install", () =>
-      asStep("npm", ["install", "--no-audit", "--no-fund"], {
-        timeoutMs: STEP_TIMEOUT_MS.install,
-      }),
-    );
-  }
+    // Hashed again: the first install writes package-lock.json.
+    if (installed.ok) writeFileSync(INSTALL_STAMP, manifestHash());
+    return installed;
+  });
 
-  if (passed)
+  if (passed && !INSTALL_ONLY)
     passed = await step("unit", async () => {
       // npm install leaves a stub client, so this always runs. It rewrites the
       // query engine, which is why the script waits for the API to exit first.
@@ -199,7 +225,7 @@ try {
       return { ...tested, failures: vitestFailures() };
     });
 
-  if (passed)
+  if (passed && !INSTALL_ONLY)
     passed = await step("boot", async () => {
       if (!(await portIsFree()))
         return {
@@ -224,7 +250,7 @@ try {
       };
     });
 
-  if (passed)
+  if (passed && !INSTALL_ONLY)
     passed = await step("smoke", async () => {
       const checks = [];
       const health = await fetch(`http://127.0.0.1:${PORT}/health`).then((response) =>
@@ -238,18 +264,19 @@ try {
       return { ok, output: checks.join("\n") };
     });
 } finally {
-  await step("stop", async () => {
-    await killTree(server);
-    // The port must be free again: a survivor would let the next run pass
-    // against a stale server.
-    const free = await portIsFree();
-    return {
-      ok: free,
-      output: free
-        ? "server stopped"
-        : `Port ${PORT} is still in use after stopping the API.`,
-    };
-  });
+  if (!INSTALL_ONLY)
+    await step("stop", async () => {
+      await killTree(server);
+      // The port must be free again: a survivor would let the next run pass
+      // against a stale server.
+      const free = await portFreed(Date.now() + 5000);
+      return {
+        ok: free,
+        output: free
+          ? "server stopped"
+          : `Port ${PORT} is still in use after stopping the API.`,
+      };
+    });
 }
 
 const result = {
