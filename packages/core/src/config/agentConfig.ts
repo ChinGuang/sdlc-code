@@ -31,6 +31,7 @@ const DEFAULT_ROLES: Record<AgentRole, Omit<RoleSettings, "capabilities">> = {
   backendCoding: { model: NEMOTRON_SUPER, thinking: true },
   frontendCoding: { model: NEMOTRON_SUPER, thinking: true },
   // Mechanical tool loop (run tests, read results): thinking costs tokens for little gain.
+  // Unused while Issue Reports are built in code from the test script's result (T16).
   testing: { model: NEMOTRON_SUPER, thinking: false },
   codeReview: { model: NEMOTRON_ULTRA, thinking: true },
 };

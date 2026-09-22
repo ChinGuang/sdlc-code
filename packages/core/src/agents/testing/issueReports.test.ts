@@ -4,15 +4,21 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseTestScriptOutput, REACT_NODE } from "@sdlc-code/stack-profiles";
+import {
+  parseTestScriptOutput,
+  REACT_NODE,
+  type TestStep,
+} from "@sdlc-code/stack-profiles";
 import { describe, expect, it } from "vitest";
 import type {
   TestRunEvidence,
   TestRunOutcome,
 } from "../../testRuns/testRunner.js";
 import {
+  codingIssues,
   isLoop,
   issueReports,
+  MAX_CODING_ISSUES,
   normalizeError,
   toCodingIssue,
   type IssueReport,
@@ -91,8 +97,9 @@ describe("issueReports from recorded Test Runs", () => {
       expect.objectContaining({
         step: "smoke",
         failingTest: null,
+        endpoint: "GET /definitely-not-here",
         error:
-          'Smoke tests failed: GET /health -> {"status":"ok","database":"up"}; GET /definitely-not-here -> 200',
+          "Smoke test failed: GET /definitely-not-here: expected 404, got 200",
         suspectedOwner: "backendCoding",
       }),
     ]);
@@ -209,7 +216,169 @@ describe("toCodingIssue", () => {
       evidence: backend!.evidence,
     });
     expect(toCodingIssue(reportsFor("failingSmoke")[0]!).summary).toMatch(
-      /^smoke step: Smoke tests failed/,
+      /^smoke step: Smoke test failed/,
     );
+  });
+});
+
+/** A failed run whose steps are given directly, for inputs no fixture has. */
+function failedWith(...steps: TestStep[]): TestRunOutcome {
+  return {
+    status: "failed",
+    result: { profile: "react-node", passed: false, steps, durationMs: 1 },
+    evidence: evidence(""),
+  };
+}
+
+const step = (
+  name: TestStep["name"],
+  output: string,
+  failures: TestStep["failures"] = [],
+): TestStep => ({ name, ok: false, durationMs: 1, output, failures });
+
+// Inputs from the T16 standards review, each wrong in the first version.
+describe("issueReports heuristics", () => {
+  it("blames a crashed unit run on the file in the error, not on a warning before it", () => {
+    const [report] = issueReports(
+      failedWith(
+        step(
+          "unit",
+          [
+            "stderr | server/app.test.ts > GET /health > reports the API",
+            "prisma:warn Prisma failed to detect the libssl/openssl version",
+            "Prisma schema loaded from prisma/schema.prisma",
+            "Error: Failed to load url ./Missing.js (resolved id: ./Missing.js) in /app/src/App.tsx. Does the file exist?",
+          ].join("\n"),
+        ),
+      ),
+      REACT_NODE,
+    );
+
+    expect(report).toMatchObject({
+      file: "src/App.tsx",
+      suspectedOwner: "frontendCoding",
+    });
+  });
+
+  it("never takes a path inside node_modules for an application file", () => {
+    const [report] = issueReports(
+      failedWith(
+        step(
+          "unit",
+          "TypeError: x is not a function\n    at x (/app/node_modules/some-lib/src/index.js:3:1)",
+        ),
+      ),
+      REACT_NODE,
+    );
+
+    expect(report).toMatchObject({ file: null, suspectedOwner: null });
+  });
+
+  it("tells two different boot failures apart when neither printed an Error line", () => {
+    const [listening] = issueReports(
+      failedWith(
+        step(
+          "boot",
+          "Listening on 4000\n\nThe API did not answer on port 3100.",
+        ),
+      ),
+      REACT_NODE,
+    );
+    const [exiting] = issueReports(
+      failedWith(
+        step(
+          "boot",
+          "DATABASE_URL missing, exiting\n\nThe API did not answer on port 3100.",
+        ),
+      ),
+      REACT_NODE,
+    );
+
+    expect(listening!.error).toBe("Listening on 4000");
+    expect(exiting!.error).toBe("DATABASE_URL missing, exiting");
+    expect(listening!.signature).not.toBe(exiting!.signature);
+  });
+
+  it("merges the same failure in many tests into one report, counting them", () => {
+    const failure = (test: string) => ({
+      test,
+      file: "/app/server/todos.test.ts",
+      message: "Error: connect ECONNREFUSED",
+    });
+    const reports = issueReports(
+      failedWith(step("unit", "", [failure("a"), failure("a"), failure("b")])),
+      REACT_NODE,
+    );
+
+    expect(
+      reports.map((report) => [report.failingTest, report.occurrences]),
+    ).toEqual([
+      ["a", 2],
+      ["b", 1],
+    ]);
+  });
+
+  it("does not take a test of the same name in another file for a Loop", () => {
+    const failure = (file: string) => ({
+      test: "renders",
+      file,
+      message: "Error: boom",
+    });
+    const reports = issueReports(
+      failedWith(
+        step("unit", "", [
+          failure("/app/src/List.test.tsx"),
+          failure("/app/src/Form.test.tsx"),
+        ]),
+      ),
+      REACT_NODE,
+    );
+
+    expect(reports).toHaveLength(2);
+    expect(isLoop(reports[0]!, [reports[1]!])).toBe(false);
+  });
+
+  it("names the endpoint a test is about, for the Orchestrator", () => {
+    expect(reportsFor("failingUnit")[0]!.endpoint).toBe("POST /todos");
+    expect(reportsFor("failingUnit")[1]!.endpoint).toBeNull();
+  });
+});
+
+describe("normalizeError edge cases", () => {
+  it("drops a whole timestamp and a whole UUID", () => {
+    expect(
+      normalizeError(
+        "at 2026-09-22T06:09:46.123Z for 3f2c1a9b-1c2d-4e5f-8a9b-0123456789ab",
+      ),
+    ).toBe("at <timestamp> for <uuid>");
+  });
+
+  it("keeps plain numbers and words that only look like timings", () => {
+    expect(normalizeError("expected 12345678 to be 1")).toBe(
+      "expected 12345678 to be 1",
+    );
+    expect(normalizeError("k8s down")).toBe("k8s down");
+  });
+});
+
+describe("codingIssues", () => {
+  it("gives a Coding Agent at most ten Issue Reports, and names the rest", () => {
+    const failures = Array.from({ length: 13 }, (_, index) => ({
+      test: `test ${index}`,
+      file: "/app/server/todos.test.ts",
+      message: `Error: failure ${index}`,
+    }));
+    const reports = issueReports(
+      failedWith(step("unit", "", failures)),
+      REACT_NODE,
+    );
+
+    const issues = codingIssues(reports);
+
+    expect(issues).toHaveLength(MAX_CODING_ISSUES + 1);
+    expect(issues.at(-1)!.summary).toBe(
+      "3 more failures not listed; fix these first.",
+    );
+    expect(issues.at(-1)!.evidence).toContain("- test 12: Error: failure 12");
   });
 });

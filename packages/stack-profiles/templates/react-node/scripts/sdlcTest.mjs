@@ -252,16 +252,29 @@ try {
 
   if (passed && !INSTALL_ONLY)
     passed = await step("smoke", async () => {
-      const checks = [];
-      const health = await fetch(`http://127.0.0.1:${PORT}/health`).then((response) =>
-        response.json(),
+      // One line per check: "ok <request>" or "FAIL <request>: expected …, got …",
+      // so a report can name the failing check alone.
+      const lines = [];
+      const check = (request, pass, expected, got) => {
+        lines.push(pass ? `ok ${request}` : `FAIL ${request}: expected ${expected}, got ${got}`);
+        return pass;
+      };
+      const health = await fetch(`http://127.0.0.1:${PORT}/health`);
+      const body = await health.json().catch(() => null);
+      const healthy = check(
+        "GET /health",
+        health.status === 200 && body?.status === "ok" && body?.database === "up",
+        '200 {"status":"ok","database":"up"}',
+        `${health.status} ${JSON.stringify(body)}`,
       );
-      checks.push(`GET /health -> ${JSON.stringify(health)}`);
       const missing = await fetch(`http://127.0.0.1:${PORT}/definitely-not-here`);
-      checks.push(`GET /definitely-not-here -> ${missing.status}`);
-      const ok =
-        health.status === "ok" && health.database === "up" && missing.status === 404;
-      return { ok, output: checks.join("\n") };
+      const notFound = check(
+        "GET /definitely-not-here",
+        missing.status === 404,
+        "404",
+        String(missing.status),
+      );
+      return { ok: healthy && notFound, output: lines.join("\n") };
     });
 } finally {
   if (!INSTALL_ONLY)
