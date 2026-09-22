@@ -3,9 +3,14 @@
  * fire on violations and stay quiet on compliant code.
  */
 import { ESLint } from "eslint";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 const eslint = new ESLint({ cwd: process.cwd() });
+
+// The first lint loads eslint.config.js and the typescript-eslint parser:
+// ~1s alone, several times that when every Vitest project runs at once. Pay it
+// here, with its own timeout, so each test only times its own lint.
+beforeAll(() => standardsViolations(""), 60_000);
 
 async function standardsViolations(code: string): Promise<string[]> {
   const [result] = await eslint.lintText(code, {

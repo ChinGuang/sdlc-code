@@ -1,16 +1,19 @@
 import type { ChatRequest, ChatResponse, ToolCall } from "@sdlc-code/clients";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { stringify as toYaml } from "yaml";
 import { ChatAgentLoop } from "../../agentLoop/agentLoop.js";
 import type { Design } from "./design.js";
 import { designDocuments } from "./designDocuments.js";
 import { goodDesign } from "./fixtures/goodDesign.js";
+import { MERMAID_LOAD_TIMEOUT, warmMermaid } from "./fixtures/warmMermaid.js";
 import recorded from "./fixtures/recordedTodoRun.json" with { type: "json" };
 import {
   DESIGN_TOOLS,
   LoopSystemDesignAgent,
   type SystemDesignAgent,
 } from "./systemDesignAgent.js";
+
+beforeAll(warmMermaid, MERMAID_LOAD_TIMEOUT);
 
 type Reply = { content: string | null; toolCalls: ToolCall[] };
 

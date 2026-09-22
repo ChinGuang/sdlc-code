@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { goodDesign } from "./fixtures/goodDesign.js";
+import { MERMAID_LOAD_TIMEOUT, warmMermaid } from "./fixtures/warmMermaid.js";
 import { mermaidProblem } from "./mermaid.js";
 import { contractEndpoints, validateDesign } from "./validateDesign.js";
+
+beforeAll(warmMermaid, MERMAID_LOAD_TIMEOUT);
 
 describe("mermaidProblem", () => {
   it.each([

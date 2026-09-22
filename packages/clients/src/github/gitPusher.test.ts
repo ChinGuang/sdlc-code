@@ -151,7 +151,9 @@ describe("TokenGitPusher", () => {
   });
 });
 
-describe("TokenGitPusher with real git", () => {
+// Real git pushes spawn several processes: ~2s alone, far longer when every
+// Vitest project runs at once. The time is real work, hence the longer timeout.
+describe("TokenGitPusher with real git", { timeout: 60_000 }, () => {
   const dirs: string[] = [];
   const tempDir = () => {
     const dir = mkdtempSync(join(tmpdir(), "sdlc-push-"));
