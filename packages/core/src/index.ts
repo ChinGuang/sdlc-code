@@ -36,3 +36,5 @@ export {
 } from "./testRuns/sandboxFiles.js";
 export * from "./testRuns/baseSnapshots.js";
 export * from "./testRuns/testRunner.js";
+export * from "./workspaces/git.js";
+export * from "./workspaces/workspaceManager.js";
