@@ -117,6 +117,66 @@ describe("SandboxClient", () => {
     );
   });
 
+  it("retries a transient failure with backoff (spike T01 finding 6)", async () => {
+    const waits: number[] = [];
+    const { fetch, calls } = fakeFetch([
+      { status: 504, body: "<html>Gateway Time-out</html>" },
+      { status: 200, body: { uuid: "op-42" } },
+    ]);
+
+    const id = await makeClient({
+      ...base,
+      fetch,
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    }).spawn({ image: "tag:x", command: "true" });
+
+    expect(id).toBe("op-42");
+    expect(calls).toHaveLength(2);
+    expect(waits).toEqual([1000]);
+  });
+
+  it("retries when the API cannot be reached at all", async () => {
+    let attempts = 0;
+    const fetch = vi.fn(async () => {
+      attempts++;
+      if (attempts === 1) throw new TypeError("fetch failed");
+      return new Response(JSON.stringify({ images: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      makeClient({ ...base, fetch, sleep: async () => {} }).listImages(),
+    ).resolves.toEqual({ images: [] });
+    expect(attempts).toBe(2);
+  });
+
+  it("gives up after maxAttempts, and never retries a client error", async () => {
+    const transient = fakeFetch([
+      { status: 503, body: "busy" },
+      { status: 503, body: "busy" },
+    ]);
+    await expect(
+      makeClient({
+        ...base,
+        fetch: transient.fetch,
+        sleep: async () => {},
+        maxAttempts: 2,
+      }).listImages(),
+    ).rejects.toMatchObject({ name: "SandboxApiError", status: 503 });
+    expect(transient.calls).toHaveLength(2);
+
+    const denied = fakeFetch([{ status: 403, body: { error: "no access" } }]);
+    await expect(
+      makeClient({
+        ...base,
+        fetch: denied.fetch,
+        sleep: async () => {},
+      }).listImages(),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(denied.calls).toHaveLength(1);
+  });
+
   it("polls an operation until it reaches a terminal status", async () => {
     const { fetch, calls } = fakeFetch([
       { status: 200, body: op({ status: "PENDING" }) },
