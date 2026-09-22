@@ -2,7 +2,11 @@ import { REACT_NODE } from "@sdlc-code/stack-profiles";
 import { describe, expect, it } from "vitest";
 import { goodDesign } from "../systemDesign/fixtures/goodDesign.js";
 import { goodUiSpec } from "../uiDesign/fixtures/goodUiSpec.js";
-import { codingContext, type CodingTaskInput } from "./codingContext.js";
+import {
+  codingContext,
+  codingSides,
+  type CodingTaskInput,
+} from "./codingContext.js";
 
 const design = goodDesign();
 const TODOS = design.slicePlan[1]!;
@@ -99,7 +103,8 @@ describe("codingContext per capability set", () => {
       }),
     );
 
-    expect(context.task.user).not.toContain("UI Spec");
+    expect(context.task.user).not.toContain("UI Spec for this Slice");
+    expect(context.task.user).not.toMatch(/\bx: \d/);
     expect(context.task.images).toBeUndefined();
     expect(context.usePenpotTools).toBe(false);
     expect(context.task.system).toContain("Backend Coding Agent");
@@ -116,6 +121,65 @@ describe("codingContext per capability set", () => {
     expect(context.screens).toEqual([]);
     expect(context.usePenpotTools).toBe(false);
     expect(context.task.images).toBeUndefined();
+  });
+});
+
+describe("codingContext for the backend", () => {
+  it("reads this Slice's screens as text: what they call and the fields they send", () => {
+    const { user } = codingContext(input({ side: "backend" })).task;
+
+    expect(user).toContain(
+      "Screens of this Slice (from the UI Spec), which your API serves:",
+    );
+    expect(user).toContain("name: Todo list");
+    expect(user).toContain("- What needs doing?");
+    expect(user).not.toContain("name: Health");
+  });
+});
+
+describe("codingContext for the Walking Skeleton", () => {
+  it("asks for Slice 1 itself, with its health screen for the frontend", () => {
+    const skeleton = design.slicePlan[0]!;
+
+    const { user } = codingContext(input({ slice: skeleton })).task;
+
+    expect(user).toContain(
+      'Your Task: build the frontend of Slice "Walking Skeleton".',
+    );
+    expect(user).toContain("Endpoints of this Slice: GET /health");
+    expect(user).toContain("1. Walking Skeleton (this Task)");
+    expect(user).toContain("2. Todos (later, not yet)");
+    expect(user).toContain("name: Health");
+  });
+});
+
+describe("codingSides", () => {
+  const uiSpec = goodUiSpec();
+
+  it("builds both sides of the Walking Skeleton", () => {
+    expect(codingSides(design.slicePlan[0]!, uiSpec)).toEqual([
+      "backend",
+      "frontend",
+    ]);
+  });
+
+  it("builds the backend for new endpoints and the frontend for screens", () => {
+    expect(codingSides(TODOS, uiSpec)).toEqual(["backend", "frontend"]);
+    expect(codingSides({ ...TODOS, title: "Reports" }, uiSpec)).toEqual([
+      "backend",
+    ]);
+    expect(codingSides({ ...TODOS, endpoints: [] }, uiSpec)).toEqual([
+      "frontend",
+    ]);
+  });
+
+  it("needs no backend for a Slice that only uses the template's GET /health", () => {
+    expect(
+      codingSides(
+        { ...TODOS, title: "Status", endpoints: ["GET /health"] },
+        uiSpec,
+      ),
+    ).toEqual([]);
   });
 });
 

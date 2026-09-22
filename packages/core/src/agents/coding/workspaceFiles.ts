@@ -14,14 +14,14 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { isSecretFile } from "../../testRuns/sandboxFiles.js";
 
 /** Never shown or written: git's own files and installed packages. */
 const HIDDEN = new Set([".git", "node_modules", "dist", ".sdlc"]);
 /** A generated file bigger than this is a mistake, not source code. */
 const MAX_FILE_BYTES = 200_000;
-const MAX_LISTED_FILES = 500;
+export const MAX_LISTED_FILES = 500;
 const MAX_SEARCH_MATCHES = 100;
 
 export type FileChange = { path: string; kind: "written" | "deleted" };
@@ -63,23 +63,25 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
   #changes = new Map<string, FileChange["kind"]>();
 
   constructor(options: WorkspaceFilesOptions) {
-    this.#root = realpathSync(options.root);
+    this.#root = realpathSync.native(options.root);
     this.#writable = options.writable;
   }
 
   listFiles = (directory = ""): string[] => {
-    const start = directory === "" ? this.#root : this.#resolve(directory);
+    const start =
+      directory === "" ? this.#root : this.#check(directory, "read").full;
     if (!existsSync(start) || !statSync(start).isDirectory())
       throw new WorkspaceFileError(`No folder "${directory}".`);
     const files: string[] = [];
     const walk = (folder: string): void => {
       for (const entry of readdirSync(folder, { withFileTypes: true })) {
-        if (HIDDEN.has(entry.name) || files.length >= MAX_LISTED_FILES)
-          continue;
+        if (files.length >= MAX_LISTED_FILES) return;
+        // Links are not followed: one could lead anywhere.
+        if (entry.isSymbolicLink() || isHidden(entry.name)) continue;
         const full = join(folder, entry.name);
         if (entry.isDirectory()) walk(full);
         else if (entry.isFile() && !isSecretFile(entry.name))
-          files.push(this.#relative(full));
+          files.push(relative(this.#root, full).split(sep).join("/"));
       }
     };
     walk(start);
@@ -87,18 +89,19 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
   };
 
   readFile = (path: string): string => {
-    const full = this.#resolve(path);
-    if (isSecretFile(path))
-      throw new WorkspaceFileError(
-        `"${path}" holds secrets and is never read.`,
-      );
+    const { full } = this.#check(path, "read");
     if (!existsSync(full) || !statSync(full).isFile())
       throw new WorkspaceFileError(`No file "${path}".`);
-    return readFileSync(full, "utf8");
+    const contents = readText(full);
+    if (contents === null)
+      throw new WorkspaceFileError(
+        `"${path}" is not a source file (binary, or over ${MAX_FILE_BYTES} bytes).`,
+      );
+    return contents;
   };
 
   writeFile = (path: string, contents: string): void => {
-    const full = this.#resolveWritable(path);
+    const { full, path: checked } = this.#check(path, "write");
     if (Buffer.byteLength(contents) > MAX_FILE_BYTES)
       throw new WorkspaceFileError(
         `"${path}" would be ${Buffer.byteLength(contents)} bytes; the limit is ${MAX_FILE_BYTES}. Split it into smaller modules.`,
@@ -106,14 +109,15 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
     if (existsSync(full) && statSync(full).isDirectory())
       throw new WorkspaceFileError(`"${path}" is a folder.`);
     mkdirSync(dirname(full), { recursive: true });
-    // Resolved again after creating folders: a new folder could be a link.
-    this.#resolveWritable(path);
+    // Checked again once the folders exist. No tool can create a link, so
+    // nothing can swap one in between this check and the write.
+    this.#check(path, "write");
     writeFileSync(full, contents);
-    this.#changes.set(this.#normal(path), "written");
+    this.#changes.set(checked, "written");
   };
 
   editFile = (path: string, oldText: string, newText: string): void => {
-    this.#resolveWritable(path);
+    this.#check(path, "write");
     if (oldText === "")
       throw new WorkspaceFileError(
         "old_text is empty; use write_file to create a file.",
@@ -137,19 +141,20 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
   };
 
   deleteFile = (path: string): void => {
-    const full = this.#resolveWritable(path);
+    const { full, path: checked } = this.#check(path, "write");
     if (!existsSync(full) || !statSync(full).isFile())
       throw new WorkspaceFileError(`No file "${path}".`);
     rmSync(full);
-    this.#changes.set(this.#normal(path), "deleted");
+    this.#changes.set(checked, "deleted");
   };
 
   search = (text: string): SearchMatch[] => {
     if (text === "") throw new WorkspaceFileError("Search for some text.");
     const matches: SearchMatch[] = [];
     for (const path of this.listFiles()) {
-      const lines = readFileSync(join(this.#root, path), "utf8").split("\n");
-      for (const [index, line] of lines.entries()) {
+      const contents = readText(join(this.#root, ...path.split("/")));
+      if (contents === null) continue;
+      for (const [index, line] of contents.split("\n").entries()) {
         if (!line.includes(text)) continue;
         matches.push({
           path,
@@ -165,59 +170,97 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
   changes = (): FileChange[] =>
     [...this.#changes].map(([path, kind]) => ({ path, kind }));
 
-  /** The full path of `path`, provided it stays inside the Workspace. */
-  #resolve(path: string): string {
-    const normal = this.#normal(path);
+  /**
+   * Where `path` really is, or a WorkspaceFileError. The part that exists is
+   * resolved on disk first (links, the disk's own casing, Windows short names
+   * like GIT~1), and every rule is applied to that real path, so no spelling
+   * of a name gets past a check another spelling would fail.
+   */
+  #check(path: string, access: "read" | "write"): Checked {
+    const normal = normalPath(path);
     const full = join(this.#root, ...normal.split("/"));
-    // A link inside the Workspace must not lead outside it.
+    const missing: string[] = [];
     let existing = full;
-    while (!existsSync(existing)) existing = dirname(existing);
-    const real = realpathSync(existing);
+    while (!existsSync(existing)) {
+      missing.unshift(basename(existing));
+      existing = dirname(existing);
+    }
+    const real = realpathSync.native(existing);
     if (real !== this.#root && !real.startsWith(this.#root + sep))
       throw new WorkspaceFileError(`"${path}" leads outside the Workspace.`);
-    return full;
-  }
-
-  #resolveWritable(path: string): string {
-    const full = this.#resolve(path);
-    const normal = this.#normal(path);
-    if (isSecretFile(normal))
+    const parts = [
+      ...relative(this.#root, real).split(sep).filter(Boolean),
+      ...missing,
+    ];
+    const hidden = parts.find(isHidden);
+    if (hidden)
       throw new WorkspaceFileError(
-        `"${path}" would hold secrets; write .env.example with placeholder values instead.`,
+        `"${path}" is inside ${hidden}, which agents do not touch.`,
       );
-    const allowed = this.#writable.some((writable) =>
-      writable.endsWith("/")
-        ? normal.startsWith(writable)
-        : normal === writable,
-    );
-    if (!allowed)
+    const checked = parts.join("/");
+    if (isSecretFile(checked))
+      throw new WorkspaceFileError(
+        access === "read"
+          ? `"${path}" holds secrets and is never read.`
+          : `"${path}" would hold secrets; write .env.example with placeholder values instead.`,
+      );
+    if (access === "write" && !this.#mayWrite(checked))
       throw new WorkspaceFileError(
         `You may not write "${path}". You may write: ${this.#writable.join(", ")}.`,
       );
-    return full;
+    return { full, path: checked };
   }
 
-  /** "/"-separated and relative, or a WorkspaceFileError saying why not. */
-  #normal(path: string): string {
-    const slashed = path.trim().replaceAll("\\", "/").replace(/^\.\//, "");
-    const parts = slashed.split("/");
-    if (
-      slashed === "" ||
-      slashed.startsWith("/") ||
-      /^[A-Za-z]:/.test(slashed) ||
-      parts.some((part) => part === "" || part === "." || part === "..")
-    )
-      throw new WorkspaceFileError(
-        `"${path}" is not a path inside the Workspace; use a relative path like "server/todos.ts".`,
-      );
-    if (parts.some((part) => HIDDEN.has(part)))
-      throw new WorkspaceFileError(
-        `"${path}" is inside ${parts.find((part) => HIDDEN.has(part))}, which agents do not touch.`,
-      );
-    return parts.join("/");
+  #mayWrite(path: string): boolean {
+    const lower = path.toLowerCase();
+    return this.#writable.some((writable) =>
+      writable.endsWith("/")
+        ? lower.startsWith(writable.toLowerCase())
+        : lower === writable.toLowerCase(),
+    );
   }
+}
 
-  #relative(full: string): string {
-    return relative(this.#root, full).split(sep).join("/");
+type Checked = {
+  full: string;
+  /** "/"-separated, relative, as the disk spells it. */
+  path: string;
+};
+
+const isHidden = (name: string): boolean => HIDDEN.has(name.toLowerCase());
+
+/** CON, NUL, COM1…: Windows devices, whatever the extension. */
+const DEVICE_NAME = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
+
+/**
+ * "/"-separated and relative, or a WorkspaceFileError saying why not. Names
+ * Windows would read differently from how they are written are refused:
+ * trailing dots and spaces, "name:stream", devices and 8.3 short names.
+ */
+function normalPath(path: string): string {
+  const refuse = (why: string): never => {
+    throw new WorkspaceFileError(
+      `"${path}" is not a path inside the Workspace (${why}); use a relative path like "server/todos.ts".`,
+    );
+  };
+  // eslint-disable-next-line no-control-regex
+  if (/[:\x00-\x1f]/.test(path))
+    refuse("no drive letters, streams or control characters");
+  const parts = path.replaceAll("\\", "/").replace(/^\.\//, "").split("/");
+  for (const part of parts) {
+    if (part === "" || part === "." || part === "..")
+      refuse("no empty, . or .. parts");
+    if (/^\s|[\s.]$/.test(part))
+      refuse("no names starting with a space or ending in a space or dot");
+    if (DEVICE_NAME.test(part)) refuse("no device names");
+    if (/~\d/.test(part)) refuse("no short names");
   }
+  return parts.join("/");
+}
+
+/** A file's text, or null if it is too big or not text. */
+function readText(full: string): string | null {
+  if (statSync(full).size > MAX_FILE_BYTES) return null;
+  const contents = readFileSync(full, "utf8");
+  return contents.includes("\0") ? null : contents;
 }

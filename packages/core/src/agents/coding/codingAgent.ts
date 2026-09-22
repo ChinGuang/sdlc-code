@@ -24,6 +24,12 @@ export type CodingInput = CodingTaskInput & {
 export type CodingResult = {
   /** The agent's summary; null unless it answered. */
   summary: string | null;
+  /**
+   * Why this Step did not deliver, for the Orchestrator to retry or escalate:
+   * the loop stopped early, or the agent answered without changing a file.
+   * Null when it answered with changes.
+   */
+  problem: "notAnswered" | "noChanges" | null;
   /** The files it wrote or deleted, for the Step's record. */
   changes: FileChange[];
   loop: AgentLoopResult;
@@ -79,6 +85,14 @@ export class LoopCodingAgent implements CodingAgent {
         : []),
     ];
     const loop = await this.#createLoop(tools).run(context.task);
-    return { summary: loop.answer, changes: files.changes(), loop };
+    const changes = files.changes();
+    // Spike T03 rule 6: judge the Step by what it did, not what it says.
+    const problem =
+      loop.stopReason !== "answered"
+        ? "notAnswered"
+        : changes.length === 0
+          ? "noChanges"
+          : null;
+    return { summary: loop.answer, problem, changes, loop };
   };
 }

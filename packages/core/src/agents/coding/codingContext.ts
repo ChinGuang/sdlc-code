@@ -9,7 +9,7 @@ import type { CodingSide, StackProfile } from "@sdlc-code/stack-profiles";
 import { stringify } from "yaml";
 import type { AgentTask } from "../../agentLoop/agentLoop.js";
 import type { ModelCapabilities } from "../../config/agentConfig.js";
-import type { DesignSlice } from "../systemDesign/design.js";
+import { HEALTH_ENDPOINT, type DesignSlice } from "../systemDesign/design.js";
 import type { UiSpec } from "../uiDesign/uiSpec.js";
 import { FILE_TOOL_NAMES, INSPECT_SCREEN } from "./codingTools.js";
 
@@ -60,11 +60,11 @@ const SIDE_WORK: Record<CodingSide, string> = {
 
 export function codingContext(input: CodingTaskInput): CodingContext {
   const frontend = input.side === "frontend";
-  const screens = frontend
-    ? input.documents.uiSpec.screens.filter(
-        (screen) => screen.sliceTitle === input.slice.title,
-      )
-    : [];
+  const sliceScreens = input.documents.uiSpec.screens.filter(
+    (screen) => screen.sliceTitle === input.slice.title,
+  );
+  // Design material (layout, images, the live design) is the frontend's.
+  const screens = frontend ? sliceScreens : [];
   const images =
     frontend && input.capabilities.vision
       ? screens.flatMap((screen) => {
@@ -94,7 +94,21 @@ export function codingContext(input: CodingTaskInput): CodingContext {
             screens,
           }).trim()}`,
         ]
-      : []),
+      : sliceScreens.length > 0
+        ? [
+            `Screens of this Slice (from the UI Spec), which your API serves:\n${stringify(
+              sliceScreens.map((screen) => ({
+                name: screen.name,
+                purpose: screen.purpose,
+                endpoints: screen.endpoints,
+                states: screen.states,
+                fields: screen.elements
+                  .filter((element) => element.kind === "input")
+                  .map((element) => element.label),
+              })),
+            ).trim()}`,
+          ]
+        : []),
     ...(images.length > 0
       ? [
           `Attached: the design of each screen, in this order: ${images.map((image) => image.name).join(", ")}.`,
@@ -139,7 +153,7 @@ ${SIDE_WORK[side]}
 How to work:
 - Start by reading the files you will change and the ones they use (list_files, read_file). Reuse the helpers the application already has.
 - You may write only: ${profile.writablePaths[side].join(", ")}. The other Coding Agent writes the rest at the same time; read its files, never change them.
-- Every change comes with tests beside it, and the tests must pass. Tests run with Vitest.
+- Every change comes with Vitest tests beside it. You cannot run them: when you finish, a Test Run installs, tests, boots and smoke-tests the merged Slice, and any failure comes back to you as an Issue Report.
 - Never write secrets or real credentials; configuration comes from environment variables, with placeholders in .env.example.
 - Keep files small and focused. Make small edits with edit_file, and write whole files only when creating them.
 
@@ -172,6 +186,21 @@ function issueSection(issues: readonly CodingIssue[]): string[] {
   return [
     `Fix these problems first; the Slice was sent back because of them:\n${listed}`,
   ];
+}
+
+/**
+ * The sides a Slice needs a Coding Agent for: the backend when it builds an
+ * endpoint the template does not already serve, the frontend when it has a
+ * screen. The Walking Skeleton always gets both, to prove the stack end to end.
+ */
+export function codingSides(slice: DesignSlice, uiSpec: UiSpec): CodingSide[] {
+  if (slice.isWalkingSkeleton) return ["backend", "frontend"];
+  const sides: CodingSide[] = [];
+  if (slice.endpoints.some((endpoint) => endpoint !== HEALTH_ENDPOINT))
+    sides.push("backend");
+  if (uiSpec.screens.some((screen) => screen.sliceTitle === slice.title))
+    sides.push("frontend");
+  return sides;
 }
 
 /** Earlier Slices are already built; later ones are not yours to start. */

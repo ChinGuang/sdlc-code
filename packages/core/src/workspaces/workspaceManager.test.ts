@@ -276,6 +276,30 @@ describe("GitWorkspaceManager.mergeSlice", () => {
     expect(read(frontend, "package.json")).toBe('{ "name": "web" }\n');
   });
 
+  it("merges package.json when both sides add dependencies", async () => {
+    const { manager } = await setup();
+    const backend = await manager.openWorkspace("slice-1", "backend");
+    const frontend = await manager.openWorkspace("slice-1", "frontend");
+    const withDependency = (name: string) =>
+      `${JSON.stringify({ name: "app", dependencies: { [name]: "^1.0.0" } }, null, 2)}\n`;
+    write(backend, "package.json", withDependency("zod"));
+    write(frontend, "package.json", withDependency("react-router-dom"));
+    await manager.saveWorkspace(backend, "backend");
+    await manager.saveWorkspace(frontend, "frontend");
+
+    const outcome = await manager.mergeSlice("slice-1", [backend, frontend]);
+
+    expect(outcome.status).toBe("merged");
+    if (outcome.status !== "merged") return;
+    const manifest = (await manager.readFiles(outcome.commit)).find(
+      (file) => file.path === "package.json",
+    )!;
+    expect(JSON.parse(manifest.contents).dependencies).toEqual({
+      "react-router-dom": "^1.0.0",
+      zod: "^1.0.0",
+    });
+  });
+
   it("can merge again after a conflict is fixed", async () => {
     const { manager } = await setup();
     const backend = await manager.openWorkspace("slice-1", "backend");

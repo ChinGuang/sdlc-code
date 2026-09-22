@@ -70,6 +70,20 @@ describe("LocalWorkspaceFiles reading", () => {
     expect(() => files.readFile(".env")).toThrow(/never read/);
   });
 
+  it("keeps binary and oversized files out of the model's context", () => {
+    const { files, root } = setup();
+    place(root, "server/logo.png", "PNG\0\0binary");
+    place(root, "server/bundle.js", `x${"y".repeat(200_001)}`);
+
+    expect(() => files.readFile("server/logo.png")).toThrow(
+      /not a source file/,
+    );
+    expect(() => files.readFile("server/bundle.js")).toThrow(
+      /not a source file/,
+    );
+    expect(files.search("binary")).toEqual([]);
+  });
+
   it("finds text across files", () => {
     const { files } = setup();
 
@@ -103,6 +117,72 @@ describe("LocalWorkspaceFiles cannot reach outside the Workspace", () => {
     expect(() => files.writeFile(path, "pwned")).toThrow(/not a path inside/);
     expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe("outside");
   });
+
+  // Each was reproduced against the first version (T15 standards review).
+  const secretSpellings = [
+    "server\\.env",
+    ".env ",
+    " .env",
+    ".env.",
+    ".env::$DATA",
+    ".ENV",
+    "server/.Env",
+    "ENV~1",
+    "server/ENV~1",
+  ];
+
+  it.each(secretSpellings)("never reads a secret spelled %j", (path) => {
+    const { files, root } = setup();
+    place(root, "server/.env", "SERVER-SECRET");
+
+    let read = "";
+    try {
+      read = files.readFile(path);
+    } catch {
+      // refused, as it must be
+    }
+    expect(read).not.toContain("secret-key-123");
+    expect(read).not.toContain("SERVER-SECRET");
+  });
+
+  it.each(secretSpellings)("never writes a secret spelled %j", (path) => {
+    const { files, root } = setup(["server/", "./"]);
+    place(root, "server/.env", "SERVER-SECRET");
+
+    expect(() => files.writeFile(path, "overwritten")).toThrow();
+    expect(readFileSync(join(root, ".env"), "utf8")).toContain(
+      "secret-key-123",
+    );
+    expect(readFileSync(join(root, "server/.env"), "utf8")).toBe(
+      "SERVER-SECRET",
+    );
+  });
+
+  it.each([".GIT/config", ".Git", "GIT~1/config", "Node_Modules/x/index.js"])(
+    "never reads git's files or packages spelled %j",
+    (path) => {
+      const { files } = setup();
+
+      expect(() => files.readFile(path)).toThrow();
+    },
+  );
+
+  it("does not list or search a secret file whatever its case", () => {
+    const { files, root } = setup();
+    place(root, ".Env.local", "MIXED-CASE-SECRET");
+
+    expect(files.listFiles()).not.toContain(".Env.local");
+    expect(files.search("MIXED-CASE-SECRET")).toEqual([]);
+  });
+
+  it.each(["server/NUL", "server/con.ts", "server/COM1.txt"])(
+    "refuses the Windows device name %j",
+    (path) => {
+      const { files } = setup();
+
+      expect(() => files.writeFile(path, "x")).toThrow(/device names/);
+    },
+  );
 
   it("refuses git's files and installed packages", () => {
     const { files } = setup(["server/", ".git", "node_modules/"]);

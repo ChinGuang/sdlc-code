@@ -149,6 +149,54 @@ describe("LoopCodingAgent", () => {
     );
   });
 
+  it("reads several files in one turn, reporting a bad one without failing the rest", async () => {
+    const manager = await workspaces();
+    const backend = await manager.openWorkspace("slice-2", "backend");
+    const { agent, requests } = agentReplaying([
+      {
+        toolCalls: [
+          call("read_files", {
+            paths: ["server/app.ts", ".env", "server/missing.ts"],
+          }),
+        ],
+      },
+      { content: "Read them." },
+    ]);
+
+    await agent.code(input(backend.dir));
+
+    const result = requests[1]!.messages.find(
+      (message) => message.role === "tool",
+    )!.content as string;
+    expect(result).toContain("=== server/app.ts ===\nimport express");
+    expect(result).toContain("=== .env ===\nError:");
+    expect(result).toContain(
+      '=== server/missing.ts ===\nError: No file "server/missing.ts".',
+    );
+  });
+
+  it("flags a Step that answered without changing anything", async () => {
+    const manager = await workspaces();
+    const backend = await manager.openWorkspace("slice-2", "backend");
+    const { agent } = agentReplaying([{ content: "All done!" }]);
+
+    const result = await agent.code(input(backend.dir));
+
+    expect(result.summary).toBe("All done!");
+    expect(result.problem).toBe("noChanges");
+  });
+
+  it("flags a Step whose loop stopped before answering", async () => {
+    const manager = await workspaces();
+    const backend = await manager.openWorkspace("slice-2", "backend");
+    const { agent } = agentReplaying([{ content: "" }]);
+
+    const result = await agent.code(input(backend.dir));
+
+    expect(result.loop.stopReason).toBe("emptyAnswer");
+    expect(result.problem).toBe("notAnswered");
+  });
+
   it("cannot write outside its Workspace, or the other side's files", async () => {
     const manager = await workspaces();
     const backend = await manager.openWorkspace("slice-2", "backend");
@@ -195,6 +243,7 @@ describe("LoopCodingAgent", () => {
     expect(toolNames(requests[0]!)).toEqual([
       "list_files",
       "read_file",
+      "read_files",
       "search_files",
       "write_file",
       "edit_file",
