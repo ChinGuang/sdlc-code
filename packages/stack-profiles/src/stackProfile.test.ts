@@ -33,6 +33,26 @@ describe("stackProfile", () => {
   });
 });
 
+describe("writablePaths", () => {
+  it("names folders and files the template has, and keeps the test script the profile's", () => {
+    for (const profile of STACK_PROFILES) {
+      const paths = templateFiles(profile).map((file) => file.path);
+      for (const writable of Object.values(profile.writablePaths).flat())
+        expect(
+          paths.some((path) =>
+            writable.endsWith("/")
+              ? path.startsWith(writable)
+              : path === writable,
+          ),
+          writable,
+        ).toBe(true);
+      expect(Object.values(profile.writablePaths).flat()).not.toContain(
+        "scripts/",
+      );
+    }
+  });
+});
+
 describe("templateFiles", () => {
   const files = templateFiles(REACT_NODE);
   const paths = files.map((file) => file.path);

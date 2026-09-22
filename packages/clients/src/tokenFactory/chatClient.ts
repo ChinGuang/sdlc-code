@@ -18,8 +18,15 @@ export const TOKEN_FACTORY_DEFAULT_BASE_URL =
 
 export type ToolCall = { id: string; name: string; arguments: string };
 
+/** Part of a user message for a model with vision: text or an image. */
+export type ContentPart =
+  | { type: "text"; text: string }
+  /** `url` may be a data URL, e.g. "data:image/png;base64,…". */
+  | { type: "image_url"; image_url: { url: string } };
+
 export type ChatMessage =
-  | { role: "system" | "user"; content: string }
+  | { role: "system"; content: string }
+  | { role: "user"; content: string | ContentPart[] }
   | {
       role: "assistant";
       content: string | null;

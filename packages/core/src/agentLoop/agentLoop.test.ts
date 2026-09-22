@@ -211,6 +211,52 @@ describe("ChatAgentLoop: tool call → result → final answer", () => {
   });
 });
 
+describe("ChatAgentLoop: images for a model with vision", () => {
+  it("sends images as data URLs after the text, and keeps them out of the Transcript", async () => {
+    const { loop, requests, events } = makeLoop([
+      { content: "The list screen has a header." },
+      { content: "- nothing to add" },
+    ]);
+
+    await loop.run({
+      ...task,
+      images: [{ bytes: Buffer.from("png-bytes"), mimeType: "image/png" }],
+    });
+
+    expect(requests[0]!.messages[1]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: task.user },
+        {
+          type: "image_url",
+          image_url: {
+            url: `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`,
+          },
+        },
+      ],
+    });
+    expect(events[1]).toEqual({
+      type: "message",
+      role: "user",
+      content: `${task.user}\n\n[1 image attached]`,
+    });
+  });
+
+  it("sends plain text when there are no images", async () => {
+    const { loop, requests } = makeLoop([
+      { content: "done" },
+      { content: "- nothing" },
+    ]);
+
+    await loop.run(task);
+
+    expect(requests[0]!.messages[1]).toEqual({
+      role: "user",
+      content: task.user,
+    });
+  });
+});
+
 describe("ChatAgentLoop: malformed and failing tool calls", () => {
   it("does not run tool calls from a reply cut off at the output limit", async () => {
     let ran = false;
