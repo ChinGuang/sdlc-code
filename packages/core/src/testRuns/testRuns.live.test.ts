@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import { openDatabase } from "../persistence/database.js";
 import { SqliteSnapshotStore } from "../persistence/snapshotStore.js";
 import { SandboxBaseSnapshots } from "./baseSnapshots.js";
+import type { UploadCache } from "./sandboxFiles.js";
 import { SandboxTestRunner, type TestRunner } from "./testRunner.js";
 
 const live = process.env.NEBIUS_LIVE === "1";
@@ -41,7 +42,7 @@ function liveRunner(): TestRunner {
     project,
     baseUrl: process.env.NEBIUS_SANDBOX_URL || undefined,
   });
-  const uploaded = new Map<string, string>();
+  const uploaded: UploadCache = new Map();
   const store = new SqliteSnapshotStore({
     db: openDatabase(join(tmpdir(), "sdlc-code-live-snapshots.db")),
   });

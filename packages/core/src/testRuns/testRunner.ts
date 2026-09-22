@@ -25,10 +25,15 @@ import {
   sha256,
   shellQuote,
   uploadFiles,
+  type UploadCache,
 } from "./sandboxFiles.js";
 
-/** Spike T01: generous for install + tests + boot + smoke, well under the 3,600 s cap. */
-const TEST_RUN_TIMEOUT_SECONDS = 600;
+/**
+ * Longer than the test script's own worst case (every step at its limit,
+ * about 1,600 s), so the script times out first and still prints its result
+ * and log; under the sandbox's 3,600 s cap.
+ */
+const TEST_RUN_TIMEOUT_SECONDS = 1800;
 /** Spike T01: 250 ms polling saves about a second per run over 1 s. */
 const POLL_MS = 250;
 /** Enough log for an Issue Report; the SDLC_RESULT line is always at its end. */
@@ -85,7 +90,7 @@ export type SandboxTestRunnerOptions = {
   sandbox: SandboxClient;
   snapshots: BaseSnapshots;
   /** Content already uploaded, by sha256; shared with the Base Snapshots. */
-  uploaded?: Map<string, string>;
+  uploaded?: UploadCache;
   /** What the Base Snapshot holds. Defaults to the template in this repo. */
   files?: (profile: StackProfile) => TemplateFile[];
 };
@@ -93,7 +98,7 @@ export type SandboxTestRunnerOptions = {
 export class SandboxTestRunner implements TestRunner {
   #sandbox: SandboxClient;
   #snapshots: BaseSnapshots;
-  #uploaded: Map<string, string>;
+  #uploaded: UploadCache;
   #files: (profile: StackProfile) => TemplateFile[];
 
   constructor(options: SandboxTestRunnerOptions) {
@@ -112,9 +117,10 @@ export class SandboxTestRunner implements TestRunner {
     try {
       result = await this.#run(profile, plan);
     } catch (error) {
-      if (!isRejectedRequest(error)) throw error;
-      // The sandbox refused the run itself, most likely because the Snapshot's
-      // image (or an uploaded file) has expired: start over from scratch, once.
+      if (!isGone(error)) throw error;
+      // The Snapshot's image (or an uploaded file) has expired: start over
+      // from scratch, once. Assumed from the API's 404/410 semantics; how the
+      // sandbox reports an expired image is not yet observed live.
       this.#snapshots.discardSnapshot(profile);
       this.#uploaded.clear();
       result = await this.#run(profile, plan);
@@ -169,7 +175,10 @@ export function planUpload(
  * The script's log goes to a file and only its end is printed, so however
  * much the install and tests print, the SDLC_RESULT line is in the output.
  */
-export function testCommand(profile: StackProfile, removed: readonly string[]) {
+export function testCommand(
+  profile: StackProfile,
+  removed: readonly string[],
+): string {
   return [
     `cd ${shellQuote(SANDBOX_APP_DIR)}`,
     ...(removed.length > 0
@@ -180,13 +189,11 @@ export function testCommand(profile: StackProfile, removed: readonly string[]) {
   ].join(" && ");
 }
 
-/** A 4xx other than rate limiting: the API understood and refused the request. */
-function isRejectedRequest(error: unknown): boolean {
+/** The API no longer has something the run named. */
+function isGone(error: unknown): boolean {
   return (
     error instanceof SandboxApiError &&
-    error.status >= 400 &&
-    error.status < 500 &&
-    error.status !== 429
+    (error.status === 404 || error.status === 410)
   );
 }
 

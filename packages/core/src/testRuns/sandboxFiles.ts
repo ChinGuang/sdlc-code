@@ -53,38 +53,48 @@ export function snapshotHash(
   const hash = createHash("sha256").update(
     `image\0${baseImage}\0command\0${snapshotCommand}\0`,
   );
-  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path)))
+  for (const file of [...files].sort(byPath))
     hash.update(`file\0${file.path}\0${sha256(file.contents)}\0`);
   return hash.digest("hex");
 }
 
+/** By code point: the hash must not depend on the machine's locale. */
+const byPath = (a: TemplateFile, b: TemplateFile): number =>
+  a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+
 const UPLOAD_CONCURRENCY = 8;
+
+/** Sandbox file ids by content sha256; an upload in flight is shared, not repeated. */
+export type UploadCache = Map<string, Promise<string>>;
 
 /**
  * Uploads files in parallel and maps each to its place under /app. Content
  * already uploaded (same sha256, recorded in `uploaded`) is not sent again.
+ * A secret file is never uploaded, whoever asks.
  */
 export async function uploadFiles(
   sandbox: SandboxClient,
   files: readonly TemplateFile[],
-  uploaded: Map<string, string>,
+  uploaded: UploadCache,
 ): Promise<Record<string, FileRef>> {
   const refs: Record<string, FileRef> = {};
-  const queue = [...files];
+  const queue = files.filter((file) => !isSecretFile(file.path));
+  for (const file of queue) assertAppPath(file.path);
   const worker = async (): Promise<void> => {
     for (let file = queue.shift(); file; file = queue.shift()) {
-      assertAppPath(file.path);
       const digest = sha256(file.contents);
       let uuid = uploaded.get(digest);
       if (!uuid) {
-        uuid = (await sandbox.uploadFile(file.contents)).uuid;
+        uuid = sandbox.uploadFile(file.contents).then((stored) => stored.uuid);
         uploaded.set(digest, uuid);
+        // A failed upload must not be reused by the next Test Run.
+        uuid.catch(() => uploaded.delete(digest));
       }
-      refs[`${SANDBOX_APP_DIR}/${file.path}`] = { uuid };
+      refs[`${SANDBOX_APP_DIR}/${file.path}`] = { uuid: await uuid };
     }
   };
   await Promise.all(
-    Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, worker),
+    Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, worker),
   );
   return refs;
 }

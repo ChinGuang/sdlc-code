@@ -95,10 +95,8 @@ export class SandboxApiError extends Error {
 /** Spike T01 finding 6: 504s and network blips happen; the next call works. */
 function isTransient(error: unknown): boolean {
   return (
-    !(error instanceof SandboxApiError) ||
-    error.status === 0 ||
-    error.status === 429 ||
-    error.status >= 500
+    error instanceof SandboxApiError &&
+    (error.status === 0 || error.status === 429 || error.status >= 500)
   );
 }
 
@@ -292,19 +290,20 @@ export class NebiusSandboxClient implements SandboxClient {
     }
 
     let response: Response;
+    let text: string;
     try {
       response = await this.#fetch(`${this.#baseUrl}${path}`, {
         method,
         headers,
         body: payload,
       });
+      text = await response.text();
     } catch (error) {
       throw new SandboxApiError(
         0,
         `Sandbox API ${method} ${path} could not be reached: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    const text = await response.text();
     if (!response.ok) {
       throw new SandboxApiError(
         response.status,

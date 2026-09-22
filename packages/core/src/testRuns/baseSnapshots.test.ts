@@ -10,7 +10,12 @@ import {
   SandboxBaseSnapshots,
   type BaseSnapshots,
 } from "./baseSnapshots.js";
-import { fakeSandbox, ranOk, type FakeSandbox } from "./fakeSandbox.js";
+import {
+  fakeSandbox,
+  ranOk,
+  type FakeSandbox,
+} from "./fixtures/fakeSandbox.js";
+import { snapshotHash } from "./sandboxFiles.js";
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -62,6 +67,21 @@ describe("SandboxBaseSnapshots", () => {
         "/app/server/app.ts": { uuid: "file-2" },
       },
     });
+  });
+
+  // A template run locally can leave a .env beside it.
+  it("never builds a secret file into the Snapshot", async () => {
+    const { snapshots, sandbox } = setup({
+      template: [
+        { path: "package.json", contents: "{}" },
+        { path: ".env", contents: "DATABASE_URL=secret-db-123" },
+      ],
+    });
+
+    await snapshots.snapshotImage(REACT_NODE);
+
+    expect(Object.keys(sandbox.runs[0]!.files!)).toEqual(["/app/package.json"]);
+    expect(JSON.stringify(sandbox.uploads)).not.toContain("secret-db-123");
   });
 
   it("builds once, and reuses the saved Snapshot after a restart", async () => {
@@ -147,11 +167,21 @@ describe("SandboxBaseSnapshots", () => {
     const sandbox = fakeSandbox({
       onRun: () => ranOk({ exitCode: 1, stdout: "npm ERR! 404 left-pad" }),
     });
-    const { snapshots } = setup({ sandbox });
+    const { snapshots, store, template } = setup({ sandbox });
 
     await expect(snapshots.snapshotImage(REACT_NODE)).rejects.toThrow(
       /Base Snapshot failed: exit code 1\nnpm ERR! 404 left-pad/,
     );
+    expect(
+      store.findSnapshot({
+        profileId: REACT_NODE.id,
+        templateHash: snapshotHash(
+          template,
+          REACT_NODE.snapshotCommand,
+          NODE_IMAGE_TAG,
+        ),
+      }),
+    ).toBeNull();
     // The next call tries again rather than reusing a broken Snapshot.
     await expect(snapshots.snapshotImage(REACT_NODE)).rejects.toThrow();
     expect(sandbox.runs).toHaveLength(2);

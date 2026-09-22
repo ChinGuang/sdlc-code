@@ -177,6 +177,22 @@ describe("SandboxClient", () => {
     expect(denied.calls).toHaveLength(1);
   });
 
+  it("never retries a reply it could not read, so a run is not started twice", async () => {
+    let attempts = 0;
+    const garbled = vi.fn(async () => {
+      attempts++;
+      return new Response("{not json", { status: 201 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      makeClient({ ...base, fetch: garbled, sleep: async () => {} }).spawn({
+        image: "tag:x",
+        command: "true",
+      }),
+    ).rejects.toThrow(SyntaxError);
+    expect(attempts).toBe(1);
+  });
+
   it("polls an operation until it reaches a terminal status", async () => {
     const { fetch, calls } = fakeFetch([
       { status: 200, body: op({ status: "PENDING" }) },

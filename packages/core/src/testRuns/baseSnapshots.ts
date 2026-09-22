@@ -19,6 +19,7 @@ import {
   shellQuote,
   snapshotHash,
   uploadFiles,
+  type UploadCache,
 } from "./sandboxFiles.js";
 
 /** Node 22 is not in the public catalogue; it is imported once under this tag. */
@@ -39,7 +40,7 @@ export type BaseSnapshotsOptions = {
   sandbox: SandboxClient;
   store: SnapshotStore;
   /** Content already uploaded, by sha256; shared with the Test Runner. */
-  uploaded?: Map<string, string>;
+  uploaded?: UploadCache;
   /** Defaults to the template in this repo. */
   files?: (profile: StackProfile) => TemplateFile[];
   now?: () => number;
@@ -56,7 +57,7 @@ export interface BaseSnapshots {
 export class SandboxBaseSnapshots implements BaseSnapshots {
   #sandbox: SandboxClient;
   #store: SnapshotStore;
-  #uploaded: Map<string, string>;
+  #uploaded: UploadCache;
   #files: (profile: StackProfile) => TemplateFile[];
   #now: () => number;
   /** One build per template at a time, however many Test Runs wait for it. */

@@ -18,8 +18,6 @@ export type StackProfile = {
   testCommand: string;
   /** Run once in the application's directory to build its Base Snapshot. */
   snapshotCommand: string;
-  /** Names the Base Snapshot built from this template (T13). */
-  baseSnapshotTag: string;
   reviewStandard: readonly Rule[];
 };
 
@@ -33,7 +31,6 @@ export const REACT_NODE: StackProfile = {
   templateDir: join(TEMPLATES, "react-node"),
   testCommand: "node scripts/sdlcTest.mjs",
   snapshotCommand: "node scripts/sdlcTest.mjs --install-only",
-  baseSnapshotTag: "sdlc-code/react-node:v1",
   reviewStandard: BASELINE_RULES,
 };
 

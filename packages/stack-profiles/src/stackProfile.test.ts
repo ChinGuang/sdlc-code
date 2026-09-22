@@ -29,7 +29,6 @@ describe("stackProfile", () => {
       expect(profile.summary).toMatch(/\w/);
       expect(profile.testCommand).toMatch(/\w/);
       expect(profile.snapshotCommand).toMatch(/\w/);
-      expect(profile.baseSnapshotTag).toMatch(/^sdlc-code\/.+:.+$/);
     }
   });
 });

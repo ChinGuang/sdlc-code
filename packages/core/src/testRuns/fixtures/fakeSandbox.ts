@@ -56,7 +56,7 @@ export function fakeSandbox({
 
 export function ranOk(overrides: Partial<RunResult> = {}): RunResult {
   return {
-    operationId: `op-run`,
+    operationId: "op-run",
     status: "SUCCESS",
     exitCode: 0,
     timedOut: false,

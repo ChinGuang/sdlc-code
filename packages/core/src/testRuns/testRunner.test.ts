@@ -7,7 +7,7 @@ import {
   ranOk,
   scriptOutput,
   type FakeSandbox,
-} from "./fakeSandbox.js";
+} from "./fixtures/fakeSandbox.js";
 import { isSecretFile, shellQuote, snapshotHash } from "./sandboxFiles.js";
 import {
   planUpload,
@@ -75,7 +75,7 @@ describe("SandboxTestRunner", () => {
       image: "snapshot-0",
       shell: true,
       disposable: true,
-      timeout: 600,
+      timeout: 1800,
       files: {
         "/app/server/app.ts": { uuid: "file-1" },
         "/app/server/todos.ts": { uuid: "file-2" },
@@ -236,7 +236,42 @@ describe("SandboxTestRunner", () => {
     expect(sandbox.runs[1]!.files).toEqual(sandbox.runs[0]!.files);
   });
 
-  it("rebuilds the Snapshot and runs again once when the sandbox refuses the run", async () => {
+  it("uploads identical content once even within one run", async () => {
+    const { runner, sandbox } = setup();
+
+    await runner.runTests({
+      profile: REACT_NODE,
+      files: slice([
+        { path: "server/a.ts", contents: "same" },
+        { path: "server/b.ts", contents: "same" },
+      ]),
+    });
+
+    expect(sandbox.uploads).toEqual(["same"]);
+  });
+
+  it("uploads again after a failed upload", async () => {
+    const { runner, sandbox } = setup();
+    let failNext = true;
+    const upload = sandbox.uploadFile;
+    sandbox.uploadFile = async (content) => {
+      if (failNext) {
+        failNext = false;
+        throw new SandboxApiError(503, "busy");
+      }
+      return upload(content);
+    };
+    const files = slice([{ path: "server/todos.ts", contents: "todos" }]);
+
+    await expect(
+      runner.runTests({ profile: REACT_NODE, files }),
+    ).rejects.toMatchObject({ status: 503 });
+    await expect(
+      runner.runTests({ profile: REACT_NODE, files }),
+    ).resolves.toMatchObject({ status: "passed" });
+  });
+
+  it("rebuilds the Snapshot and runs again once when the sandbox no longer has it", async () => {
     let attempts = 0;
     const { runner, sandbox, snapshots } = setup(() => {
       if (++attempts === 1) throw new SandboxApiError(404, "image not found");
@@ -258,15 +293,28 @@ describe("SandboxTestRunner", () => {
     expect(sandbox.uploads).toEqual(["todos", "todos"]);
   });
 
-  it("gives up when the sandbox refuses the run a second time", async () => {
+  it("gives up when the sandbox still does not have it after a rebuild", async () => {
     const { runner, snapshots } = setup(() => {
-      throw new SandboxApiError(400, "bad request");
+      throw new SandboxApiError(404, "image not found");
     });
 
     await expect(
       runner.runTests({ profile: REACT_NODE, files: slice() }),
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toMatchObject({ status: 404 });
     expect(snapshots.discarded).toBe(1);
+  });
+
+  it("does not rebuild the Snapshot for a bad request or bad credentials", async () => {
+    for (const status of [400, 401, 403, 413]) {
+      const { runner, snapshots } = setup(() => {
+        throw new SandboxApiError(status, "refused");
+      });
+
+      await expect(
+        runner.runTests({ profile: REACT_NODE, files: slice() }),
+      ).rejects.toMatchObject({ status });
+      expect(snapshots.discarded).toBe(0);
+    }
   });
 
   it("does not rebuild the Snapshot when the API is failing", async () => {
