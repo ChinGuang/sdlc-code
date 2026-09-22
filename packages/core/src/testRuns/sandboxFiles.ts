@@ -18,7 +18,8 @@ export const sha256 = (contents: string): string =>
  * secret and ships with the template.
  */
 export function isSecretFile(path: string): boolean {
-  const name = path.split("/").at(-1) ?? path;
+  // Either separator, any case: Windows reads ".ENV" and "a\.env" as ".env".
+  const name = (path.split(/[/\\]/).at(-1) ?? path).toLowerCase();
   return (
     (name === ".env" || name.startsWith(".env.")) && name !== ".env.example"
   );

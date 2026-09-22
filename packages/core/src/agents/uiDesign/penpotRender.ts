@@ -232,3 +232,50 @@ caption.name = "caption";
 return { boardId: board.id, name: boardName };
 `;
 }
+
+/** Most elements read back from one screen; a drawn screen has far fewer. */
+const MAX_DESCRIBED_ELEMENTS = 300;
+
+/**
+ * Reads a drawn screen back, read-only, for a Coding Agent: every element
+ * with its text, position relative to the board, size and first fill. A human
+ * may have adjusted the board since it was drawn. Null if it is not there.
+ */
+export function describeScreenCode(
+  pageName: string,
+  screenName: string,
+): string {
+  return `
+const pageName = ${literal(pageName)};
+const boardName = ${literal(BOARD_PREFIX + screenName)};
+const limit = ${MAX_DESCRIBED_ELEMENTS};
+const page = penpotUtils.getPageByName(pageName);
+if (!page) return null;
+const board = penpotUtils.findShape((s) => s.type === "board" && s.name === boardName, page.root);
+if (!board) return null;
+const elements = [];
+const walk = (shape) => {
+  for (const child of shape.children ?? []) {
+    if (elements.length >= limit) return;
+    elements.push({
+      type: child.type,
+      name: child.name,
+      text: child.type === "text" ? (child.characters ?? null) : null,
+      x: Math.round(child.x - board.x),
+      y: Math.round(child.y - board.y),
+      width: Math.round(child.width),
+      height: Math.round(child.height),
+      fill: child.fills?.[0]?.fillColor ?? null,
+    });
+    walk(child);
+  }
+};
+walk(board);
+return {
+  name: ${literal(screenName)},
+  width: Math.round(board.width),
+  height: Math.round(board.height),
+  elements,
+};
+`;
+}

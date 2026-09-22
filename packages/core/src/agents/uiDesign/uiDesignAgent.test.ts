@@ -44,6 +44,7 @@ function fakeCanvas(overrides: Partial<UiCanvas> = {}) {
       exported.push(boardId);
       return { bytes: Buffer.from("png"), mimeType: "image/png" };
     },
+    describeScreen: async () => null,
     ...overrides,
   };
   return { canvas, drawn, exported, swept };

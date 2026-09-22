@@ -38,3 +38,7 @@ export * from "./testRuns/baseSnapshots.js";
 export * from "./testRuns/testRunner.js";
 export * from "./workspaces/git.js";
 export * from "./workspaces/workspaceManager.js";
+export * from "./agents/coding/workspaceFiles.js";
+export * from "./agents/coding/codingTools.js";
+export * from "./agents/coding/codingContext.js";
+export * from "./agents/coding/codingAgent.js";

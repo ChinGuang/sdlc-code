@@ -5,6 +5,7 @@
 import type { ExportedImage, PenpotClient } from "@sdlc-code/clients";
 import {
   CONNECTION_CHECK_CODE,
+  describeScreenCode,
   ensurePageCode,
   screenCode,
   sweepBoardsCode,
@@ -26,6 +27,24 @@ export type RunPage = {
 
 export type DrawnBoard = { boardId: string; name: string };
 
+/** A screen as drawn in Penpot, read back for a Coding Agent. */
+export type ScreenDescription = {
+  name: string;
+  width: number;
+  height: number;
+  elements: Array<{
+    type: string;
+    name: string;
+    text: string | null;
+    /** Relative to the board. */
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    fill: string | null;
+  }>;
+};
+
 export type DrawScreenRequest = {
   pageName: string;
   /** Position of the board on the page, left to right. */
@@ -44,6 +63,11 @@ export interface UiCanvas {
   /** Removes boards of screens the design no longer has; returns their names. */
   sweepBoards: (pageName: string, keepScreens: string[]) => Promise<string[]>;
   exportBoard: (boardId: string) => Promise<ExportedImage>;
+  /** Reads a drawn screen back; null when the page or board is missing. */
+  describeScreen: (
+    pageName: string,
+    screenName: string,
+  ) => Promise<ScreenDescription | null>;
 }
 
 export class PenpotUiCanvas implements UiCanvas {
@@ -74,4 +98,12 @@ export class PenpotUiCanvas implements UiCanvas {
 
   exportBoard = (boardId: string): Promise<ExportedImage> =>
     this.#penpot.exportShape(boardId, "png");
+
+  describeScreen = (
+    pageName: string,
+    screenName: string,
+  ): Promise<ScreenDescription | null> =>
+    this.#penpot.executeCode<ScreenDescription | null>(
+      describeScreenCode(pageName, screenName),
+    );
 }

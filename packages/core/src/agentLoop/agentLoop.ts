@@ -14,6 +14,8 @@ import {
   type ChatMessage,
   type ChatRequest,
   type ChatResponse,
+  type ContentPart,
+  type ExportedImage,
   type ToolCall,
   type Usage,
 } from "@sdlc-code/clients";
@@ -29,7 +31,12 @@ import {
 
 export type CompletionClient = Pick<ChatClient, "complete">;
 
-export type AgentTask = { system: string; user: string };
+export type AgentTask = {
+  system: string;
+  user: string;
+  /** Sent with the user message; only for a model with vision. */
+  images?: ExportedImage[];
+};
 
 /** One Transcript row; recorded as a Step event (CONTEXT.md "Transcript"). */
 export type TranscriptEvent =
@@ -122,12 +129,26 @@ export class ChatAgentLoop implements AgentLoop {
   }
 
   run = async (task: AgentTask): Promise<AgentLoopResult> => {
+    const images = task.images ?? [];
     const messages: ChatMessage[] = [
       { role: "system", content: task.system },
-      { role: "user", content: task.user },
+      {
+        role: "user",
+        content: images.length > 0 ? withImages(task.user, images) : task.user,
+      },
     ];
     this.#record({ type: "message", role: "system", content: task.system });
-    this.#record({ type: "message", role: "user", content: task.user });
+    // The Transcript keeps the text; the images are the design's own exports.
+    this.#record({
+      type: "message",
+      role: "user",
+      content:
+        images.length > 0
+          ? `${task.user}
+
+[${images.length} image${images.length === 1 ? "" : "s"} attached]`
+          : task.user,
+    });
 
     const state: LoopState = {
       stopReason: "maxIterations",
@@ -345,6 +366,19 @@ const STOP_REASON_TEXT: Record<StopReason, string> = {
   emptyAnswer: "the model returned an empty answer",
   apiError: "Token Factory error",
 };
+
+/** The user message with each image as a data URL after the text. */
+function withImages(text: string, images: ExportedImage[]): ContentPart[] {
+  return [
+    { type: "text", text },
+    ...images.map((image): ContentPart => ({
+      type: "image_url",
+      image_url: {
+        url: `data:${image.mimeType};base64,${image.bytes.toString("base64")}`,
+      },
+    })),
+  ];
+}
 
 /** A Working Memory note built from facts, when the model cannot write one. */
 function fallbackNote(state: LoopState): string {

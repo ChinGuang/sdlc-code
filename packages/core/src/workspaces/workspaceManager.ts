@@ -7,7 +7,13 @@
  * its Test Run passes.
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import type { TemplateFile } from "@sdlc-code/stack-profiles";
 import { isSecretFile } from "../testRuns/sandboxFiles.js";
@@ -19,6 +25,7 @@ import {
   type GitCommand,
   type GitOutput,
 } from "./git.js";
+import { mergePackageJson } from "./packageJsonMerge.js";
 
 /** The Coding Agents that own a Workspace in a Slice. */
 export const WORKSPACE_ROLES = ["backend", "frontend"] as const;
@@ -313,6 +320,12 @@ export class GitWorkspaceManager implements WorkspaceManager {
       ]);
       const files = conflicted.stdout.split("\0").filter(Boolean);
       if (files.length === 0) throw new GitError(["merge"], merged);
+      if (
+        files.length === 1 &&
+        files[0] === "package.json" &&
+        (await this.#mergeManifest(merge.dir))
+      )
+        continue;
       await this.#run(merge.dir, ["merge", "--abort"]);
       return { status: "conflict", sliceId, role: workspace.role, files };
     }
@@ -500,6 +513,28 @@ export class GitWorkspaceManager implements WorkspaceManager {
           recursive: true,
           force: true,
         });
+  }
+
+  /**
+   * Both sides added to package.json: merge it by key and finish the merge.
+   * False when they changed the same key differently, a real conflict.
+   */
+  async #mergeManifest(dir: string): Promise<boolean> {
+    // Index stages of the conflicted file: 1 base, 2 ours, 3 theirs.
+    const stage = async (n: number): Promise<string> =>
+      (await this.#exec(dir, ["show", `:${n}:package.json`])).stdout;
+    const merged = mergePackageJson(
+      await stage(1),
+      await stage(2),
+      await stage(3),
+    );
+    if (merged === null) return false;
+    writeFileSync(join(dir, "package.json"), merged);
+    await this.#run(dir, ["add", "package.json"]);
+    await this.#run(dir, ["commit", "--quiet", "--no-verify", "--no-edit"], {
+      env: this.#identity(),
+    });
+    return true;
   }
 
   async #isWorktree(dir: string): Promise<boolean> {

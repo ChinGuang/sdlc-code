@@ -7,12 +7,14 @@ import {
 import { goodUiSpec } from "./fixtures/goodUiSpec.js";
 import {
   CONNECTION_CHECK_CODE,
+  describeScreenCode,
   ensurePageCode,
   penpotPageUrl,
   runPageName,
   screenCode,
   sweepBoardsCode,
 } from "./penpotRender.js";
+import type { ScreenDescription } from "./uiCanvas.js";
 import { BOARD_WIDTH } from "./uiSpec.js";
 
 const PAGE = "#run-1 Todo app";
@@ -66,6 +68,74 @@ describe("ensurePageCode", () => {
 
     expect(result).toMatchObject({ created: false });
     expect(fake.pages).toHaveLength(1);
+  });
+});
+
+describe("describeScreenCode", () => {
+  it("reads a drawn screen back with each element relative to its board", async () => {
+    const fake = fakePenpot();
+    await runPenpotCode(fake, ensurePageCode(PAGE));
+    await runPenpotCode(fake, drawScreen(0));
+    await runPenpotCode(fake, drawScreen(1));
+
+    const described = (await runPenpotCode(
+      fake,
+      describeScreenCode(PAGE, "Todo list"),
+    )) as ScreenDescription;
+
+    expect(described).toMatchObject({
+      name: "Todo list",
+      width: BOARD_WIDTH,
+      height: 800,
+    });
+    const button = described.elements.find(
+      (element) => element.name === "button: Add",
+    );
+    // Board 2 sits at x = 1360; the element's position is the spec's.
+    expect(button).toMatchObject({ x: 560, y: 128 });
+    expect(described.elements.some((element) => element.text === "Add")).toBe(
+      true,
+    );
+  });
+
+  it("is null when the screen or the page is not drawn", async () => {
+    const fake = fakePenpot();
+    await runPenpotCode(fake, ensurePageCode(PAGE));
+
+    expect(
+      await runPenpotCode(fake, describeScreenCode(PAGE, "Todo list")),
+    ).toBeNull();
+    expect(
+      await runPenpotCode(fake, describeScreenCode("#other", "Todo list")),
+    ).toBeNull();
+  });
+
+  it("changes nothing in the design", async () => {
+    const fake = fakePenpot();
+    await runPenpotCode(fake, ensurePageCode(PAGE));
+    await runPenpotCode(fake, drawScreen(1));
+    // Shapes point back at their parent; leave that out of the snapshot.
+    const snapshot = () =>
+      JSON.stringify(fake.boards(PAGE)[0]!.children, (key, value: unknown) =>
+        key === "parent" ? undefined : value,
+      );
+    const before = snapshot();
+
+    await runPenpotCode(fake, describeScreenCode(PAGE, "Todo list"));
+
+    expect(snapshot()).toBe(before);
+  });
+
+  it("keeps a hostile screen name inert in the generated code", async () => {
+    const fake = fakePenpot();
+    await runPenpotCode(fake, ensurePageCode(PAGE));
+
+    await expect(
+      runPenpotCode(
+        fake,
+        describeScreenCode(PAGE, '"); throw new Error("injected'),
+      ),
+    ).resolves.toBeNull();
   });
 });
 

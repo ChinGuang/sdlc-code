@@ -7,6 +7,9 @@ import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BASELINE_RULES, type Rule } from "./reviewStandard.js";
 
+/** The Coding Agents of a Slice; each writes its own part of the application. */
+export type CodingSide = "backend" | "frontend";
+
 export type StackProfile = {
   id: string;
   name: string;
@@ -19,6 +22,11 @@ export type StackProfile = {
   /** Run once in the application's directory to build its Base Snapshot. */
   snapshotCommand: string;
   reviewStandard: readonly Rule[];
+  /**
+   * What each Coding Agent may write: a folder ends with "/", anything else
+   * is one file. Both may read everything; the test script is the profile's.
+   */
+  writablePaths: Record<CodingSide, readonly string[]>;
 };
 
 const TEMPLATES = fileURLToPath(new URL("../templates/", import.meta.url));
@@ -32,6 +40,17 @@ export const REACT_NODE: StackProfile = {
   testCommand: "node scripts/sdlcTest.mjs",
   snapshotCommand: "node scripts/sdlcTest.mjs --install-only",
   reviewStandard: BASELINE_RULES,
+  writablePaths: {
+    backend: ["server/", "prisma/", "package.json", ".env.example"],
+    frontend: [
+      "src/",
+      "index.html",
+      "package.json",
+      "vite.config.ts",
+      "tailwind.config.js",
+      "postcss.config.js",
+    ],
+  },
 };
 
 export const STACK_PROFILES: readonly StackProfile[] = [REACT_NODE];
