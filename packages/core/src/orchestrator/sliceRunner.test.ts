@@ -4,7 +4,13 @@
  */
 import { REACT_NODE, templateFiles } from "@sdlc-code/stack-profiles";
 import type { CodingSide } from "@sdlc-code/stack-profiles";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -92,10 +98,21 @@ const frontendFailure = (signature: string) =>
     suspectedOwner: "frontendCoding",
   });
 
+/** What a fake Coding Agent does on a call: write its file (default), or not. */
+type Behaviour =
+  | "write"
+  | "nothing"
+  | "throw"
+  | { stop: AgentLoopResult["stopReason"] }
+  | { path: string; contents: string };
+
 async function setup(options: {
   results: TestSliceResult[];
   tokens?: number;
   plan?: typeof TODOS;
+  retryBudget?: number;
+  /** Per side, what each of its calls does, in order. */
+  behave?: Partial<Record<CodingSide, Behaviour[]>>;
 }) {
   const root = mkdtempSync(join(tmpdir(), "sdlc-slice-"));
   folders.push(root);
@@ -122,6 +139,7 @@ async function setup(options: {
     notes: string | null;
   }> = [];
   let tokens = options.tokens ?? 1_000_000;
+  const checkpoints: string[] = [];
   const results = [...options.results];
   const testing: TestingAgent = {
     testSlice: async () => {
@@ -138,11 +156,41 @@ async function setup(options: {
         notes: input.workingMemory,
       });
       tokens -= 1000;
+      const behaviour = options.behave?.[side]?.shift() ?? "write";
+      if (behaviour === "throw") {
+        // The half-written file a crash leaves behind.
+        writeFileSync(join(input.workspaceDir, "server-crash.txt"), "x");
+        throw new Error(`${side} agent crashed`);
+      }
+      if (typeof behaviour === "object" && "stop" in behaviour)
+        return {
+          summary: null,
+          problem: "notAnswered",
+          changes: [],
+          loop: { ...loop(), stopReason: behaviour.stop, answer: null },
+        };
+      if (behaviour === "nothing")
+        return {
+          summary: "Nothing to change.",
+          problem: "noChanges",
+          changes: [],
+          loop: loop(),
+        };
       // Each attempt changes the side's own file, as a real fix would.
-      const path = side === "backend" ? "server/todos.ts" : "src/TodoList.tsx";
+      const path =
+        typeof behaviour === "object"
+          ? behaviour.path
+          : side === "backend"
+            ? "server/todos.ts"
+            : "src/TodoList.tsx";
       const file = join(input.workspaceDir, path);
       mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, `// attempt ${calls.length}\n`);
+      writeFileSync(
+        file,
+        typeof behaviour === "object"
+          ? behaviour.contents
+          : `// attempt ${calls.length}\n`,
+      );
       return {
         summary: `${side} done`,
         problem: null,
@@ -163,6 +211,8 @@ async function setup(options: {
       spend: (spent) => void (tokens -= spent),
     },
     codingAgent,
+    retryBudget: options.retryBudget,
+    checkpoint: (checkpoint) => checkpoints.push(checkpoint.at),
   });
   const input = (overrides: Partial<SliceRunInput> = {}): SliceRunInput => ({
     runId,
@@ -186,7 +236,18 @@ async function setup(options: {
   });
   const sliceStatus = () =>
     slices.listSlices(runId).find((s) => s.id === slice!.id)!;
-  return { runner, input, calls, tasks, runId, workspaces, sliceStatus };
+  const testsLeft = () => results.length;
+  return {
+    runner,
+    input,
+    calls,
+    tasks,
+    runId,
+    workspaces,
+    sliceStatus,
+    checkpoints,
+    testsLeft,
+  };
 }
 
 describe("OrchestratedSliceRunner", () => {
@@ -271,10 +332,18 @@ describe("OrchestratedSliceRunner", () => {
         passing(),
       ],
     });
-    await runner.runSlice(input());
+    const first = await runner.runSlice(input());
+    expect(first).toMatchObject({
+      status: "escalated",
+      trigger: "retryBudget",
+    });
+    if (first.status !== "escalated") return;
 
     const outcome = await runner.runSlice(
-      input({ hint: "The list must render before the fetch resolves." }),
+      input({
+        history: first.history,
+        hint: "The list must render before the fetch resolves.",
+      }),
     );
 
     expect(outcome).toMatchObject({ status: "passed" });
@@ -361,5 +430,231 @@ describe("OrchestratedSliceRunner", () => {
     await runner.runSlice(input());
 
     expect(calls.map((call) => call.side)).toEqual(["backend"]);
+  });
+
+  it("uses a configured Retry Budget", async () => {
+    const { runner, input, calls } = await setup({
+      retryBudget: 1,
+      results: ["a", "b"].map((sig) => failing(frontendFailure(sig))),
+    });
+
+    const outcome = await runner.runSlice(input());
+
+    expect(outcome).toMatchObject({ trigger: "retryBudget" });
+    expect(calls).toHaveLength(3);
+  });
+
+  it("marks the checkpoints diagram 6 needs", async () => {
+    const { runner, input, checkpoints } = await setup({
+      results: [failing(frontendFailure("a")), passing()],
+    });
+
+    await runner.runSlice(input());
+
+    expect(checkpoints).toEqual(["merged", "retrying", "merged", "committed"]);
+  });
+});
+
+describe("OrchestratedSliceRunner across calls", () => {
+  it("does not refill the Retry Budget without a person's hint", async () => {
+    const { runner, input, calls } = await setup({
+      results: ["a", "b", "c", "d", "e"].map((sig) =>
+        failing(frontendFailure(sig)),
+      ),
+    });
+    const first = await runner.runSlice(input());
+    if (first.status !== "escalated") throw new Error("expected an Escalation");
+    const callsBefore = calls.length;
+
+    const again = await runner.runSlice(input({ history: first.history }));
+
+    expect(again).toMatchObject({
+      status: "escalated",
+      trigger: "retryBudget",
+    });
+    // Both sides build once more, and the failure escalates at once.
+    expect(calls.length - callsBefore).toBe(2);
+  });
+
+  it("escalates as a Loop when a document revision did not help", async () => {
+    const uiSpec = goodUiSpec();
+    uiSpec.screens[1]!.endpoints.push("DELETE /todos/{id}");
+    const wrongDocument = issueReport({
+      failingTest: "DELETE /todos/{id} > removes a todo",
+      endpoint: "DELETE /todos/{id}",
+      suspectedOwner: "frontendCoding",
+    });
+    const { runner, input } = await setup({
+      results: [failing(wrongDocument), failing(wrongDocument)],
+    });
+    const documents = { ...input().documents, uiSpec };
+    const first = await runner.runSlice(input({ documents }));
+    if (first.status !== "designIssue") throw new Error("expected a revision");
+
+    const again = await runner.runSlice(
+      input({ documents, history: first.history }),
+    );
+
+    expect(again).toMatchObject({ status: "escalated", trigger: "loop" });
+  });
+
+  it("refuses a Slice that already passed, leaving its Tasks done", async () => {
+    const { runner, input, tasks, runId, sliceStatus } = await setup({
+      results: [passing()],
+    });
+    await runner.runSlice(input());
+
+    await expect(
+      runner.runSlice(input({ slice: sliceStatus() })),
+    ).rejects.toThrow(/is passed; there is nothing left to build/);
+    expect(tasks.listTasks(runId).map((task) => task.status)).toEqual([
+      "done",
+      "done",
+    ]);
+  });
+});
+
+describe("OrchestratedSliceRunner when a Step goes wrong", () => {
+  it("lets the other side finish, discards the crashed Step and resets its Workspace", async () => {
+    const { runner, input, tasks, runId, workspaces } = await setup({
+      behave: { backend: ["throw"] },
+      results: [passing()],
+    });
+
+    await expect(runner.runSlice(input())).rejects.toThrow(
+      /backend agent crashed/,
+    );
+
+    const steps = tasks
+      .listTasks(runId)
+      .flatMap((task) => tasks.listSteps(task.id));
+    expect(steps.map((step) => step.status).sort()).toEqual([
+      "completed",
+      "discarded",
+    ]);
+    const backend = await workspaces.openWorkspace(input().slice.id, "backend");
+    expect(existsSync(join(backend.dir, "server-crash.txt"))).toBe(false);
+    // The Slice can simply run again: no Step was left running.
+    await expect(runner.runSlice(input())).resolves.toMatchObject({
+      status: "passed",
+    });
+  });
+
+  it("redoes a Step that stopped part-way, without spending a Test Run", async () => {
+    const { runner, input, calls, testsLeft } = await setup({
+      behave: { frontend: [{ stop: "maxIterations" }] },
+      results: [passing()],
+    });
+
+    const outcome = await runner.runSlice(input());
+
+    expect(outcome).toMatchObject({ status: "passed", attempts: 2 });
+    expect(calls.at(-1)).toMatchObject({
+      side: "frontend",
+      issues: [expect.stringContaining("ran out of turns")],
+    });
+    expect(testsLeft()).toBe(0);
+  });
+
+  it("escalates when a Step stopped because the Token Budget ran out", async () => {
+    const { runner, input } = await setup({
+      behave: { backend: [{ stop: "tokenBudget" }] },
+      results: [],
+    });
+
+    await expect(runner.runSlice(input())).resolves.toMatchObject({
+      status: "escalated",
+      trigger: "tokenBudget",
+    });
+  });
+
+  it("does not test the same code again when a retry changed nothing", async () => {
+    const { runner, input, testsLeft } = await setup({
+      behave: { frontend: ["write", "nothing"] },
+      results: [failing(frontendFailure("a")), passing()],
+    });
+
+    const outcome = await runner.runSlice(input());
+
+    expect(outcome).toMatchObject({
+      status: "escalated",
+      trigger: "loop",
+      reports: [expect.objectContaining({ signature: "a" })],
+    });
+    expect(testsLeft()).toBe(1);
+  });
+
+  it("escalates a merge conflict between the two sides", async () => {
+    const manifest = (name: string) =>
+      `${JSON.stringify({ name: "app", dependencies: { react: name } }, null, 2)}\n`;
+    const { runner, input } = await setup({
+      behave: {
+        backend: [{ path: "package.json", contents: manifest("^18.0.0") }],
+        frontend: [{ path: "package.json", contents: manifest("^19.1.0") }],
+      },
+      results: [],
+    });
+
+    await expect(runner.runSlice(input())).resolves.toMatchObject({
+      status: "escalated",
+      trigger: "undecidableOwner",
+      summary: expect.stringContaining("package.json"),
+    });
+  });
+
+  it("escalates a Test Run that never finished", async () => {
+    const run = passing().testRun;
+    const { runner, input } = await setup({
+      results: [
+        {
+          passed: false,
+          issueReports: [
+            issueReport({
+              step: "sandbox",
+              failingTest: null,
+              file: null,
+              endpoint: null,
+              suspectedOwner: null,
+              error: "The sandbox run timed out.",
+            }),
+          ],
+          testRun: {
+            status: "broken",
+            problem: "The sandbox run timed out.",
+            evidence: run.evidence,
+          },
+        },
+      ],
+    });
+
+    await expect(runner.runSlice(input())).resolves.toMatchObject({
+      status: "escalated",
+      trigger: "undecidableOwner",
+    });
+  });
+
+  it("records no retry for one side when the other side escalates", async () => {
+    const { runner, input, tasks, runId } = await setup({
+      results: [
+        failing(
+          issueReport({ signature: "backend-a" }),
+          frontendFailure("front-a"),
+        ),
+        failing(
+          issueReport({ signature: "backend-b" }),
+          frontendFailure("front-a"),
+        ),
+      ],
+    });
+
+    const outcome = await runner.runSlice(input());
+
+    expect(outcome).toMatchObject({ trigger: "loop" });
+    expect(
+      tasks.listTasks(runId).map((task) => [task.agentRole, task.retries]),
+    ).toEqual([
+      ["backendCoding", 1],
+      ["frontendCoding", 1],
+    ]);
   });
 });
