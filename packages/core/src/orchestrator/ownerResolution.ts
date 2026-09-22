@@ -95,9 +95,14 @@ export function resolveByDocuments(
   report: IssueReport,
   { documents }: OwnerContext,
 ): OwnerDecision | null {
-  const contract = new Set(contractEndpoints(documents.apiContract));
-  const endpoint = report.endpoint;
-  const specified = endpoint === null || contract.has(endpoint);
+  const contract = contractEndpoints(documents.apiContract);
+  // A test names "DELETE /todos/1"; the Contract defines "DELETE /todos/{id}".
+  const endpoint = report.endpoint
+    ? (contract.find((defined) => sameOperation(report.endpoint!, defined)) ??
+      report.endpoint)
+    : null;
+  const inContract = endpoint !== null && contract.includes(endpoint);
+  const specified = endpoint === null || inContract;
 
   // 1. The code deviates: the evidence points at one side, about something
   // the documents specify.
@@ -108,27 +113,30 @@ export function resolveByDocuments(
       reason: `${where(report)} fails in ${side(report.suspectedOwner)} code${endpoint ? ` for ${endpoint}, which the API Contract defines` : ""}.`,
     };
 
-  if (endpoint && !contract.has(endpoint)) {
+  if (endpoint && !inContract) {
     // 2. The documents contradict each other: another document relies on an
-    // operation the API Contract lacks.
-    const screens = documents.uiSpec.screens.filter((screen) =>
-      screen.endpoints.includes(endpoint),
-    );
-    if (screens.length > 0)
-      return {
-        owner: "uiDesign",
-        rule: "documentsContradict",
-        reason: `The UI Spec's ${screens.map((screen) => `"${screen.name}"`).join(", ")} calls ${endpoint}, which the API Contract does not define.`,
-      };
+    // operation the API Contract lacks. When the Slice Plan asks for it, the
+    // Contract is what deviates (both are the System Design Agent's), whatever
+    // the UI Spec says; only an operation the UI Spec alone relies on is the
+    // UI Spec deviating.
     if (
       documents.slicePlan.some((planned) =>
-        planned.endpoints.includes(endpoint),
+        planned.endpoints.some((listed) => sameOperation(endpoint, listed)),
       )
     )
       return {
         owner: "systemDesign",
         rule: "documentsContradict",
         reason: `The Slice Plan lists ${endpoint}, which the API Contract does not define.`,
+      };
+    const screens = documents.uiSpec.screens.filter((screen) =>
+      screen.endpoints.some((called) => sameOperation(endpoint, called)),
+    );
+    if (screens.length > 0)
+      return {
+        owner: "uiDesign",
+        rule: "documentsContradict",
+        reason: `The UI Spec's ${screens.map((screen) => `"${screen.name}"`).join(", ")} calls ${endpoint}, which neither the API Contract nor the Slice Plan defines.`,
       };
     // The code built an operation no document asks for: that is the code
     // deviating, whichever side the evidence points at.
@@ -140,6 +148,28 @@ export function resolveByDocuments(
       };
   }
   return null;
+}
+
+/**
+ * "DELETE /todos/1" and "DELETE /todos/:id" are the operation the documents
+ * write as "DELETE /todos/{id}": same method, same segments, a parameter
+ * matching any one segment.
+ */
+export function sameOperation(named: string, defined: string): boolean {
+  const [namedMethod, namedPath = ""] = named.split(" ");
+  const [definedMethod, definedPath = ""] = defined.split(" ");
+  if (namedMethod !== definedMethod) return false;
+  const segments = (path: string) => path.replace(/\/+$/, "").split("/");
+  const a = segments(namedPath);
+  const b = segments(definedPath);
+  const isParameter = (segment: string) => /^(\{.+\}|:.+)$/.test(segment);
+  return (
+    a.length === b.length &&
+    a.every(
+      (segment, index) =>
+        segment === b[index] || isParameter(segment) || isParameter(b[index]!),
+    )
+  );
 }
 
 function where(report: IssueReport): string {

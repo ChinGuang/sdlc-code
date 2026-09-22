@@ -35,6 +35,18 @@ export type RetryDecision =
       summary: string;
     };
 
+/**
+ * The first report that repeats an earlier one: diagram 7 asks this before
+ * anything else, whoever would own the report, so a document revised to no
+ * effect escalates too. The caller checks it before routing.
+ */
+export function detectLoop(
+  reports: readonly IssueReport[],
+  earlier: readonly IssueReport[],
+): IssueReport | null {
+  return reports.find((report) => isLoop(report, earlier)) ?? null;
+}
+
 export function decideRetry({
   reports,
   earlier,
@@ -42,7 +54,7 @@ export function decideRetry({
   retryBudget = DEFAULT_RETRY_BUDGET,
   tokensRemaining,
 }: RetryInput): RetryDecision {
-  const looping = reports.find((report) => isLoop(report, earlier));
+  const looping = detectLoop(reports, earlier);
   if (looping)
     return {
       action: "escalate",

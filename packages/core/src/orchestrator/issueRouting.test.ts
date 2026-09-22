@@ -58,10 +58,11 @@ describe("routeIssues", () => {
       routed("human"),
     ]);
 
+    // The person deciding sees the whole Test Run, not only the unclear part.
     expect(route).toEqual({
       kind: "escalate",
       summary: "human should fix it.",
-      reports: [routed("human")],
+      reports: [routed("backendCoding"), routed("uiDesign"), routed("human")],
     });
   });
 

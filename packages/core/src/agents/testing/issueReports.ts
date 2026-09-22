@@ -61,9 +61,12 @@ const MAX_ERROR_CHARS = 300;
 /** Most Issue Reports a Coding Agent is given at once; the rest follow on the next attempt. */
 export const MAX_CODING_ISSUES = 10;
 
-/** "POST /todos > rejects …" or "FAIL GET /x: …": the operation named at the start. */
+/**
+ * "POST /todos > rejects …" or "FAIL GET /x: …": the operation named at the
+ * start, up to a space or a colon that ends a label; "/todos/:id" stays whole.
+ */
 const LEADING_ENDPOINT = new RegExp(
-  String.raw`^(?:FAIL )?((?:${HTTP_METHODS.join("|")}) /[^\s:>]*)`,
+  String.raw`^(?:FAIL )?((?:${HTTP_METHODS.join("|")}) /[^\s>]*?)(?=:\s|\s|$)`,
 );
 
 /** Everything a Test Run found wrong, one report per distinct failure; empty when it passed. */

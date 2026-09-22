@@ -342,6 +342,23 @@ describe("issueReports heuristics", () => {
     expect(reportsFor("failingUnit")[0]!.endpoint).toBe("POST /todos");
     expect(reportsFor("failingUnit")[1]!.endpoint).toBeNull();
   });
+
+  it("keeps a :param path whole, and stops at a label's colon", () => {
+    const endpointOf = (test: string) =>
+      issueReports(
+        failedWith(
+          step("unit", "", [
+            { test, file: "/app/server/x.test.ts", message: "Error: x" },
+          ]),
+        ),
+        REACT_NODE,
+      )[0]!.endpoint;
+
+    expect(endpointOf("DELETE /todos/:id > removes it")).toBe(
+      "DELETE /todos/:id",
+    );
+    expect(endpointOf("GET /todos: lists them")).toBe("GET /todos");
+  });
 });
 
 describe("normalizeError edge cases", () => {

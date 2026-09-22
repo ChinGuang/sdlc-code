@@ -6,6 +6,7 @@ import { issueReport } from "./fixtures/issueReport.js";
 import {
   resolveByDocuments,
   RuleOwnerResolver,
+  sameOperation,
   type OwnerContext,
   type OwnerDecision,
   type OwnerJudge,
@@ -17,7 +18,7 @@ const design = goodDesign();
 /** The todo app's documents, with a UI Spec screen and a Slice that rely on operations the API Contract lacks. */
 function context(): OwnerContext {
   const uiSpec = goodUiSpec();
-  uiSpec.screens[1]!.endpoints.push("DELETE /todos/{id}");
+  uiSpec.screens[1]!.endpoints.push("DELETE /todos/{id}", "GET /tags");
   const documents: ApprovedDocuments = {
     systemDesign: "# System Design",
     slicePlan: [
@@ -76,6 +77,22 @@ const TABLE: Array<{
     expected: { owner: "uiDesign", rule: "documentsContradict" },
   },
   {
+    name: "the Slice Plan and a screen both need an operation the Contract lacks: the Contract deviates",
+    report: {
+      endpoint: "GET /tags",
+      suspectedOwner: "frontendCoding",
+    },
+    expected: { owner: "systemDesign", rule: "documentsContradict" },
+  },
+  {
+    name: "a test names a concrete path of an operation the Contract defines",
+    report: {
+      failingTest: "PATCH /todos/1 > marks a todo done",
+      endpoint: "PATCH /todos/1",
+    },
+    expected: { owner: "backendCoding", rule: "codeDeviates" },
+  },
+  {
     name: "the Slice Plan lists an operation missing from the Contract",
     report: { endpoint: "GET /tags", suspectedOwner: "backendCoding" },
     expected: { owner: "systemDesign", rule: "documentsContradict" },
@@ -116,6 +133,32 @@ describe("resolveByDocuments (diagram 7 in order)", () => {
     if (expected === null) expect(decision).toBeNull();
     else expect(decision).toMatchObject(expected);
     expect(decision?.reason ?? "").not.toMatch(/undefined|null/);
+  });
+});
+
+describe("resolveByDocuments reasons", () => {
+  it("names the Contract's operation for a concrete path", () => {
+    const decision = resolveByDocuments(
+      issueReport({ endpoint: "PATCH /todos/1" }),
+      context(),
+    );
+
+    expect(decision?.reason).toContain(
+      "for PATCH /todos/{id}, which the API Contract defines",
+    );
+  });
+});
+
+describe("sameOperation", () => {
+  it.each([
+    ["PATCH /todos/1", "PATCH /todos/{id}", true],
+    ["PATCH /todos/:id", "PATCH /todos/{id}", true],
+    ["PATCH /todos/1/", "PATCH /todos/{id}", true],
+    ["GET /todos/1", "PATCH /todos/{id}", false],
+    ["PATCH /todos", "PATCH /todos/{id}", false],
+    ["PATCH /users/1", "PATCH /todos/{id}", false],
+  ])("%s is %s: %s", (named, defined, same) => {
+    expect(sameOperation(named, defined)).toBe(same);
   });
 });
 

@@ -36,7 +36,8 @@ export function routeIssues(routed: readonly RoutedReport[]): Route {
     return {
       kind: "escalate",
       summary: undecidable.map(({ decision }) => decision.reason).join(" "),
-      reports: undecidable,
+      // The person deciding sees the whole Test Run, not only the unclear part.
+      reports: [...routed],
     };
   const byOwner = <O extends Owner>(owners: readonly O[]) =>
     owners.flatMap((owner) => {

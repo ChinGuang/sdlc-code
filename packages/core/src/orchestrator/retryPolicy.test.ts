@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { issueReport } from "./fixtures/issueReport.js";
-import { decideRetry, DEFAULT_RETRY_BUDGET } from "./retryPolicy.js";
+import {
+  decideRetry,
+  DEFAULT_RETRY_BUDGET,
+  detectLoop,
+} from "./retryPolicy.js";
 
 const first = issueReport({ signature: "sig-a" });
 const other = issueReport({
   signature: "sig-b",
   failingTest: "GET /todos > lists todos",
+});
+
+describe("detectLoop", () => {
+  it("finds a report that repeats an earlier one, whoever would own it", () => {
+    const again = issueReport({ signature: "sig-a", suspectedOwner: null });
+
+    expect(detectLoop([other, again], [first])).toBe(again);
+    expect(detectLoop([other], [first])).toBeNull();
+  });
 });
 
 describe("decideRetry", () => {
