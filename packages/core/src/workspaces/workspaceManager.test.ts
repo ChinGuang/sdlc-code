@@ -15,6 +15,7 @@ import {
   GitWorkspaceManager,
   parseBatch,
   parseWorktrees,
+  type PassedTestRun,
   type Workspace,
   type WorkspaceManager,
 } from "./workspaceManager.js";
@@ -24,6 +25,23 @@ const SCAFFOLD = [
   { path: "server/app.ts", contents: "export const routes = [];\n" },
   { path: "src/App.tsx", contents: "export const App = () => null;\n" },
 ];
+
+/** What a passing Test Run of the merged code hands back. */
+const PASSED: PassedTestRun = {
+  status: "passed",
+  result: { profile: "react-node", passed: true, steps: [], durationMs: 1 },
+  evidence: {
+    operationId: "op",
+    exitCode: 0,
+    timedOut: false,
+    durationSeconds: 1,
+    cost: 0,
+    log: "",
+    changedFiles: [],
+    removedFiles: [],
+    withheldFiles: [],
+  },
+};
 
 const folders: string[] = [];
 afterEach(() => {
@@ -172,6 +190,36 @@ describe("GitWorkspaceManager Workspaces", () => {
     expect(await manager.lastSliceCommit()).toBe(scaffold);
   });
 
+  it("never commits a secret file, and does not count it as unsaved", async () => {
+    const { manager, repoDir } = await setup();
+    const backend = await manager.openWorkspace("slice-1", "backend");
+    write(backend, ".env", "NEBIUS_API_KEY=secret-key-123");
+    write(backend, "server/todos.ts", "export const todos = [];\n");
+
+    const saved = await manager.saveWorkspace(backend, "Backend: todos");
+
+    expect(git(repoDir, "ls-tree", "-r", "--name-only", saved!)).not.toContain(
+      ".env",
+    );
+    await expect(
+      manager.mergeSlice("slice-1", [backend]),
+    ).resolves.toMatchObject({ status: "merged" });
+  });
+
+  it("resets a Workspace to its last save, keeping the saved work", async () => {
+    const { manager } = await setup();
+    const backend = await manager.openWorkspace("slice-1", "backend");
+    write(backend, "server/todos.ts", "saved");
+    await manager.saveWorkspace(backend, "Step 1");
+    write(backend, "server/todos.ts", "half-written");
+    write(backend, "server/draft.ts", "half-written");
+
+    await manager.resetWorkspace(backend);
+
+    expect(read(backend, "server/todos.ts")).toBe("saved");
+    expect(existsSync(join(backend.dir, "server/draft.ts"))).toBe(false);
+  });
+
   it("refuses unsafe Slice ids, so a Workspace stays in its folder", async () => {
     const { manager } = await setup();
 
@@ -273,7 +321,7 @@ describe("GitWorkspaceManager.commitSlice", () => {
     const merged = await manager.mergeSlice("slice-1", [backend, frontend]);
     if (merged.status !== "merged") throw new Error("expected a merge");
 
-    const slice = await manager.commitSlice(merged, "Slice 1: Todos");
+    const slice = await manager.commitSlice(merged, PASSED, "Slice 1: Todos");
 
     expect(await manager.lastSliceCommit()).toBe(slice);
     // Exactly one commit on top of the last one, whatever the merges were.
@@ -290,12 +338,42 @@ describe("GitWorkspaceManager.commitSlice", () => {
     expect(existsSync(frontend.dir)).toBe(false);
   });
 
+  it("lists the Slice Commits, and none before the first Slice passes", async () => {
+    const { manager } = await setup();
+    expect(await manager.sliceCommits()).toEqual([]);
+
+    const shas: string[] = [];
+    for (const id of ["slice-1", "slice-2"]) {
+      const { backend } = await builtSlice(manager, id);
+      write(backend, `server/${id}.ts`, id);
+      await manager.saveWorkspace(backend, id);
+      const merged = await manager.mergeSlice(id, [backend]);
+      if (merged.status !== "merged") throw new Error("expected a merge");
+      shas.push(await manager.commitSlice(merged, PASSED, id));
+    }
+
+    expect(await manager.sliceCommits()).toEqual(shas);
+  });
+
+  it("refuses to commit a Slice without a passing Test Run", async () => {
+    const { manager } = await setup();
+    const { backend } = await builtSlice(manager);
+    const merged = await manager.mergeSlice("slice-1", [backend]);
+    if (merged.status !== "merged") throw new Error("expected a merge");
+    const failed = { ...PASSED, status: "failed" } as unknown as typeof PASSED;
+
+    await expect(
+      manager.commitSlice(merged, failed, "Slice 1"),
+    ).rejects.toThrow(/no passing Test Run/);
+    expect(await manager.sliceCommits()).toEqual([]);
+  });
+
   it("starts the next Slice's Workspaces from the new Slice Commit", async () => {
     const { manager } = await setup();
     const { backend, frontend } = await builtSlice(manager);
     const merged = await manager.mergeSlice("slice-1", [backend, frontend]);
     if (merged.status !== "merged") throw new Error("expected a merge");
-    await manager.commitSlice(merged, "Slice 1: Todos");
+    await manager.commitSlice(merged, PASSED, "Slice 1: Todos");
 
     const next = await manager.openWorkspace("slice-2", "backend");
 
@@ -316,9 +394,9 @@ describe("GitWorkspaceManager.commitSlice", () => {
     ]);
     if (stale.status !== "merged" || fresh.status !== "merged")
       throw new Error("expected merges");
-    await manager.commitSlice(fresh, "Slice 2");
+    await manager.commitSlice(fresh, PASSED, "Slice 2");
 
-    await expect(manager.commitSlice(stale, "Slice 1")).rejects.toThrow(
+    await expect(manager.commitSlice(stale, PASSED, "Slice 1")).rejects.toThrow(
       /merge it again/,
     );
   });
@@ -359,7 +437,7 @@ describe("GitWorkspaceManager discard and reset", () => {
       done.frontend,
     ]);
     if (merged.status !== "merged") throw new Error("expected a merge");
-    const slice = await manager.commitSlice(merged, "Slice 1");
+    const slice = await manager.commitSlice(merged, PASSED, "Slice 1");
     const unfinished = await builtSlice(manager, "slice-2");
 
     await manager.discardUnfinished();
@@ -391,11 +469,40 @@ describe("GitWorkspaceManager discard and reset", () => {
     const { backend, frontend } = await builtSlice(manager);
     const merged = await manager.mergeSlice("slice-1", [backend, frontend]);
     if (merged.status !== "merged") throw new Error("expected a merge");
-    await manager.commitSlice(merged, "Slice 1");
+    await manager.commitSlice(merged, PASSED, "Slice 1");
 
     await manager.resetToSliceCommit(scaffold);
 
     expect(await manager.lastSliceCommit()).toBe(scaffold);
+  });
+
+  it("refuses to reset to before the run started", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sdlc-target-"));
+    folders.push(root);
+    const target = join(root, "target");
+    mkdirSync(target);
+    git(target, "init", "--quiet", "--initial-branch=main");
+    git(
+      target,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "init",
+    );
+    const repoDir = join(root, "run.git");
+    git(root, "clone", "--quiet", "--bare", target, repoDir);
+    const { manager } = await setup({ repoDir, baseRef: "main" });
+
+    await expect(
+      manager.resetToSliceCommit(git(repoDir, "rev-parse", "main")),
+    ).rejects.toThrow(/not a Slice Commit/);
   });
 
   it("refuses to reset to a commit that is not on the run branch", async () => {
@@ -406,6 +513,157 @@ describe("GitWorkspaceManager discard and reset", () => {
     await expect(manager.resetToSliceCommit(unmerged)).rejects.toThrow(
       /not a Slice Commit/,
     );
+  });
+});
+
+describe("GitWorkspaceManager inside someone else's repository", () => {
+  /** A folder inside a git repository the Run must never write to. */
+  function outerRepository(): { root: string; head: () => string } {
+    const root = mkdtempSync(join(tmpdir(), "sdlc-outer-"));
+    folders.push(root);
+    git(root, "init", "--quiet", "--initial-branch=main");
+    git(
+      root,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "outer",
+    );
+    return {
+      root,
+      head: () =>
+        git(root, "for-each-ref", "--format=%(refname) %(objectname)"),
+    };
+  }
+
+  it("refuses a repoDir that is not a bare repository of its own", async () => {
+    const outer = outerRepository();
+    const before = outer.head();
+    const repoDir = join(outer.root, "not-a-repo");
+    mkdirSync(repoDir);
+    writeFileSync(join(repoDir, "notes.txt"), "user files");
+    const manager: WorkspaceManager = new GitWorkspaceManager({
+      repoDir,
+      runBranch: "sdlc/run",
+      workspacesDir: join(outer.root, "ws"),
+    });
+
+    await expect(
+      manager.startRun({ scaffold: SCAFFOLD, message: "x" }),
+    ).rejects.toThrow(/not a bare git repository/);
+    expect(outer.head()).toBe(before);
+  });
+
+  it("starts in an empty folder inside another repository without touching it", async () => {
+    const outer = outerRepository();
+    const before = outer.head();
+    const repoDir = join(outer.root, "run.git");
+    mkdirSync(repoDir);
+    const manager: WorkspaceManager = new GitWorkspaceManager({
+      repoDir,
+      runBranch: "sdlc/run",
+      workspacesDir: join(outer.root, "ws"),
+    });
+
+    await manager.startRun({ scaffold: SCAFFOLD, message: "x" });
+    const backend = await manager.openWorkspace("slice-1", "backend");
+    write(backend, "server/todos.ts", "x");
+    await manager.saveWorkspace(backend, "x");
+
+    expect(outer.head()).toBe(before);
+  });
+
+  it("replaces a stray Workspace folder instead of committing into the repository around it", async () => {
+    const outer = outerRepository();
+    const before = outer.head();
+    const workspacesDir = join(outer.root, "ws");
+    const manager: WorkspaceManager = new GitWorkspaceManager({
+      repoDir: join(outer.root, "run.git"),
+      runBranch: "sdlc/run",
+      workspacesDir,
+    });
+    await manager.startRun({ scaffold: SCAFFOLD, message: "x" });
+    // Left by a crash: a folder with the Workspace's name but no worktree.
+    mkdirSync(join(workspacesDir, "slice-1-backend"), { recursive: true });
+    writeFileSync(join(workspacesDir, "slice-1-backend", "stray.ts"), "x");
+
+    const backend = await manager.openWorkspace("slice-1", "backend");
+    write(backend, "server/todos.ts", "x");
+    await manager.saveWorkspace(backend, "x");
+
+    expect(existsSync(join(backend.dir, "stray.ts"))).toBe(false);
+    expect(outer.head()).toBe(before);
+  });
+});
+
+describe("GitWorkspaceManager edge cases", () => {
+  it("leaves binary files out of a Test Run's files rather than corrupting them", async () => {
+    const { manager } = await setup();
+    const frontend = await manager.openWorkspace("slice-1", "frontend");
+    writeFileSync(
+      join(frontend.dir, "src/logo.png"),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00]),
+    );
+    const saved = await manager.saveWorkspace(frontend, "logo");
+
+    const paths = (await manager.readFiles(saved!)).map((file) => file.path);
+
+    expect(paths).not.toContain("src/logo.png");
+    expect(paths).toContain("src/App.tsx");
+  });
+
+  it("refuses to merge a Slice with no Workspaces", async () => {
+    const { manager } = await setup();
+
+    await expect(manager.mergeSlice("slice-1", [])).rejects.toThrow(
+      /no Workspaces/,
+    );
+  });
+
+  it("refuses a merge result that is not built on the Slice Commit it names", async () => {
+    const { manager, scaffold } = await setup();
+    const unrelated = await setup();
+    const { backend } = await builtSlice(unrelated.manager);
+    const foreign = git(backend.dir, "rev-parse", "HEAD");
+
+    await expect(
+      manager.commitSlice(
+        {
+          status: "merged",
+          sliceId: "slice-1",
+          commit: foreign,
+          base: scaffold,
+        },
+        PASSED,
+        "forged",
+      ),
+    ).rejects.toThrow();
+    expect(await manager.sliceCommits()).toEqual([]);
+  });
+
+  it("saves backend and frontend at the same time", async () => {
+    const { manager } = await setup();
+    const backend = await manager.openWorkspace("slice-1", "backend");
+    const frontend = await manager.openWorkspace("slice-1", "frontend");
+    write(backend, "server/todos.ts", "b");
+    write(frontend, "src/TodoList.tsx", "f");
+
+    const saved = await Promise.all([
+      manager.saveWorkspace(backend, "backend"),
+      manager.saveWorkspace(frontend, "frontend"),
+    ]);
+
+    expect(saved.every((sha) => sha !== null)).toBe(true);
+    await expect(
+      manager.mergeSlice("slice-1", [backend, frontend]),
+    ).resolves.toMatchObject({ status: "merged" });
   });
 });
 

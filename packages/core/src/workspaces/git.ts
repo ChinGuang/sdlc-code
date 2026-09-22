@@ -42,6 +42,11 @@ export function gitSafetyConfig(noHooksDir: string): string[] {
     "commit.gpgsign=false",
     "-c",
     "tag.gpgsign=false",
+    // Worktrees share one repository; a background gc must not race them.
+    "-c",
+    "gc.auto=0",
+    "-c",
+    "maintenance.auto=false",
   ];
 }
 
