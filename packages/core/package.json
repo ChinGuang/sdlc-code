@@ -15,6 +15,7 @@
     "design:smoke": "tsx --env-file-if-exists=../../.env scripts/designSmoke.ts",
     "design-phase:smoke": "tsx --env-file-if-exists=../../.env scripts/designPhaseSmoke.ts",
     "penpot:smoke": "tsx --env-file-if-exists=../../.env scripts/penpotSmoke.ts",
+    "fixtures:testing": "tsx --env-file-if-exists=../../.env scripts/captureTestingFixtures.ts",
     "penpot:probe": "tsx --env-file-if-exists=../../.env scripts/penpotSuspendProbe.ts"
   },
   "dependencies": {

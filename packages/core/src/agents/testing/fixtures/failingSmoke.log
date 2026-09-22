@@ -1,0 +1,62 @@
+
+=== install ===
+ok in 3ms
+
+=== unit ===
+prisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to "openssl-1.1.x".
+Please manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.
+Prisma schema loaded from prisma/schema.prisma
+
+✔ Generated Prisma Client (v6.19.3) to ./node_modules/@prisma/client in 38ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Want to turn off tips and other hints? https://pris.ly/tip-4-nohints
+
+prisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to "openssl-1.1.x".
+Please manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": SQLite database "sdlc-test.db" at "file:./sdlc-test.db"
+
+SQLite database sdlc-test.db created at file:./sdlc-test.db
+
+🚀  Your database is now in sync with your Prisma schema. Done in 8ms
+┌─────────────────────────────────────────────────────────┐
+│  Update available 6.19.3 -> 8.0.0-rc.15                 │
+│                                                         │
+│  This is a major update - please follow the guide at    │
+│  https://pris.ly/d/major-version-upgrade                │
+│                                                         │
+│  Run the following to update                            │
+│    npm i --save-dev prisma@latest                       │
+│    npm i @prisma/client@latest                          │
+└─────────────────────────────────────────────────────────┘
+
+
+ RUN  v2.1.9 /app
+
+stderr | server/app.test.ts > GET /health > reports the API and its database
+prisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to "openssl-1.1.x".
+Please manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.
+
+ ✓ server/app.test.ts (3 tests) 84ms
+ ✓ src/App.test.tsx (2 tests) 33ms
+
+ Test Files  2 passed (2)
+      Tests  5 passed (5)
+   Start at  06:20:53
+   Duration  1.67s (transform 104ms, setup 245ms, collect 409ms, tests 117ms, environment 868ms, prepare 824ms)
+
+JSON report written to /app/.sdlc/vitest.json
+ok in 5648ms
+
+=== boot ===
+ok in 787ms
+
+=== smoke ===
+FAILED in 5ms
+
+=== stop ===
+ok in 109ms
+
+SDLC_RESULT {"profile":"react-node","passed":false,"steps":[{"name":"install","ok":true,"durationMs":3,"output":"dependencies already installed from this package.json","failures":[]},{"name":"unit","ok":true,"durationMs":5648,"output":"\n RUN  v2.1.9 /app\n\nstderr | server/app.test.ts > GET /health > reports the API and its database\nprisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to \"openssl-1.1.x\".\nPlease manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.\n\n ✓ server/app.test.ts (3 tests) 84ms\n ✓ src/App.test.tsx (2 tests) 33ms\n\n Test Files  2 passed (2)\n      Tests  5 passed (5)\n   Start at  06:20:53\n   Duration  1.67s (transform 104ms, setup 245ms, collect 409ms, tests 117ms, environment 868ms, prepare 824ms)\n\nJSON report written to /app/.sdlc/vitest.json\n","failures":[]},{"name":"boot","ok":true,"durationMs":787,"output":"API on http://127.0.0.1:3100\nprisma:warn Prisma failed to detect the libssl/openssl version to use, and may not work as expected. Defaulting to \"openssl-1.1.x\".\nPlease manually install OpenSSL via `apt-get update -y && apt-get install -y openssl` and try installing Prisma again. If you're running Prisma on Docker, add this command to your Dockerfile, or switch to an image that already has OpenSSL installed.\n","failures":[]},{"name":"smoke","ok":false,"durationMs":5,"output":"ok GET /health\nFAIL GET /definitely-not-here: expected 404, got 200","failures":[]},{"name":"stop","ok":true,"durationMs":109,"output":"server stopped","failures":[]}],"durationMs":6556}
