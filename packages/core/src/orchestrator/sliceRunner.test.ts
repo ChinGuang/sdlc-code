@@ -108,7 +108,7 @@ type Behaviour =
   | "write"
   | "nothing"
   | "throw"
-  | { stop: AgentLoopResult["stopReason"] }
+  | { stop: AgentLoopResult["stopReason"]; wrote?: boolean }
   | { path: string; contents: string };
 
 async function setup(options: {
@@ -167,13 +167,21 @@ async function setup(options: {
         writeFileSync(join(input.workspaceDir, "server-crash.txt"), "x");
         throw new Error(`${side} agent crashed`);
       }
-      if (typeof behaviour === "object" && "stop" in behaviour)
+      if (typeof behaviour === "object" && "stop" in behaviour) {
+        const written =
+          side === "backend" ? "server/todos.ts" : "src/TodoList.tsx";
+        if (behaviour.wrote) {
+          const file = join(input.workspaceDir, written);
+          mkdirSync(dirname(file), { recursive: true });
+          writeFileSync(file, "// half-written\n");
+        }
         return {
           summary: null,
           problem: "notAnswered",
-          changes: [],
+          changes: behaviour.wrote ? [{ path: written, kind: "written" }] : [],
           loop: { ...loop(), stopReason: behaviour.stop, answer: null },
         };
+      }
       if (behaviour === "nothing")
         return {
           summary: "Nothing to change.",
@@ -559,6 +567,25 @@ describe("OrchestratedSliceRunner when a Step goes wrong", () => {
       issues: [expect.stringContaining("ran out of turns")],
     });
     expect(testsLeft()).toBe(0);
+  });
+
+  it("tests what an agent wrote even when it ran out of turns", async () => {
+    const { runner, input, calls, testsLeft, workspaces } = await setup({
+      behave: { frontend: [{ stop: "maxIterations", wrote: true }] },
+      results: [passing()],
+    });
+
+    const outcome = await runner.runSlice(input());
+
+    // The Test Run judges the work; the turn counter does not throw it away.
+    expect(outcome).toMatchObject({ status: "passed", attempts: 1 });
+    expect(calls).toHaveLength(2);
+    expect(testsLeft()).toBe(0);
+    if (outcome.status !== "passed") return;
+    const paths = (await workspaces.readFiles(outcome.commit)).map(
+      (f) => f.path,
+    );
+    expect(paths).toContain("src/TodoList.tsx");
   });
 
   it("escalates when a Step stopped because the Token Budget ran out", async () => {

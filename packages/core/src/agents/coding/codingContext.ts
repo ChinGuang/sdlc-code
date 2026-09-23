@@ -156,6 +156,7 @@ How to work:
 - Every change comes with Vitest tests beside it. You cannot run them: when you finish, a Test Run installs, tests, boots and smoke-tests the merged Slice, and any failure comes back to you as an Issue Report.
 - Never write secrets or real credentials; configuration comes from environment variables, with placeholders in .env.example.
 - Keep files small and focused. Make small edits with edit_file, and write whole files only when creating them.
+- Finish within about 20 tool calls: read what you need, make the changes, then reply. Do not re-read a file you have already read.
 
 Your tools: ${tools}.
 
