@@ -229,6 +229,24 @@ describe("codingContext inputs", () => {
     expect(codingContext(input()).task.user).not.toContain("previous attempt");
   });
 
+  // Seen live: the frontend agent asserted on data a fetch had not returned
+  // yet, then rewrote the screen instead of the test until the Slice looped.
+  it("tells the frontend how to test what a fetch brings in", () => {
+    const { system } = codingContext(input()).task;
+
+    expect(system).toContain("await screen.findBy");
+    expect(system).toContain("One <h1> per screen");
+    expect(system).not.toContain("supertest");
+  });
+
+  it("tells the backend to answer the Contract and validate input", () => {
+    const { system } = codingContext(input({ side: "backend" })).task;
+
+    expect(system).toContain("supertest");
+    expect(system).toContain("answer 400");
+    expect(system).not.toContain("findBy");
+  });
+
   it("tells the agent what it may write and the rules it is reviewed against", () => {
     const { system } = codingContext(input({ side: "backend" })).task;
 

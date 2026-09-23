@@ -51,6 +51,24 @@ const SIDE_NAMES: Record<CodingSide, string> = {
   frontend: "Frontend Coding Agent",
 };
 
+/**
+ * What each side gets wrong without being told. Seen live: a frontend agent
+ * asserted on data that arrives after a fetch with a synchronous query, could
+ * not see why its own test failed, and rewrote the screen instead of the test
+ * until the Slice looped.
+ */
+const SIDE_RULES: Record<CodingSide, string> = {
+  backend: `Writing the API:
+- Answer exactly what the API Contract defines: path, status code and body shape, including the fields a smoke test reads.
+- Validate request bodies with zod and answer 400 when they do not fit, rather than letting the route throw.
+- Test a route through the app (supertest against createApp()), not by calling the handler.`,
+  frontend: `Writing screens and their tests (Vitest, Testing Library):
+- Anything that appears after a fetch needs "await screen.findBy…"; "getBy…" only sees what is on screen before the first await, which is the loading state.
+- Stub fetch per test and assert each state the UI Spec lists: loading, empty, error, and data.
+- One <h1> per screen: change the screen the template already has instead of adding a second heading, or queries by role match two elements and fail.
+- When you change what a screen renders, update the tests that assert the old text in the same edit.`,
+};
+
 const SIDE_WORK: Record<CodingSide, string> = {
   backend:
     "You build the API: routes, validation, services and the database schema, with tests. Implement every endpoint of this Slice exactly as the API Contract defines it: paths, status codes and bodies.",
@@ -157,6 +175,8 @@ How to work:
 - Never write secrets or real credentials; configuration comes from environment variables, with placeholders in .env.example.
 - Keep files small and focused. Make small edits with edit_file, and write whole files only when creating them.
 - Finish within about 20 tool calls: read what you need, make the changes, then reply. Do not re-read a file you have already read.
+
+${SIDE_RULES[side]}
 
 Your tools: ${tools}.
 
