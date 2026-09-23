@@ -116,6 +116,37 @@ describe("PenpotClient.executeCode", () => {
     expect(sleep).toHaveBeenCalledWith(5);
   });
 
+  it("reports every wait, so a caller can ask for the tab to be focused", async () => {
+    const callTool: CallTool = vi
+      .fn()
+      .mockResolvedValueOnce(
+        text(
+          "The Penpot plugin tab appears to be suspended by the browser",
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(
+        text(
+          "The Penpot plugin tab appears to be suspended by the browser",
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
+    const waits: Array<{ attempt: number; delayMs: number }> = [];
+    const client = makeClient({
+      callTool,
+      sleep: async () => {},
+      retryDelaysMs: [5, 10],
+      onSuspended: (wait) => waits.push(wait),
+    });
+
+    await expect(client.executeCode("x")).resolves.toBe("ok");
+    expect(waits).toEqual([
+      { attempt: 1, delayMs: 5 },
+      { attempt: 2, delayMs: 10 },
+    ]);
+  });
+
   it("does not retry when no plugin is connected", async () => {
     const callTool: CallTool = vi.fn(async () =>
       text("Tool execution failed: No Penpot plugin instance is connected"),

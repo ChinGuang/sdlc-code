@@ -155,7 +155,16 @@ const loopFor =
   };
 
 console.log("Connecting to Penpot…");
-const penpot = await connectPenpotMcp({ url: penpotUrl });
+const penpot = await connectPenpotMcp({
+  url: penpotUrl,
+  // A background tab sleeps until someone clicks it, so a Run waits minutes
+  // for that rather than throwing away the design it has already paid for.
+  retryDelaysMs: [5_000, 10_000, 15_000, 30_000, 30_000, 60_000, 60_000],
+  onSuspended: ({ attempt, delayMs }) =>
+    console.log(
+      `  Penpot tab is asleep: click it to wake it (waiting ${delayMs / 1000}s, attempt ${attempt})`,
+    ),
+});
 const canvas = new PenpotUiCanvas(penpot.penpot);
 const file = await canvas.checkConnection();
 console.log(`  Penpot file "${file.file}"`);

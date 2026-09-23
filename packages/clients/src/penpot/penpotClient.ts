@@ -64,10 +64,13 @@ export type PenpotClientOptions = {
   callTool: CallTool;
   sleep?: (ms: number) => Promise<void>;
   /**
-   * Delay before each retry while the tab is suspended. Retries only bridge a
-   * brief refocus; if the user is away the error surfaces for Escalation.
+   * Delay before each retry while the tab is suspended. A background tab stays
+   * asleep until someone clicks it, so a caller that can ask for that (the CLI,
+   * the dashboard) passes a longer schedule and reports each wait.
    */
   retryDelaysMs?: number[];
+  /** Called before each wait, so the caller can ask the user to focus the tab. */
+  onSuspended?: (wait: { attempt: number; delayMs: number }) => void;
 };
 
 export type ExportedImage = { bytes: Buffer; mimeType: string };
@@ -87,15 +90,18 @@ export class McpPenpotClient implements PenpotClient {
   #callTool: CallTool;
   #sleep: (ms: number) => Promise<void>;
   #retryDelaysMs: number[];
+  #onSuspended: PenpotClientOptions["onSuspended"];
 
   constructor({
     callTool,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     retryDelaysMs = [2000, 5000, 10000],
+    onSuspended,
   }: PenpotClientOptions) {
     this.#callTool = callTool;
     this.#sleep = sleep;
     this.#retryDelaysMs = retryDelaysMs;
+    this.#onSuspended = onSuspended;
   }
 
   executeCode = async <T = unknown>(code: string): Promise<T> => {
@@ -157,6 +163,7 @@ export class McpPenpotClient implements PenpotClient {
           kind,
           `${GUIDANCE[kind]} (${redactToken(message)})`,
         );
+      this.#onSuspended?.({ attempt: attempt + 1, delayMs: delay });
       await this.#sleep(delay);
     }
   }

@@ -27,12 +27,17 @@ export type ConnectPenpotOptions = {
   clientName?: string;
   /** Tests connect to an in-memory server instead of the real one. */
   createTransport?: (url: URL) => Transport;
+  /** Passed to the client: how long to wait for a suspended tab, and what to say. */
+  retryDelaysMs?: number[];
+  onSuspended?: (wait: { attempt: number; delayMs: number }) => void;
 };
 
 export async function connectPenpotMcp({
   url,
   clientName = "sdlc-code",
   createTransport = (target) => new StreamableHTTPClientTransport(target),
+  retryDelaysMs,
+  onSuspended,
 }: ConnectPenpotOptions): Promise<PenpotConnection> {
   const client = new Client({ name: clientName, version: "0.0.0" });
   const transport = createTransport(new URL(url));
@@ -50,7 +55,7 @@ export async function connectPenpotMcp({
   const callTool: CallTool = async (name, args) =>
     (await client.callTool({ name, arguments: args })) as ToolResult;
   return {
-    penpot: new McpPenpotClient({ callTool }),
+    penpot: new McpPenpotClient({ callTool, retryDelaysMs, onSuspended }),
     tools: listed.tools.map((tool) => tool.name),
     close: () => client.close(),
   };
