@@ -12,6 +12,9 @@ export default tseslint.config(
       "**/node_modules/**",
       "docs/**",
       "packages/stack-profiles/templates/**",
+      // Applications a Run built, and Claude Code's worktrees: not this repo's code.
+      ".sdlc-runs/**",
+      ".claude/**",
     ],
   },
   js.configs.recommended,

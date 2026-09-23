@@ -142,9 +142,13 @@ function place(shape, element) {
 }
 
 function addText(element, text, size, color) {
-  const shape = penpot.createText(text);
+  const content = String(text == null ? "" : text).trim();
+  // Penpot refuses to create an empty text (seen live); an element whose
+  // label is blank is drawn without one, rather than failing the design.
+  if (!content) return null;
+  const shape = penpot.createText(content);
   // A screen missing its text must fail the Step, not be reported as drawn.
-  if (!shape) throw new Error("Penpot could not create the text " + JSON.stringify(text));
+  if (!shape) throw new Error("Penpot could not create the text " + JSON.stringify(content));
   shape.name = element.kind + ": " + element.label;
   place(shape, element);
   shape.growType = "auto-width";
@@ -227,7 +231,7 @@ const caption = addText(
   14,
   tokens.text,
 );
-caption.name = "caption";
+if (caption) caption.name = "caption";
 
 return { boardId: board.id, name: boardName };
 `;
