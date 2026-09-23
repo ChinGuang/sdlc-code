@@ -28,6 +28,8 @@ export type EscalationChoice =
 
 export type RunEvent =
   | { type: "documentsReady" }
+  /** No valid design came out; with no one to ask (auto mode), the Run fails. */
+  | { type: "designFailed" }
   | { type: "designChangesRequested" }
   | { type: "designApproved" }
   | { type: "issueOwnedByDesignAgent" }
@@ -41,6 +43,7 @@ export type RunEvent =
 
 export const RUN_EVENT_TYPES = [
   "documentsReady",
+  "designFailed",
   "designChangesRequested",
   "designApproved",
   "issueOwnedByDesignAgent",
@@ -76,6 +79,7 @@ export function nextRunStatus(
   const next = ((): RunStatus | null => {
     switch (status) {
       case "designing":
+        if (event.type === "designFailed") return gated ? null : "failed";
         return event.type === "documentsReady"
           ? gated
             ? "awaitingDesignGate"

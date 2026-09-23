@@ -137,4 +137,8 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (profile_id, template_hash)
   );
   `,
+
+  /* 4: why a Run failed, for its Draft PR (T20) */ `
+  ALTER TABLE runs ADD COLUMN failure TEXT;
+  `,
 ];

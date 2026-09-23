@@ -17,6 +17,12 @@ export interface SliceStore {
   /** Saves the Slice Plan's Slices; replaces them while none has started. */
   saveSlices: (runId: string, slices: PlannedSlice[]) => Slice[];
   listSlices: (runId: string) => Slice[];
+  /**
+   * Brings the Slices in line with a revised Slice Plan once building has
+   * begun: Slices that started keep their record and place; the ones not
+   * started are replaced by the plan's remaining Slices, in plan order.
+   */
+  reconcileSlices: (runId: string, slices: PlannedSlice[]) => Slice[];
   /** Moves a Slice on; `commitSha` (the Slice Commit) is required to pass. */
   moveSlice: (sliceId: string, to: SliceStatus, commitSha?: string) => Slice;
 }
@@ -66,6 +72,34 @@ export class SqliteSliceStore implements SliceStore {
       .prepare("SELECT * FROM slices WHERE run_id = ? ORDER BY position")
       .all(runId)
       .map((row) => toSlice(row as SliceRow));
+
+  reconcileSlices = (runId: string, slices: PlannedSlice[]): Slice[] =>
+    inTransaction(this.#ctx.db, () => {
+      const started = this.listSlices(runId).filter(
+        (slice) => slice.status !== "pending",
+      );
+      this.#ctx.db
+        .prepare("DELETE FROM slices WHERE run_id = ? AND status = 'pending'")
+        .run(runId);
+      const kept = new Set(started.map((slice) => slice.title));
+      const last = Math.max(0, ...started.map((slice) => slice.order));
+      const insert = this.#ctx.db.prepare(
+        `INSERT INTO slices (id, run_id, position, title, is_walking_skeleton, status)
+         VALUES (?, ?, ?, ?, ?, 'pending')`,
+      );
+      slices
+        .filter((slice) => !kept.has(slice.title))
+        .forEach((slice, index) =>
+          insert.run(
+            this.#ctx.newId(),
+            runId,
+            last + index + 1,
+            slice.title,
+            toFlag(slice.isWalkingSkeleton),
+          ),
+        );
+      return this.listSlices(runId);
+    });
 
   moveSlice = (sliceId: string, to: SliceStatus, commitSha?: string): Slice =>
     inTransaction(this.#ctx.db, () => {

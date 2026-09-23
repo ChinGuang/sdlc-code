@@ -49,3 +49,6 @@ export * from "./orchestrator/ownerJudge.js";
 export * from "./orchestrator/retryPolicy.js";
 export * from "./orchestrator/issueRouting.js";
 export * from "./orchestrator/sliceRunner.js";
+export * from "./orchestrator/approvedDocuments.js";
+export * from "./orchestrator/designPhase.js";
+export * from "./orchestrator/runOrchestrator.js";

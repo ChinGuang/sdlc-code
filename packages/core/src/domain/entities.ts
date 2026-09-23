@@ -23,6 +23,17 @@ export type TargetRepo = {
 
 export type RunPullRequest = { number: number; url: string; draft: boolean };
 
+/** Why a Run failed with no one to ask (auto mode): its Draft PR says so (T20). */
+export type RunFailure = {
+  /** An Escalation trigger, or "design" when no valid design came out. */
+  trigger: EscalationTrigger | "design";
+  summary: string;
+  /** The Slice being built; null when the Run failed while designing. */
+  slice: string | null;
+  /** The Issue Reports behind it (T16), as stored. */
+  reports: unknown[];
+};
+
 export type Run = {
   id: string;
   projectRequest: string;
@@ -33,6 +44,7 @@ export type Run = {
   tokenBudget: number;
   tokensUsed: number;
   pullRequest: RunPullRequest | null;
+  failure: RunFailure | null;
   createdAt: string;
   updatedAt: string;
 };
