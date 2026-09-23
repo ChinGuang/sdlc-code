@@ -68,8 +68,9 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
   }
 
   listFiles = (directory = ""): string[] => {
-    const start =
-      directory === "" ? this.#root : this.#check(directory, "read").full;
+    // "", "." and "./" all mean the whole application; agents write all three.
+    const whole = ["", ".", "./", "/"].includes(directory.trim());
+    const start = whole ? this.#root : this.#check(directory, "read").full;
     if (!existsSync(start) || !statSync(start).isDirectory())
       throw new WorkspaceFileError(`No folder "${directory}".`);
     const files: string[] = [];

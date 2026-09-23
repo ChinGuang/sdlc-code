@@ -172,7 +172,7 @@ await workspaces.startRun({
 });
 
 const uploaded = new Map<string, Promise<string>>();
-const testing = new SandboxTestingAgent({
+const sandboxTesting = new SandboxTestingAgent({
   runner: new SandboxTestRunner({
     sandbox,
     snapshots: new SandboxBaseSnapshots({
@@ -183,6 +183,29 @@ const testing = new SandboxTestingAgent({
     uploaded,
   }),
 });
+
+/** The same Testing Agent, saying on the terminal what each Test Run found. */
+const testing = {
+  testSlice: async (input: Parameters<typeof sandboxTesting.testSlice>[0]) => {
+    console.log(`  Test Run: ${input.files.length} files…`);
+    const result = await sandboxTesting.testSlice(input);
+    const run = result.testRun;
+    const steps =
+      run.status === "broken"
+        ? run.problem
+        : run.result.steps
+            .map((step) => `${step.ok ? "ok" : "FAILED"} ${step.name}`)
+            .join(", ");
+    console.log(
+      `  Test Run ${run.status} in ${run.evidence.durationSeconds ?? "?"}s (${run.evidence.cost ?? 0}): ${steps}`,
+    );
+    for (const report of result.issueReports)
+      console.log(
+        `    ${report.suspectedOwner ?? "unowned"}: ${report.failingTest ?? report.step} — ${report.error.slice(0, 160)}`,
+      );
+    return result;
+  },
+};
 
 const sliceRunner = new OrchestratedSliceRunner({
   workspaces,

@@ -55,6 +55,20 @@ describe("LocalWorkspaceFiles reading", () => {
     expect(files.listFiles("server")).toEqual(["server/app.ts"]);
   });
 
+  // Seen live: agents ask for "." and "./" as often as for no folder at all.
+  it.each(["", ".", "./", " . "])(
+    "lists the whole application for %j",
+    (directory) => {
+      const { files } = setup();
+
+      expect(files.listFiles(directory)).toEqual([
+        "package.json",
+        "server/app.ts",
+        "src/App.tsx",
+      ]);
+    },
+  );
+
   it("reads any application file, including the other side's", () => {
     const { files } = setup();
 
