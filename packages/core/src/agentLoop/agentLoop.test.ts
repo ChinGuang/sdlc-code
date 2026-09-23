@@ -415,6 +415,23 @@ describe("ChatAgentLoop: limits", () => {
 });
 
 describe("ChatAgentLoop: API errors", () => {
+  it("retries a connection that never reached Token Factory", async () => {
+    const { loop, sleeps } = makeLoop([
+      new ChatApiError(
+        0,
+        null,
+        "Token Factory could not be reached: fetch failed",
+      ),
+      { content: "done" },
+      memoryReply,
+    ]);
+
+    const result = await loop.run(task);
+
+    expect(result.stopReason).toBe("answered");
+    expect(sleeps).toEqual([1000]);
+  });
+
   it("retries a 429 after Retry-After, then continues", async () => {
     const { loop, sleeps, events } = makeLoop([
       new ChatApiError(429, 7, "Token Factory 429: rate limited"),

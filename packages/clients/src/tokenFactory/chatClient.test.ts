@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  UNREACHABLE,
   ChatApiError,
   costUsd,
   parseToolArguments,
@@ -158,6 +159,24 @@ describe("TokenFactoryChatClient.complete", () => {
       status: 429,
       retryAfterSeconds: 7,
       message: expect.stringMatching(/429.*rate limited/),
+    });
+  });
+
+  // Seen live: "SocketError: other side closed" ended a Run mid-design.
+  it("reports a dropped connection as an unreachable API, not a crash", async () => {
+    const dropped = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      makeClient({ ...base, fetch: dropped }).complete({
+        model: "m",
+        messages: [],
+      }),
+    ).rejects.toMatchObject({
+      name: "ChatApiError",
+      status: UNREACHABLE,
+      message: expect.stringMatching(/could not be reached.*fetch failed/),
     });
   });
 

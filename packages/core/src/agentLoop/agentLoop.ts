@@ -18,6 +18,7 @@ import {
   type ExportedImage,
   type ToolCall,
   type Usage,
+  UNREACHABLE,
 } from "@sdlc-code/clients";
 import { THINKING_OFF } from "../config/agentConfig.js";
 import {
@@ -113,7 +114,8 @@ export interface AgentLoop {
 
 const DEFAULT_MAX_TOOL_RESULT_CHARS = 20_000;
 const DEFAULT_MAX_API_ATTEMPTS = 3;
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+/** Rate limits, server errors, and a request that never arrived (UNREACHABLE). */
+const RETRYABLE_STATUS = new Set([UNREACHABLE, 429, 500, 502, 503, 504]);
 const WORKING_MEMORY_MAX_TOKENS = 500;
 
 export const WORKING_MEMORY_PROMPT =

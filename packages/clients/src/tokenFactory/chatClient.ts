@@ -83,6 +83,9 @@ export interface ChatClient {
   listModels: () => Promise<ModelInfo[]>;
 }
 
+/** The status of a request that never reached Token Factory. */
+export const UNREACHABLE = 0;
+
 export class ChatApiError extends Error {
   readonly status: number;
   readonly retryAfterSeconds: number | null;
@@ -182,11 +185,22 @@ export class TokenFactoryChatClient implements ChatClient {
       Authorization: `Bearer ${this.#apiKey}`,
     };
     if (body !== undefined) headers["Content-Type"] = "application/json";
-    const response = await this.#fetch(`${this.#baseUrl}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await this.#fetch(`${this.#baseUrl}${path}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (error) {
+      // A dropped connection is status 0: retryable, like a 5xx (seen live:
+      // "SocketError: other side closed" ended a Run mid-design).
+      throw new ChatApiError(
+        UNREACHABLE,
+        null,
+        `Token Factory could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     if (!response.ok) {
       const text = await response.text();
       const retryAfter = Number(response.headers.get("retry-after"));
