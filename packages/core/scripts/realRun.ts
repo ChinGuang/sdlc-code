@@ -262,7 +262,37 @@ const orchestrator = new AgentRunOrchestrator({
   penpotPage: () => pageName,
 });
 
-const ask = createInterface({ input: process.stdin, output: process.stdout });
+/**
+ * Your answers: typed at a terminal, or piped in (one per line) for an
+ * unattended run. Piped input ends long before the first question is asked,
+ * so it is read up front rather than through readline.
+ */
+async function answering() {
+  if (process.stdin.isTTY) {
+    const readline = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    return {
+      ask: (question: string) => readline.question(question),
+      close: () => readline.close(),
+    };
+  }
+  const piped: string[] = [];
+  process.stdin.setEncoding("utf8");
+  for await (const chunk of process.stdin) piped.push(chunk);
+  const answers = piped.join("").split(/\r?\n/);
+  return {
+    ask: async (question: string) => {
+      const answer = answers.shift() ?? "";
+      console.log(`${question}${answer || "(no answer left)"}`);
+      return answer;
+    },
+    close: () => {},
+  };
+}
+
+const ask = await answering();
 
 function report(): void {
   const current = runs.getRun(run.id)!;
@@ -299,11 +329,9 @@ async function decideDesign(): Promise<void> {
   for (const document of inReview) {
     console.log(`\n--- ${document.kind} v${document.version} ---`);
     console.log(document.content.slice(0, 2000));
-    const answer = (
-      await ask.question(`Approve ${document.kind}? [Y/n] `)
-    ).trim();
+    const answer = (await ask.ask(`Approve ${document.kind}? [Y/n] `)).trim();
     if (answer.toLowerCase().startsWith("n")) {
-      const comments = await ask.question("  What should change? ");
+      const comments = await ask.ask("  What should change? ");
       verdicts.push({
         documentKind: document.kind as DocumentKind,
         decision: "requestChanges" as const,
@@ -324,13 +352,13 @@ async function decideDesign(): Promise<void> {
 async function resolveEscalation(summary: string): Promise<void> {
   console.log(`\nEscalation: ${summary}`);
   const choice = (
-    await ask.question(
+    await ask.ask(
       "  1 retry with hint · 2 edit documents · 3 skip Slice · 4 abort [1] ",
     )
   ).trim();
   if (choice === "2") {
-    const kind = (await ask.question("  Which document? ")).trim();
-    const comments = await ask.question("  What should change? ");
+    const kind = (await ask.ask("  Which document? ")).trim();
+    const comments = await ask.ask("  What should change? ");
     orchestrator.resolveEscalation(run.id, {
       choice: "editDocuments",
       edits: [{ documentKind: kind as DocumentKind, comments }],
@@ -340,7 +368,7 @@ async function resolveEscalation(summary: string): Promise<void> {
   } else if (choice === "4") {
     orchestrator.resolveEscalation(run.id, { choice: "abort" });
   } else {
-    const hint = await ask.question("  Hint for the Coding Agents: ");
+    const hint = await ask.ask("  Hint for the Coding Agents: ");
     orchestrator.resolveEscalation(run.id, { choice: "retryWithHint", hint });
   }
 }
