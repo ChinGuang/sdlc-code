@@ -9,3 +9,4 @@ dist/
 
 # Local agent config (copy from sdlc-code.config.example.json)
 sdlc-code.config.json
+.sdlc-runs/
