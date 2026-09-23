@@ -71,6 +71,31 @@ describe("ensurePageCode", () => {
   });
 });
 
+// Seen live: Penpot refuses to create an empty text and the design failed.
+describe("screenCode with a blank label", () => {
+  it("draws the element without a text, and keeps drawing the rest", async () => {
+    const fake = fakePenpot();
+    await runPenpotCode(fake, ensurePageCode(PAGE));
+    const screen = structuredClone(spec.screens[1]!);
+    screen.elements[2]!.label = "  ";
+
+    await runPenpotCode(
+      fake,
+      screenCode({ pageName: PAGE, index: 0, screen, tokens: spec.tokens }),
+    );
+
+    const board = fake.boards(PAGE)[0]!;
+    const texts = board.children.filter((child) => child.type === "text");
+    expect(texts.length).toBeGreaterThan(0);
+    for (const text of texts) expect(text.characters?.trim()).toBeTruthy();
+    // The element itself is still drawn, and so is everything after it.
+    expect(
+      board.children.some((child) => child.name.startsWith("input:")),
+    ).toBe(true);
+    expect(fake.find(PAGE, "heading: Your todos")).toBeDefined();
+  });
+});
+
 describe("describeScreenCode", () => {
   it("reads a drawn screen back with each element relative to its board", async () => {
     const fake = fakePenpot();
