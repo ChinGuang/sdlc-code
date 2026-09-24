@@ -1,1 +1,9 @@
 import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+// Vitest runs without `globals`, so Testing Library never registers its own
+// cleanup: without this, a second render() leaves the first screen mounted and
+// every query by role matches two elements. Seen live: three Coding Agent
+// attempts rewrote a correct screen chasing "found multiple elements".
+afterEach(cleanup);
