@@ -11,6 +11,7 @@ import {
   redactToken,
   type CallTool,
   type PenpotClient,
+  type PenpotClientOptions,
   type ToolResult,
 } from "./penpotClient.js";
 
@@ -27,9 +28,9 @@ export type ConnectPenpotOptions = {
   clientName?: string;
   /** Tests connect to an in-memory server instead of the real one. */
   createTransport?: (url: URL) => Transport;
-  /** Passed to the client: how long to wait for a suspended tab, and what to say. */
+  /** Passed to the client: how long to wait for the plugin tab, and what to say. */
   retryDelaysMs?: number[];
-  onSuspended?: (wait: { attempt: number; delayMs: number }) => void;
+  onWaiting?: PenpotClientOptions["onWaiting"];
 };
 
 export async function connectPenpotMcp({
@@ -37,7 +38,7 @@ export async function connectPenpotMcp({
   clientName = "sdlc-code",
   createTransport = (target) => new StreamableHTTPClientTransport(target),
   retryDelaysMs,
-  onSuspended,
+  onWaiting,
 }: ConnectPenpotOptions): Promise<PenpotConnection> {
   const client = new Client({ name: clientName, version: "0.0.0" });
   const transport = createTransport(new URL(url));
@@ -55,7 +56,7 @@ export async function connectPenpotMcp({
   const callTool: CallTool = async (name, args) =>
     (await client.callTool({ name, arguments: args })) as ToolResult;
   return {
-    penpot: new McpPenpotClient({ callTool, retryDelaysMs, onSuspended }),
+    penpot: new McpPenpotClient({ callTool, retryDelaysMs, onWaiting }),
     tools: listed.tools.map((tool) => tool.name),
     close: () => client.close(),
   };

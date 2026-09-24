@@ -3,7 +3,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { connectPenpotMcp } from "./connectPenpot.js";
+import {
+  connectPenpotMcp,
+  type ConnectPenpotOptions,
+} from "./connectPenpot.js";
 import { PenpotError, type PenpotClient } from "./penpotClient.js";
 
 /**
@@ -50,13 +53,17 @@ function fakePenpotServer(options: { fail?: string } = {}) {
 }
 
 /** Connects the real client to the fake server over a pair of in-memory transports. */
-async function connectTo(fake: ReturnType<typeof fakePenpotServer>) {
+async function connectTo(
+  fake: ReturnType<typeof fakePenpotServer>,
+  options: Partial<ConnectPenpotOptions> = {},
+) {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   await fake.server.connect(serverTransport);
   return connectPenpotMcp({
     url: "https://design.penpot.app/mcp/stream?userToken=secret-token",
     createTransport: () => clientTransport,
+    ...options,
   });
 }
 
@@ -90,6 +97,8 @@ describe("connectPenpotMcp", () => {
       fakePenpotServer({
         fail: "Tool execution failed: Error: No Penpot plugin is connected.",
       }),
+      // No waiting here: this test is about the message, not the schedule.
+      { retryDelaysMs: [] },
     );
 
     const error = await connection.penpot

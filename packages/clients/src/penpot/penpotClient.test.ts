@@ -33,6 +33,15 @@ describe("classifyPenpotError", () => {
     );
   });
 
+  // Seen live: this ended a Run while the design was being drawn.
+  it("recognises the connection Penpot loses when its tab closes", () => {
+    expect(
+      classifyPenpotError(
+        "Tool execution failed: Error: No Penpot instance connected for user token. Please ensure that Penpot is connected.",
+      ),
+    ).toBe("disconnected");
+  });
+
   it("treats anything else as an execution error", () => {
     expect(
       classifyPenpotError(
@@ -132,22 +141,44 @@ describe("PenpotClient.executeCode", () => {
         ),
       )
       .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
-    const waits: Array<{ attempt: number; delayMs: number }> = [];
+    const waits: Array<{ attempt: number; delayMs: number; kind: string }> = [];
     const client = makeClient({
       callTool,
       sleep: async () => {},
       retryDelaysMs: [5, 10],
-      onSuspended: (wait) => waits.push(wait),
+      onWaiting: (wait) => waits.push(wait),
     });
 
     await expect(client.executeCode("x")).resolves.toBe("ok");
     expect(waits).toEqual([
-      { attempt: 1, delayMs: 5 },
-      { attempt: 2, delayMs: 10 },
+      { attempt: 1, delayMs: 5, kind: "suspended" },
+      { attempt: 2, delayMs: 10, kind: "suspended" },
     ]);
   });
 
-  it("does not retry when no plugin is connected", async () => {
+  // Seen live: a Run lost its design work when the plugin tab was closed.
+  it("waits for a plugin tab that went away, then goes on", async () => {
+    const callTool: CallTool = vi
+      .fn()
+      .mockResolvedValueOnce(
+        text(
+          "Tool execution failed: Error: No Penpot instance connected for user token.",
+        ),
+      )
+      .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
+    const waits: Array<{ attempt: number; delayMs: number; kind: string }> = [];
+    const client = makeClient({
+      callTool,
+      sleep: async () => {},
+      retryDelaysMs: [1, 1],
+      onWaiting: (wait) => waits.push(wait),
+    });
+
+    await expect(client.executeCode("x")).resolves.toBe("ok");
+    expect(waits).toEqual([{ attempt: 1, delayMs: 1, kind: "disconnected" }]);
+  });
+
+  it("gives up on a plugin that never comes back, saying what to do", async () => {
     const callTool: CallTool = vi.fn(async () =>
       text("Tool execution failed: No Penpot plugin instance is connected"),
     );
@@ -159,8 +190,9 @@ describe("PenpotClient.executeCode", () => {
 
     await expect(client.executeCode("x")).rejects.toMatchObject({
       kind: "disconnected",
+      message: expect.stringMatching(/start the MCP plugin/i),
     });
-    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(callTool).toHaveBeenCalledTimes(3);
   });
 
   it("returns undefined when the code returns nothing", async () => {

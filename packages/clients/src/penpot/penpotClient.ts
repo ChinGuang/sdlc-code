@@ -30,8 +30,10 @@ export class PenpotError extends Error {
 export function classifyPenpotError(message: string): PenpotErrorKind {
   if (/suspended by the browser|no heartbeat/i.test(message))
     return "suspended";
+  // Seen live: "No Penpot instance connected for user token" ended a Run when
+  // the plugin tab was closed while the design was being drawn.
   if (
-    /not connected|no .*plugin.*connected|plugin .*not (found|available)/i.test(
+    /not connected|no [^.]*\bconnected\b|plugin .*not (found|available)/i.test(
       message,
     )
   )
@@ -64,13 +66,17 @@ export type PenpotClientOptions = {
   callTool: CallTool;
   sleep?: (ms: number) => Promise<void>;
   /**
-   * Delay before each retry while the tab is suspended. A background tab stays
-   * asleep until someone clicks it, so a caller that can ask for that (the CLI,
-   * the dashboard) passes a longer schedule and reports each wait.
+   * Delay before each retry while the tab is asleep or gone. A background tab
+   * stays asleep until someone clicks it, so a caller that can ask for that
+   * (the CLI, the dashboard) passes a longer schedule and reports each wait.
    */
   retryDelaysMs?: number[];
-  /** Called before each wait, so the caller can ask the user to focus the tab. */
-  onSuspended?: (wait: { attempt: number; delayMs: number }) => void;
+  /** Called before each wait, so the caller can ask the user to fix the tab. */
+  onWaiting?: (wait: {
+    attempt: number;
+    delayMs: number;
+    kind: Exclude<PenpotErrorKind, "execution">;
+  }) => void;
 };
 
 export type ExportedImage = { bytes: Buffer; mimeType: string };
@@ -90,18 +96,18 @@ export class McpPenpotClient implements PenpotClient {
   #callTool: CallTool;
   #sleep: (ms: number) => Promise<void>;
   #retryDelaysMs: number[];
-  #onSuspended: PenpotClientOptions["onSuspended"];
+  #onWaiting: PenpotClientOptions["onWaiting"];
 
   constructor({
     callTool,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     retryDelaysMs = [2000, 5000, 10000],
-    onSuspended,
+    onWaiting,
   }: PenpotClientOptions) {
     this.#callTool = callTool;
     this.#sleep = sleep;
     this.#retryDelaysMs = retryDelaysMs;
-    this.#onSuspended = onSuspended;
+    this.#onWaiting = onWaiting;
   }
 
   executeCode = async <T = unknown>(code: string): Promise<T> => {
@@ -155,15 +161,15 @@ export class McpPenpotClient implements PenpotClient {
       const kind = classifyPenpotError(message);
       if (kind === "execution")
         throw new PenpotError(kind, redactToken(message));
-      // Only a suspended tab can come back on its own; a missing plugin needs a human now.
-      const delay =
-        kind === "suspended" ? this.#retryDelaysMs[attempt] : undefined;
+      // A sleeping tab wakes on a click and a closed one is reopened, so both
+      // wait for the person instead of throwing away the Run's design work.
+      const delay = this.#retryDelaysMs[attempt];
       if (delay === undefined)
         throw new PenpotError(
           kind,
           `${GUIDANCE[kind]} (${redactToken(message)})`,
         );
-      this.#onSuspended?.({ attempt: attempt + 1, delayMs: delay });
+      this.#onWaiting?.({ attempt: attempt + 1, delayMs: delay, kind });
       await this.#sleep(delay);
     }
   }
