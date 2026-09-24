@@ -245,6 +245,19 @@ describe("LocalWorkspaceFiles writing", () => {
     expect(() => files.writeFile("serverx/a.ts", "x")).toThrow(/may not write/);
   });
 
+  // Seen live: a Coding Agent committed server/SUMMARY.txt into the app.
+  it("writes source and configuration, not notes to itself", () => {
+    const { files, root } = setup(["server/", "package.json", ".env.example"]);
+
+    for (const path of ["server/todos.ts", "server/schema.sql", ".env.example"])
+      expect(() => files.writeFile(path, "x")).not.toThrow();
+    for (const path of ["server/SUMMARY.txt", "server/notes.md", "server/plan"])
+      expect(() => files.writeFile(path, "x"), path).toThrow(
+        /not source code or configuration/,
+      );
+    expect(existsSync(join(root, "server/SUMMARY.txt"))).toBe(false);
+  });
+
   it("never writes a secret file", () => {
     const { files } = setup(["server/", ".env"]);
 

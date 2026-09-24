@@ -66,8 +66,12 @@ export class LoopCodingAgent implements CodingAgent {
   }
 
   code = async (input: CodingInput): Promise<CodingResult> => {
+    const files = this.#openFiles(input);
     const context = codingContext({
       ...input,
+      // The agent is given the application as it is now, so it spends its
+      // turns on the code rather than on finding out what exists.
+      applicationFiles: files.listFiles(),
       // Without a canvas and a page there is no live design to read.
       capabilities: {
         ...input.capabilities,
@@ -77,7 +81,6 @@ export class LoopCodingAgent implements CodingAgent {
           input.penpotPage !== null,
       },
     });
-    const files = this.#openFiles(input);
     const tools = [
       ...fileTools(files),
       ...(context.usePenpotTools && this.#canvas && input.penpotPage

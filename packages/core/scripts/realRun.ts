@@ -235,7 +235,9 @@ const sliceRunner = new OrchestratedSliceRunner({
     new LoopCodingAgent({
       createLoop: loopFor(
         side === "backend" ? "backendCoding" : "frontendCoding",
-        30,
+        // Seen live: a frontend Step wrote the tests, ran out of turns before
+        // the screen they test, and every retry started that work again.
+        45,
         stepId,
       ),
       canvas,

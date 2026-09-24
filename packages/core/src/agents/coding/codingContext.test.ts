@@ -247,6 +247,28 @@ describe("codingContext inputs", () => {
     expect(system).not.toContain("findBy");
   });
 
+  // Seen live: over twenty list_files and read_file calls before the first
+  // edit, repeated on every attempt, spent most of a Run's Token Budget.
+  it("lists the application's files, marking the ones this side may write", () => {
+    const { user } = codingContext(
+      input({
+        side: "backend",
+        applicationFiles: ["package.json", "server/app.ts", "src/App.tsx"],
+      }),
+    ).task;
+
+    expect(user).toContain("* package.json");
+    expect(user).toContain("* server/app.ts");
+    expect(user).toContain("  src/App.tsx");
+    expect(user).toContain("do not list folders");
+  });
+
+  it("says nothing about files when the Workspace was not read", () => {
+    expect(codingContext(input()).task.user).not.toContain(
+      "The application already has these files",
+    );
+  });
+
   it("tells the agent what it may write and the rules it is reviewed against", () => {
     const { system } = codingContext(input({ side: "backend" })).task;
 
