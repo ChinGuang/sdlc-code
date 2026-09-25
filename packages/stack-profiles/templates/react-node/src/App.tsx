@@ -1,25 +1,23 @@
-import { useEffect, useState } from "react";
-import { getHealth, type Health } from "./api.js";
+import { Link, Route, Routes } from "react-router-dom";
+import { HealthScreen } from "./screens/HealthScreen.js";
 
-/** The Walking Skeleton screen: proves the app reaches its API. */
+/**
+ * Every screen of the UI Spec is a Route here, and screens move between each
+ * other with <Link> or useNavigate. The Router itself is in main.tsx, so a
+ * test can render this inside a MemoryRouter (see App.test.tsx).
+ */
 export function App() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getHealth()
-      .then(setHealth)
-      .catch((problem: unknown) =>
-        setError(problem instanceof Error ? problem.message : String(problem)),
-      );
-  }, []);
-
   return (
-    <main className="min-h-screen bg-slate-950 p-16 text-slate-100">
-      <h1 className="text-4xl font-semibold">App</h1>
-      <p className="mt-4 text-slate-400">
-        {error ?? (health ? `API ${health.status}, database ${health.database}` : "Checking the API…")}
-      </p>
-    </main>
+    <div className="min-h-screen bg-slate-950 p-16 text-slate-100">
+      <nav className="mb-8 flex gap-4 text-sm text-slate-400">
+        <Link to="/">Home</Link>
+      </nav>
+      <main>
+        <Routes>
+          <Route path="/" element={<HealthScreen />} />
+          <Route path="*" element={<p>This page does not exist.</p>} />
+        </Routes>
+      </main>
+    </div>
   );
 }

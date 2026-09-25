@@ -70,6 +70,8 @@ describe("templateFiles", () => {
         "server/main.ts",
         "src/App.tsx",
         "src/App.test.tsx",
+        "src/screens/HealthScreen.tsx",
+        "src/screens/HealthScreen.test.tsx",
         "src/api.ts",
         "scripts/sdlcTest.mjs",
       ]),
