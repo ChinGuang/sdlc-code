@@ -15,7 +15,12 @@ export type CallTool = (
   args: Record<string, unknown>,
 ) => Promise<ToolResult>;
 
-export type PenpotErrorKind = "suspended" | "disconnected" | "execution";
+export type PenpotErrorKind =
+  | "suspended"
+  | "disconnected"
+  /** Penpot itself is busy or timed out; the same call may work in a moment. */
+  | "unavailable"
+  | "execution";
 
 export class PenpotError extends Error {
   readonly kind: PenpotErrorKind;
@@ -38,6 +43,14 @@ export function classifyPenpotError(message: string): PenpotErrorKind {
     )
   )
     return "disconnected";
+  // Seen live: exporting a board returned Penpot's own 500 :timeout and ended
+  // a Run after the whole design had been drawn.
+  if (
+    /:timed? ?out|timed out|:server-error|http error .*:status 50\d|\b50[0234]\b/i.test(
+      message,
+    )
+  )
+    return "unavailable";
   return "execution";
 }
 
@@ -46,6 +59,7 @@ const GUIDANCE: Record<Exclude<PenpotErrorKind, "execution">, string> = {
     "Penpot plugin tab is suspended. Focus the Penpot tab (keep it visible) and retry.",
   disconnected:
     "No Penpot plugin is connected. Open the Penpot file and start the MCP plugin.",
+  unavailable: "Penpot did not answer in time and kept failing on retry.",
 };
 
 const FAILURE_PREFIX = /^Tool execution failed:/;

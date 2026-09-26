@@ -59,6 +59,8 @@ export type UiDesignAgentOptions = {
   canvas: UiCanvas;
   /** Export a PNG of every board once it is drawn. Default true. */
   exportBoards?: boolean;
+  /** Told when a board's PNG could not be exported; the design is kept. */
+  onExportFailed?: (failure: { screen: string; reason: string }) => void;
 };
 
 export const SUBMIT_UI_SPEC = "submit_ui_spec";
@@ -81,11 +83,13 @@ export class LoopUiDesignAgent implements UiDesignAgent {
   #createLoop: UiDesignAgentOptions["createLoop"];
   #canvas: UiCanvas;
   #exportBoards: boolean;
+  #onExportFailed: UiDesignAgentOptions["onExportFailed"];
 
   constructor(options: UiDesignAgentOptions) {
     this.#createLoop = options.createLoop;
     this.#canvas = options.canvas;
     this.#exportBoards = options.exportBoards ?? true;
+    this.#onExportFailed = options.onExportFailed;
   }
 
   design = async (input: UiDesignInput): Promise<UiDesignResult> => {
@@ -122,6 +126,27 @@ export class LoopUiDesignAgent implements UiDesignAgent {
     return { spec, screens, page, loop };
   };
 
+  /**
+   * A board's PNG is design material for a model with vision, not the design
+   * itself: the UI Spec and the boards are already saved. Seen live: Penpot's
+   * export API timed out and ended a Run whose design was fully drawn, so a
+   * failed export now costs that one image and nothing more.
+   */
+  async #exportOrSkip(
+    boardId: string,
+    screenName: string,
+  ): Promise<ExportedImage | null> {
+    try {
+      return await this.#canvas.exportBoard(boardId);
+    } catch (error) {
+      this.#onExportFailed?.({
+        screen: screenName,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
   async #draw(
     pageName: string,
     spec: UiSpec,
@@ -139,7 +164,7 @@ export class LoopUiDesignAgent implements UiDesignAgent {
         name: screen.name,
         boardId: board.boardId,
         export: this.#exportBoards
-          ? await this.#canvas.exportBoard(board.boardId)
+          ? await this.#exportOrSkip(board.boardId, screen.name)
           : null,
       });
     }

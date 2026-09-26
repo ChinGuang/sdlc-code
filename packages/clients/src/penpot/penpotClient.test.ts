@@ -42,6 +42,16 @@ describe("classifyPenpotError", () => {
     ).toBe("disconnected");
   });
 
+  // Seen live: export_shape returned Penpot's own 500 :timeout and ended a Run
+  // whose design had already been drawn.
+  it("recognises Penpot answering too slowly as something to retry", () => {
+    expect(
+      classifyPenpotError(
+        'Tool execution failed: Error: Error handling task: http error ({:type :server-error, :code :timeout, :hint "ResourceRequest timed out", :uri "https://design.penpot.app/api/export", :status 500})',
+      ),
+    ).toBe("unavailable");
+  });
+
   it("treats anything else as an execution error", () => {
     expect(
       classifyPenpotError(
@@ -176,6 +186,27 @@ describe("PenpotClient.executeCode", () => {
 
     await expect(client.executeCode("x")).resolves.toBe("ok");
     expect(waits).toEqual([{ attempt: 1, delayMs: 1, kind: "disconnected" }]);
+  });
+
+  it("retries an export Penpot was too busy to finish", async () => {
+    const callTool: CallTool = vi
+      .fn()
+      .mockResolvedValueOnce(
+        text(
+          "Tool execution failed: Error: http error ({:code :timeout, :status 500})",
+        ),
+      )
+      .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
+    const waits: Array<{ kind: string }> = [];
+    const client = makeClient({
+      callTool,
+      sleep: async () => {},
+      retryDelaysMs: [1, 1],
+      onWaiting: ({ kind }) => waits.push({ kind }),
+    });
+
+    await expect(client.executeCode("x")).resolves.toBe("ok");
+    expect(waits).toEqual([{ kind: "unavailable" }]);
   });
 
   it("gives up on a plugin that never comes back, saying what to do", async () => {
