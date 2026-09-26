@@ -29,6 +29,7 @@ import {
   type ToolOutcome,
   type ToolProblem,
 } from "./tools.js";
+import { trimToolResults } from "./trimMessages.js";
 
 export type CompletionClient = Pick<ChatClient, "complete">;
 
@@ -83,6 +84,12 @@ export type AgentLoopOptions = {
   budget?: TokenBudget;
   /** Longer tool results are cut, keeping contexts short (spike rule 4). */
   maxToolResultChars?: number;
+  /**
+   * Tool results sent in full, counting back from the newest; older ones go as
+   * a one-line note (trimMessages.ts). Defaults to
+   * DEFAULT_KEEP_RECENT_RESULTS; a whole number of 0 or more.
+   */
+  keepRecentToolResults?: number;
   /** Attempts per model call when Token Factory returns 429 or 5xx. */
   maxApiAttempts?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -199,7 +206,7 @@ export class ChatAgentLoop implements AgentLoop {
         return;
       }
       const response = await this.#complete({
-        messages,
+        messages: this.#trim(messages),
         tools: [...this.#tools.values()].map((tool) => tool.definition),
       });
       state.iterations++;
@@ -285,7 +292,7 @@ export class ChatAgentLoop implements AgentLoop {
       try {
         const response = await this.#complete({
           messages: [
-            ...messages,
+            ...this.#trim(messages),
             { role: "user", content: WORKING_MEMORY_PROMPT },
           ],
           extra: { ...this.#options.request.extra, ...THINKING_OFF },
@@ -299,6 +306,11 @@ export class ChatAgentLoop implements AgentLoop {
       }
     }
     return fallbackNote(state);
+  }
+
+  /** What this turn sends: the Task in full, older tool results as notes. */
+  #trim(messages: readonly ChatMessage[]): ChatMessage[] {
+    return trimToolResults(messages, this.#options.keepRecentToolResults);
   }
 
   /** One model call, retrying rate limits and server errors. */
