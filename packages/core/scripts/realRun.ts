@@ -40,7 +40,6 @@ import {
   PenpotUiCanvas,
   penpotPageUrl,
   requestOptionsFor,
-  resumableRuns,
   resumeRun,
   RuleOwnerResolver,
   RunTokenBudget,
@@ -60,6 +59,7 @@ import {
   type AgentRole,
   type AgentTool,
   type DocumentKind,
+  type SliceCheckpoint,
   type TranscriptEvent,
 } from "../src/index.js";
 import { requireEnv } from "../../clients/scripts/requireEnv.js";
@@ -113,9 +113,9 @@ const gate = new DocumentDesignGate({
  * none). A resumed Run keeps its design, its Slice Commits and what its Slices
  * already failed on; --budget gives it a new total to spend.
  */
-const run = flag("resume") ? resuming() : fresh();
+const run = flag("resume") ? runToResume() : createRun();
 
-function fresh() {
+function createRun() {
   return runs.createRun({
     projectRequest,
     mode,
@@ -130,9 +130,9 @@ function fresh() {
   });
 }
 
-function resuming() {
+function runToResume() {
   const id = value("resume");
-  const unfinished = resumableRuns(runs);
+  const unfinished = runs.listUnfinishedRuns();
   const found = id ? runs.getRun(id) : unfinished.at(-1);
   if (!found) {
     console.error(
@@ -268,32 +268,37 @@ const testing = {
   },
 };
 
-const sliceRunner = new OrchestratedSliceRunner({
-  workspaces,
-  testing,
-  owners: new RuleOwnerResolver({
-    judge: new ModelOwnerJudge({
-      client,
-      request: requestOptionsFor(config.roles.orchestrator),
-      budget,
+/** A Slice runner that reports its Checkpoints to the Orchestrator and to you. */
+const sliceRunnerFor = (onCheckpoint: (checkpoint: SliceCheckpoint) => void) =>
+  new OrchestratedSliceRunner({
+    workspaces,
+    testing,
+    owners: new RuleOwnerResolver({
+      judge: new ModelOwnerJudge({
+        client,
+        request: requestOptionsFor(config.roles.orchestrator),
+        budget,
+      }),
     }),
-  }),
-  tasks,
-  slices,
-  budget,
-  codingAgent: (side, stepId) =>
-    new LoopCodingAgent({
-      createLoop: loopFor(
-        side === "backend" ? "backendCoding" : "frontendCoding",
-        // Seen live: a frontend Step wrote the tests, ran out of turns before
-        // the screen they test, and every retry started that work again.
-        45,
-        stepId,
-      ),
-      canvas,
-    }),
-  checkpoint: (checkpoint) => console.log(`  checkpoint: ${checkpoint.at}`),
-});
+    tasks,
+    slices,
+    budget,
+    codingAgent: (side, stepId) =>
+      new LoopCodingAgent({
+        createLoop: loopFor(
+          side === "backend" ? "backendCoding" : "frontendCoding",
+          // Seen live: a frontend Step wrote the tests, ran out of turns before
+          // the screen they test, and every retry started that work again.
+          45,
+          stepId,
+        ),
+        canvas,
+      }),
+    checkpoint: (checkpoint) => {
+      console.log(`  checkpoint: ${checkpoint.at}`);
+      onCheckpoint(checkpoint);
+    },
+  });
 
 const orchestrator = new AgentRunOrchestrator({
   runs,
@@ -320,7 +325,7 @@ const orchestrator = new AgentRunOrchestrator({
     profile: () => REACT_NODE,
     pageName: () => pageName,
   }),
-  sliceRunner: async () => sliceRunner,
+  sliceRunner: async (_run, onCheckpoint) => sliceRunnerFor(onCheckpoint),
   profile: () => REACT_NODE,
   capabilities: {
     backend: config.roles.backendCoding.capabilities,

@@ -37,6 +37,7 @@ import {
   type RunOrchestrator,
 } from "./runOrchestrator.js";
 import type {
+  SliceCheckpoint,
   SliceHistory,
   SliceOutcome,
   SliceRunInput,
@@ -73,6 +74,11 @@ function setup(options: {
   revisedPlan?: Design["slicePlan"];
   /** Design calls that fail (no valid design), by call number from 1. */
   failDesign?: number[];
+  /**
+   * The process dies inside the first Slice, between two attempts, with this
+   * as what the Slice had failed on so far.
+   */
+  killAfterRetry?: SliceHistory;
 }) {
   const db = openDatabase(":memory:");
   const store = { db };
@@ -144,6 +150,7 @@ function setup(options: {
   };
 
   const runnerCalls: SliceRunInput[] = [];
+  const sliceCheckpoints: Array<(checkpoint: SliceCheckpoint) => void> = [];
   const outcomes = [...(options.outcomes ?? [])];
   // Tests depend on the interface; only this factory knows the class. A second
   // one over the same stores is a restarted process (see "resuming a Run").
@@ -164,9 +171,22 @@ function setup(options: {
         profile: () => REACT_NODE,
         pageName: () => "#1 Todo",
       }),
-      sliceRunner: async () => ({
+      sliceRunner: async (_run, onCheckpoint) => ({
         runSlice: async (input) => {
           runnerCalls.push(input);
+          // The real runner reports each Checkpoint of diagram 6; a test says
+          // which ones happened through `sliceCheckpoint` below.
+          sliceCheckpoints.push(onCheckpoint);
+          if (options.killAfterRetry && runnerCalls.length === 1) {
+            slices.moveSlice(input.slice.id, "building");
+            onCheckpoint({
+              at: "retrying",
+              sliceId: input.slice.id,
+              attempt: 2,
+              history: options.killAfterRetry,
+            });
+            throw new Error("the process died mid-Slice");
+          }
           const outcome = outcomes.shift() ?? {
             status: "passed",
             commit: `commit-${runnerCalls.length}`,
@@ -198,6 +218,9 @@ function setup(options: {
   return {
     orchestrator,
     restart: build,
+    /** Reports a Checkpoint from inside a Slice, as the real runner does. */
+    sliceCheckpoint: (checkpoint: SliceCheckpoint) =>
+      sliceCheckpoints.at(-1)!(checkpoint),
     runId: run.id,
     status,
     sliceStatuses,
@@ -231,20 +254,6 @@ const escalatedWith = (
 });
 
 describe("AgentRunOrchestrator: resuming a Run (T18)", () => {
-  it("writes a Checkpoint at every Step boundary", async () => {
-    const { orchestrator, runId, runs } = await approved({});
-
-    expect(runs.latestCheckpoint(runId)).not.toBeNull();
-
-    await orchestrator.advance(runId);
-
-    expect(runs.latestCheckpoint(runId)?.payload).toMatchObject({
-      version: 1,
-      revisions: [],
-      hints: {},
-    });
-  });
-
   // The Run stops mid-build: a spent budget, a closed laptop, a kill -9.
   it("a restarted process takes the same next action", async () => {
     const context = await approved({ outcomes: [escalatedWith()] });
@@ -258,6 +267,30 @@ describe("AgentRunOrchestrator: resuming a Run (T18)", () => {
 
     expect(progress).toMatchObject({ waitingFor: "escalation" });
     expect(context.sliceStatuses()).toEqual(before);
+  });
+
+  // The plan's own test: killed mid-Slice, a resumed Run must not hand the
+  // Slice a fresh Retry Budget and forget what it already failed on.
+  it("keeps what a Slice failed on when the process dies between attempts", async () => {
+    const history: SliceHistory = {
+      earlier: { backend: [issueReport()], frontend: [], design: [] },
+      retryBaseline: { backend: 1 },
+    };
+    const context = await approved({ killAfterRetry: history });
+    await expect(context.orchestrator.advance(context.runId)).rejects.toThrow(
+      /died mid-Slice/,
+    );
+
+    const resumed = context.restart();
+    await resumed.advance(context.runId);
+
+    // Without the Checkpoint the Slice would start over with a full Retry
+    // Budget and no memory of the failure it already had.
+    const sliceId = context.runnerCalls[0]!.slice.id;
+    expect(
+      context.runnerCalls.slice(1).find((call) => call.slice.id === sliceId)
+        ?.history,
+    ).toEqual(history);
   });
 
   it("gives a resumed Slice what it already failed on, from the Checkpoint", async () => {

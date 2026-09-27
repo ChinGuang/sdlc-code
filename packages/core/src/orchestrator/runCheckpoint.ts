@@ -13,9 +13,14 @@ import { z } from "zod";
 import { AGENT_ROLES } from "../agentRoles.js";
 import { DOCUMENT_KINDS } from "../domain/documentLifecycle.js";
 import { TEST_STEPS } from "@sdlc-code/stack-profiles";
+import type { IssueReport } from "../agents/testing/issueReports.js";
 import type { Revision } from "./designGate.js";
 import type { SliceHistory } from "./sliceRunner.js";
 
+/**
+ * `satisfies` is the link to IssueReport: a field added there and not here
+ * stops this file compiling, rather than being dropped from every resume.
+ */
 const IssueReportSchema = z.strictObject({
   step: z.union([z.enum(TEST_STEPS), z.literal("sandbox")]),
   failingTest: z.string().nullable(),
@@ -26,7 +31,7 @@ const IssueReportSchema = z.strictObject({
   suspectedOwner: z.enum(["backendCoding", "frontendCoding"]).nullable(),
   signature: z.string(),
   occurrences: z.number().int().positive(),
-});
+}) satisfies z.ZodType<IssueReport>;
 
 const SliceHistorySchema = z.strictObject({
   earlier: z.strictObject({
@@ -47,8 +52,9 @@ const RevisionSchema = z.strictObject({
 });
 
 /**
- * Version 1. A Checkpoint an older version wrote is ignored rather than
- * guessed at: the Run starts its current Slice again, which is safe.
+ * A Checkpoint written by any other version of this shape is ignored rather
+ * than guessed at, whether it is older or newer: the Run starts its current
+ * Slice again, which is safe.
  */
 export const CHECKPOINT_VERSION = 1;
 
@@ -75,8 +81,9 @@ export type RunMemoryState = {
  * The payload to save. The board PNGs a model with vision was given are left
  * out on purpose: they are bytes, they are design material rather than a
  * decision, and the UI Spec they were drawn from is an Approved Document. A
- * resumed Run builds its screens from the UI Spec alone until the design is
- * drawn again.
+ * resumed Run builds its screens from the UI Spec alone. A design that is not
+ * revised is never redrawn, so a vision-capable agent works without those
+ * images for the rest of that Run.
  *
  * The run branch is not recorded either: it only ever moves forward by a Slice
  * Commit, so its head is already the last Slice that passed.
@@ -116,7 +123,7 @@ export function memoryFromCheckpoint(payload: unknown): RunMemoryState | null {
       Object.entries(parsed.data.histories).map(([sliceId, history]) => [
         sliceId,
         {
-          earlier: history.earlier as SliceHistory["earlier"],
+          earlier: history.earlier,
           retryBaseline: history.retryBaseline,
         },
       ]),

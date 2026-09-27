@@ -10,6 +10,8 @@
  * would have taken before the interrupted Step began.
  */
 import type { Run } from "../domain/entities.js";
+import { memoryFromCheckpoint } from "./runCheckpoint.js";
+import { isFinished } from "../domain/runLifecycle.js";
 import type { RunStore } from "../persistence/runStore.js";
 import type { TaskStore } from "../persistence/taskStore.js";
 import type { WorkspaceManager } from "../workspaces/workspaceManager.js";
@@ -40,7 +42,7 @@ export async function resumeRun(
 ): Promise<ResumedRun> {
   const run = runs.getRun(runId);
   if (!run) throw new Error(`No Run ${runId} to resume.`);
-  if (FINISHED.has(run.status))
+  if (isFinished(run.status))
     throw new Error(
       `Run ${runId} is ${run.status}; there is nothing left to resume.`,
     );
@@ -53,13 +55,9 @@ export async function resumeRun(
   return {
     run,
     discardedSteps: discarded.length,
-    hadCheckpoint: runs.latestCheckpoint(runId) !== null,
+    // Read, not merely counted: a Checkpoint this version cannot parse is not
+    // one the Run continues from, and saying otherwise would be a lie.
+    hadCheckpoint:
+      memoryFromCheckpoint(runs.latestCheckpoint(runId)?.payload) !== null,
   };
 }
-
-/** Every unfinished Run, oldest first, as a restart finds them. */
-export function resumableRuns(runs: RunStore): Run[] {
-  return runs.listUnfinishedRuns();
-}
-
-const FINISHED = new Set(["done", "failed", "aborted"]);

@@ -19,7 +19,7 @@ import { SqliteSliceStore } from "../persistence/sliceStore.js";
 import { SqliteTaskStore } from "../persistence/taskStore.js";
 import { GitWorkspaceManager } from "../workspaces/workspaceManager.js";
 import type { WorkspaceManager } from "../workspaces/workspaceManager.js";
-import { resumableRuns, resumeRun } from "./resumeRun.js";
+import { resumeRun } from "./resumeRun.js";
 
 // Real git and a real template scaffold: slow under a loaded suite, like the
 // other tests that boot something.
@@ -156,19 +156,5 @@ describe("resumeRun", () => {
     await expect(resumeRun("no-such-run", context.options)).rejects.toThrow(
       /No Run no-such-run/,
     );
-  });
-});
-
-describe("resumableRuns", () => {
-  it("lists the Runs a restart should pick up, and drops the finished ones", async () => {
-    const context = await setup();
-
-    expect(resumableRuns(context.runs).map((run) => run.id)).toEqual([
-      context.run.id,
-    ]);
-
-    context.runs.applyEvent(context.run.id, { type: "designFailed" });
-
-    expect(resumableRuns(context.runs)).toEqual([]);
   });
 });

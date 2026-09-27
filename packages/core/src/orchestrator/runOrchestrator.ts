@@ -13,7 +13,8 @@
  *
  * What a later step needs from an earlier one (revisions to make, a Slice's
  * history, a hint) is written to a Checkpoint at every Step boundary
- * (runCheckpoint.ts), so a Run that stopped continues where it was.
+ * (runCheckpoint.ts), so a Run that stopped continues where it was. The board
+ * PNGs are the exception: a resumed Run works from the UI Spec without them.
  */
 import type { ExportedImage } from "@sdlc-code/clients";
 import type { CodingSide, StackProfile } from "@sdlc-code/stack-profiles";
@@ -42,7 +43,7 @@ import {
   memoryFromCheckpoint,
   type RunMemoryState,
 } from "./runCheckpoint.js";
-import type { SliceRunner } from "./sliceRunner.js";
+import type { SliceCheckpoint, SliceRunner } from "./sliceRunner.js";
 
 /** Where a Run stopped, and why. */
 export type RunProgress =
@@ -79,18 +80,20 @@ export type RunOrchestratorOptions = {
   escalations: EscalationStore;
   gate: DesignGate;
   designPhase: DesignPhase;
-  /** The Slice runner for a Run: its Workspaces, agents and budget. */
-  sliceRunner: (run: Run) => Promise<SliceRunner>;
+  /**
+   * The Slice runner for a Run: its Workspaces, agents and budget. It reports
+   * each Checkpoint of diagram 6 to `onCheckpoint`, which writes it down.
+   */
+  sliceRunner: (
+    run: Run,
+    onCheckpoint: (checkpoint: SliceCheckpoint) => void,
+  ) => Promise<SliceRunner>;
   profile: (run: Run) => StackProfile;
   capabilities: Record<CodingSide, ModelCapabilities>;
   penpotPage: (run: Run) => string | null;
 };
 
-/**
- * What a Run carries from one step to the next. Everything but the board PNGs
- * is in its Checkpoint; the images are design material a resumed Run does
- * without until the design is drawn again (runCheckpoint.ts).
- */
+/** What a Run carries from one step to the next. */
 type RunMemory = RunMemoryState & {
   screenImages: Map<string, ExportedImage>;
 };
@@ -294,7 +297,9 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     const memory = this.#memoryOf(run.id);
     const hint = memory.hints.get(current.id);
     memory.hints.delete(current.id);
-    const runner = await this.#options.sliceRunner(run);
+    const runner = await this.#options.sliceRunner(run, (checkpoint) =>
+      this.#sliceCheckpoint(run.id, checkpoint),
+    );
     const outcome = await runner.runSlice({
       runId: run.id,
       slice: current,
@@ -402,7 +407,6 @@ export class AgentRunOrchestrator implements RunOrchestrator {
         revisions: saved?.revisions ?? [],
         histories: saved?.histories ?? new Map(),
         hints: saved?.hints ?? new Map(),
-        // Board PNGs are not in a Checkpoint; the UI Spec they came from is.
         screenImages: new Map(),
       };
       this.#memory.set(runId, memory);
@@ -410,7 +414,20 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     return memory;
   }
 
-  /** Writes down where the Run is, at a Step boundary. */
+  /**
+   * A Checkpoint from inside a Slice (diagram 6). A Run killed between attempts
+   * must come back knowing what it already failed on, so the retry it takes
+   * next is the one it would have taken.
+   */
+  #sliceCheckpoint(runId: string, checkpoint: SliceCheckpoint): void {
+    const memory = this.#memoryOf(runId);
+    if (checkpoint.at === "retrying")
+      memory.histories.set(checkpoint.sliceId, checkpoint.history);
+    if (checkpoint.at === "committed")
+      memory.histories.delete(checkpoint.sliceId);
+    this.#checkpoint(runId);
+  }
+
   #checkpoint(runId: string): void {
     this.#options.runs.saveCheckpoint(
       runId,

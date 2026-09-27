@@ -104,7 +104,11 @@ export type SliceOutcome =
       history: SliceHistory;
     };
 
-/** A point where diagram 6 saves a Checkpoint; T18 writes it. */
+/**
+ * A point where diagram 6 saves a Checkpoint. The Orchestrator writes one from
+ * it: "retrying" carries the history a resumed Slice must keep, or its Retry
+ * Budget would be refilled and a repeated failure would no longer be a Loop.
+ */
 export type SliceCheckpoint =
   | { at: "merged"; sliceId: string; attempt: number; commit: string }
   | { at: "committed"; sliceId: string; commit: string }
