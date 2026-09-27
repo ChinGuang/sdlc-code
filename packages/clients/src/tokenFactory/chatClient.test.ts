@@ -180,6 +180,29 @@ describe("TokenFactoryChatClient.complete", () => {
     });
   });
 
+  // Seen live: a Run sat for hours on a request that was never answered.
+  it("gives up on a request that is never answered, as unreachable", async () => {
+    const silent = ((_url: string | URL, init: RequestInit = {}) =>
+      new Promise<Response>((_, reject) => {
+        init.signal?.addEventListener("abort", () =>
+          reject(
+            new DOMException("The operation was aborted.", "TimeoutError"),
+          ),
+        );
+      })) as unknown as typeof fetch;
+
+    await expect(
+      makeClient({ ...base, fetch: silent, timeoutMs: 5 }).complete({
+        model: "m",
+        messages: [],
+      }),
+    ).rejects.toMatchObject({
+      name: "ChatApiError",
+      status: UNREACHABLE,
+      message: expect.stringMatching(/could not be reached/),
+    });
+  });
+
   it("public methods work when passed as callbacks", async () => {
     const { fetch } = fakeFetch([
       { status: 200, body: completion({ role: "assistant", content: "ok" }) },

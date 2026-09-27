@@ -85,6 +85,12 @@ export type PenpotClientOptions = {
    * (the CLI, the dashboard) passes a longer schedule and reports each wait.
    */
   retryDelaysMs?: number[];
+  /**
+   * How long one tool call may take before it counts as Penpot not answering.
+   * Seen live: a Run waited three and a half hours on a call that never came
+   * back, because the retries only ever saw answers, never silence.
+   */
+  timeoutMs?: number;
   /** Called before each wait, so the caller can ask the user to fix the tab. */
   onWaiting?: (wait: {
     attempt: number;
@@ -92,6 +98,9 @@ export type PenpotClientOptions = {
     kind: Exclude<PenpotErrorKind, "execution">;
   }) => void;
 };
+
+/** Long enough for Penpot to draw a board, short enough to notice silence. */
+export const DEFAULT_PENPOT_TIMEOUT_MS = 90_000;
 
 export type ExportedImage = { bytes: Buffer; mimeType: string };
 
@@ -110,17 +119,20 @@ export class McpPenpotClient implements PenpotClient {
   #callTool: CallTool;
   #sleep: (ms: number) => Promise<void>;
   #retryDelaysMs: number[];
+  #timeoutMs: number;
   #onWaiting: PenpotClientOptions["onWaiting"];
 
   constructor({
     callTool,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     retryDelaysMs = [2000, 5000, 10000],
+    timeoutMs = DEFAULT_PENPOT_TIMEOUT_MS,
     onWaiting,
   }: PenpotClientOptions) {
     this.#callTool = callTool;
     this.#sleep = sleep;
     this.#retryDelaysMs = retryDelaysMs;
+    this.#timeoutMs = timeoutMs;
     this.#onWaiting = onWaiting;
   }
 
@@ -162,17 +174,52 @@ export class McpPenpotClient implements PenpotClient {
     };
   };
 
+  /** The call, or an "unavailable" PenpotError once it has taken too long. */
+  async #withTimeout(name: string, call: Promise<ToolResult>) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const silence = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new PenpotError(
+              "unavailable",
+              `Penpot did not answer ${name} in time (${this.#timeoutMs} ms).`,
+            ),
+          ),
+        this.#timeoutMs,
+      );
+    });
+    try {
+      return await Promise.race([call, silence]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async #call(
     name: string,
     args: Record<string, unknown>,
   ): Promise<ToolResult> {
     for (let attempt = 0; ; attempt++) {
-      const result = await this.#callTool(name, args);
-      const message = textOf(result);
-      // Penpot Cloud MCP reports failures as text without setting isError.
-      if (!result.isError && !FAILURE_PREFIX.test(message)) return result;
+      let message: string;
+      // Silence is Penpot not answering, which the waits below treat as the
+      // timeout it already is, rather than reading it as a message.
+      let silent = false;
+      try {
+        const result = await this.#withTimeout(
+          name,
+          this.#callTool(name, args),
+        );
+        message = textOf(result);
+        // Penpot Cloud MCP reports failures as text without setting isError.
+        if (!result.isError && !FAILURE_PREFIX.test(message)) return result;
+      } catch (error) {
+        if (!(error instanceof PenpotError)) throw error;
+        message = error.message;
+        silent = true;
+      }
 
-      const kind = classifyPenpotError(message);
+      const kind = silent ? "unavailable" : classifyPenpotError(message);
       if (kind === "execution")
         throw new PenpotError(kind, redactToken(message));
       // A sleeping tab wakes on a click and a closed one is reopened, so both

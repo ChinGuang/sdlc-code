@@ -209,6 +209,41 @@ describe("PenpotClient.executeCode", () => {
     expect(waits).toEqual([{ kind: "unavailable" }]);
   });
 
+  // Seen live: a Run waited three and a half hours on a call that never
+  // answered, because every retry only ever looked at answers.
+  it("treats a call Penpot never answers as something to retry", async () => {
+    const never = new Promise<never>(() => {});
+    const callTool: CallTool = vi
+      .fn()
+      .mockReturnValueOnce(never)
+      .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
+    const waits: Array<{ kind: string }> = [];
+    const client = makeClient({
+      callTool,
+      sleep: async () => {},
+      retryDelaysMs: [1, 1],
+      timeoutMs: 5,
+      onWaiting: ({ kind }) => waits.push({ kind }),
+    });
+
+    await expect(client.executeCode("x")).resolves.toBe("ok");
+    expect(waits).toEqual([{ kind: "unavailable" }]);
+  });
+
+  it("says how long it waited when Penpot never answers at all", async () => {
+    const client = makeClient({
+      callTool: () => new Promise<never>(() => {}),
+      sleep: async () => {},
+      retryDelaysMs: [],
+      timeoutMs: 5,
+    });
+
+    await expect(client.executeCode("x")).rejects.toMatchObject({
+      kind: "unavailable",
+      message: expect.stringMatching(/did not answer execute_code/),
+    });
+  });
+
   it("gives up on a plugin that never comes back, saying what to do", async () => {
     const callTool: CallTool = vi.fn(async () =>
       text("Tool execution failed: No Penpot plugin instance is connected"),
