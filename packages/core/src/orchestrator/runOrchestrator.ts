@@ -12,7 +12,8 @@
  *   reviewing onwards  → T19/T20
  *
  * What a later step needs from an earlier one (revisions to make, a Slice's
- * history, a hint) is kept here per Run; T18 moves it into Checkpoints.
+ * history, a hint) is written to a Checkpoint at every Step boundary
+ * (runCheckpoint.ts), so a Run that stopped continues where it was.
  */
 import type { ExportedImage } from "@sdlc-code/clients";
 import type { CodingSide, StackProfile } from "@sdlc-code/stack-profiles";
@@ -36,7 +37,12 @@ import type {
   Revision,
 } from "./designGate.js";
 import { DesignPhaseError, type DesignPhase } from "./designPhase.js";
-import type { SliceHistory, SliceRunner } from "./sliceRunner.js";
+import {
+  checkpointPayload,
+  memoryFromCheckpoint,
+  type RunMemoryState,
+} from "./runCheckpoint.js";
+import type { SliceRunner } from "./sliceRunner.js";
 
 /** Where a Run stopped, and why. */
 export type RunProgress =
@@ -80,11 +86,12 @@ export type RunOrchestratorOptions = {
   penpotPage: (run: Run) => string | null;
 };
 
-/** What a Run carries from one step to the next (T18 persists it). */
-type RunMemory = {
-  revisions: Revision[];
-  histories: Map<string, SliceHistory>;
-  hints: Map<string, string>;
+/**
+ * What a Run carries from one step to the next. Everything but the board PNGs
+ * is in its Checkpoint; the images are design material a resumed Run does
+ * without until the design is drawn again (runCheckpoint.ts).
+ */
+type RunMemory = RunMemoryState & {
   screenImages: Map<string, ExportedImage>;
 };
 
@@ -137,6 +144,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
   decideDesign = (runId: string, verdicts: DesignVerdict[]): GateDecision => {
     const decision = this.#options.gate.decide(runId, verdicts);
     this.#memoryOf(runId).revisions.push(...decision.revisions);
+    this.#checkpoint(runId);
     return decision;
   };
 
@@ -172,20 +180,22 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     switch (resolution.choice) {
       case "retryWithHint":
         if (current) memory.hints.set(current.id, resolution.hint);
-        return;
+        break;
       case "skipSlice":
         if (current) {
           slices.moveSlice(current.id, "skipped");
           this.#failTasks(runId, current.id);
         }
-        return;
+        break;
       case "editDocuments":
         for (const edit of edits) this.#reopen(runId, edit);
-        return;
+        break;
       case "abort":
         if (current) this.#failTasks(runId, current.id);
-        return;
+        break;
     }
+    // The person's decision is the thing a resumed Run must not lose.
+    this.#checkpoint(runId);
   };
 
   /**
@@ -257,6 +267,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     }
     memory.revisions = [];
     if (result.screenImages.size > 0) memory.screenImages = result.screenImages;
+    this.#checkpoint(run.id);
   }
 
   /** Builds Slices until the Run leaves building. */
@@ -300,9 +311,11 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     switch (outcome.status) {
       case "passed":
         memory.histories.delete(current.id);
+        this.#checkpoint(run.id);
         return;
       case "escalated":
         memory.histories.set(current.id, outcome.history);
+        this.#checkpoint(run.id);
         this.#limit(run, outcome.trigger, outcome.summary, outcome.reports);
         return;
       case "designIssue":
@@ -318,6 +331,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
               )
               .join("\n"),
           });
+        this.#checkpoint(run.id);
         return;
     }
   }
@@ -373,17 +387,34 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     return run;
   }
 
+  /**
+   * What this Run carries. The first time a process asks for a Run it did not
+   * build itself, the latest Checkpoint is read: that is how a resumed Run
+   * knows what its Slices already failed on and what a person asked for.
+   */
   #memoryOf(runId: string): RunMemory {
     let memory = this.#memory.get(runId);
     if (!memory) {
+      const saved = memoryFromCheckpoint(
+        this.#options.runs.latestCheckpoint(runId)?.payload,
+      );
       memory = {
-        revisions: [],
-        histories: new Map(),
-        hints: new Map(),
+        revisions: saved?.revisions ?? [],
+        histories: saved?.histories ?? new Map(),
+        hints: saved?.hints ?? new Map(),
+        // Board PNGs are not in a Checkpoint; the UI Spec they came from is.
         screenImages: new Map(),
       };
       this.#memory.set(runId, memory);
     }
     return memory;
+  }
+
+  /** Writes down where the Run is, at a Step boundary. */
+  #checkpoint(runId: string): void {
+    this.#options.runs.saveCheckpoint(
+      runId,
+      checkpointPayload(this.#memoryOf(runId)),
+    );
   }
 }

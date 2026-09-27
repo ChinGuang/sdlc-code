@@ -6,6 +6,11 @@
  *
  *   pnpm --filter @sdlc-code/core run:real "Build a todo app" [--auto] [--budget 2000000]
  *
+ * A Run that stopped is continued rather than started again, with a new total
+ * to spend; --resume takes a Run id, or the newest unfinished Run without one:
+ *
+ *   pnpm --filter @sdlc-code/core run:real --resume --auto --budget 4000000
+ *
  * Needs NEBIUS_API_KEY, NEBIUS_AI_PROJECT and PENPOT_MCP_URL, and the Penpot
  * tab open with the MCP plugin connected. It spends tokens and sandbox credit.
  */
@@ -35,6 +40,8 @@ import {
   PenpotUiCanvas,
   penpotPageUrl,
   requestOptionsFor,
+  resumableRuns,
+  resumeRun,
   RuleOwnerResolver,
   RunTokenBudget,
   runPageName,
@@ -61,7 +68,9 @@ const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(`--${name}`);
 const value = (name: string): string | undefined => {
   const at = args.indexOf(`--${name}`);
-  return at === -1 ? undefined : args[at + 1];
+  const next = at === -1 ? undefined : args[at + 1];
+  // "--resume --auto" means resume the newest Run, not a Run called "--auto".
+  return next?.startsWith("--") ? undefined : next;
 };
 const projectRequest =
   args.find(
@@ -99,21 +108,47 @@ const gate = new DocumentDesignGate({
   gates: new SqliteGateStore(store),
 });
 
-const run = runs.createRun({
-  projectRequest,
-  mode,
-  targetRepo: {
-    owner: "local",
-    name: "app",
-    baseBranch: "main",
-    runBranch: "sdlc/run",
-  },
-  stackProfile: REACT_NODE.id,
-  tokenBudget,
-});
+/**
+ * A new Run, or the one --resume names (the newest unfinished one when it names
+ * none). A resumed Run keeps its design, its Slice Commits and what its Slices
+ * already failed on; --budget gives it a new total to spend.
+ */
+const run = flag("resume") ? resuming() : fresh();
+
+function fresh() {
+  return runs.createRun({
+    projectRequest,
+    mode,
+    targetRepo: {
+      owner: "local",
+      name: "app",
+      baseBranch: "main",
+      runBranch: "sdlc/run",
+    },
+    stackProfile: REACT_NODE.id,
+    tokenBudget,
+  });
+}
+
+function resuming() {
+  const id = value("resume");
+  const unfinished = resumableRuns(runs);
+  const found = id ? runs.getRun(id) : unfinished.at(-1);
+  if (!found) {
+    console.error(
+      id
+        ? `No Run ${id}.`
+        : "No unfinished Run to resume. Start one without --resume.",
+    );
+    process.exit(1);
+  }
+  return value("budget") ? runs.setTokenBudget(found.id, tokenBudget) : found;
+}
 const runDir = join(dataDir, run.id);
 console.log(
-  `Run ${run.id} (${mode}, ${tokenBudget.toLocaleString()} tokens)\n  ${projectRequest}\n  Files: ${runDir}`,
+  `Run ${run.id} (${run.mode}, ${run.tokensUsed.toLocaleString()} of ${run.tokenBudget.toLocaleString()} tokens spent)
+  ${run.projectRequest}
+  Files: ${runDir}`,
 );
 
 const client: ChatClient = new TokenFactoryChatClient({
@@ -180,10 +215,22 @@ const workspaces = new GitWorkspaceManager({
   runBranch: run.targetRepo.runBranch,
   workspacesDir: join(runDir, "workspaces"),
 });
-await workspaces.startRun({
-  scaffold: templateFiles(REACT_NODE),
-  message: `Scaffold: ${REACT_NODE.name}`,
-});
+if (flag("resume")) {
+  // Whatever was in flight when the Run stopped is thrown away, not guessed at.
+  const { discardedSteps, hadCheckpoint } = await resumeRun(run.id, {
+    runs,
+    tasks,
+    workspaces,
+  });
+  console.log(
+    `Resuming: ${discardedSteps} unfinished Step${discardedSteps === 1 ? "" : "s"} discarded, ${hadCheckpoint ? "continuing from its Checkpoint" : "no Checkpoint to continue from"}.`,
+  );
+} else {
+  await workspaces.startRun({
+    scaffold: templateFiles(REACT_NODE),
+    message: `Scaffold: ${REACT_NODE.name}`,
+  });
+}
 
 const uploaded = new Map<string, Promise<string>>();
 const sandboxTesting = new SandboxTestingAgent({

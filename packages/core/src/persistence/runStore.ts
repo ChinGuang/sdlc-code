@@ -31,6 +31,12 @@ export interface RunStore {
   /** Moves the Run through UML diagram 3; throws IllegalTransitionError otherwise. */
   applyEvent: (id: string, event: RunEvent) => Run;
   addTokensUsed: (id: string, tokens: number) => Run;
+  /**
+   * Gives a Run more Token Budget, so one that stopped because its budget ran
+   * out can be resumed rather than started again (T18). Never less than what
+   * the Run has already spent.
+   */
+  setTokenBudget: (id: string, tokens: number) => Run;
   setPullRequest: (id: string, pullRequest: RunPullRequest) => Run;
   /** Records why the Run failed; it is not a Checkpoint, nothing resumes from it. */
   recordFailure: (id: string, failure: RunFailure) => Run;
@@ -131,6 +137,24 @@ export class SqliteRunStore implements RunStore {
       this.#ctx.db
         .prepare(
           "UPDATE runs SET tokens_used = tokens_used + ?, updated_at = ? WHERE id = ?",
+        )
+        .run(tokens, this.#ctx.now(), id);
+      return this.#require(id);
+    });
+  };
+
+  setTokenBudget = (id: string, tokens: number): Run => {
+    if (!Number.isInteger(tokens) || tokens <= 0)
+      throw new RangeError(`tokens must be a positive integer, got ${tokens}`);
+    return inTransaction(this.#ctx.db, () => {
+      const run = this.#require(id);
+      if (tokens < run.tokensUsed)
+        throw new RangeError(
+          `Run ${id} has already spent ${run.tokensUsed} tokens; its budget cannot be ${tokens}.`,
+        );
+      this.#ctx.db
+        .prepare(
+          "UPDATE runs SET token_budget = ?, updated_at = ? WHERE id = ?",
         )
         .run(tokens, this.#ctx.now(), id);
       return this.#require(id);

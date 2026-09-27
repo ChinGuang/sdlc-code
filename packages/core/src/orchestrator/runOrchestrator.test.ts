@@ -145,55 +145,59 @@ function setup(options: {
 
   const runnerCalls: SliceRunInput[] = [];
   const outcomes = [...(options.outcomes ?? [])];
-  // Tests depend on the interface; only this factory knows the class.
-  const orchestrator: RunOrchestrator = new AgentRunOrchestrator({
-    runs,
-    documents,
-    slices,
-    tasks,
-    escalations,
-    gate,
-    designPhase: new AgentDesignPhase({
+  // Tests depend on the interface; only this factory knows the class. A second
+  // one over the same stores is a restarted process (see "resuming a Run").
+  const build = (): RunOrchestrator =>
+    new AgentRunOrchestrator({
+      runs,
       documents,
       slices,
+      tasks,
+      escalations,
       gate,
-      systemDesign,
-      uiDesign,
+      designPhase: new AgentDesignPhase({
+        documents,
+        slices,
+        gate,
+        systemDesign,
+        uiDesign,
+        profile: () => REACT_NODE,
+        pageName: () => "#1 Todo",
+      }),
+      sliceRunner: async () => ({
+        runSlice: async (input) => {
+          runnerCalls.push(input);
+          const outcome = outcomes.shift() ?? {
+            status: "passed",
+            commit: `commit-${runnerCalls.length}`,
+            attempts: 1,
+          };
+          // Moves the Slice the way the real runner does, from wherever it is.
+          const now = () =>
+            slices.listSlices(input.runId).find((s) => s.id === input.slice.id)!
+              .status;
+          if (now() === "pending") slices.moveSlice(input.slice.id, "building");
+          if (outcome.status === "passed") {
+            slices.moveSlice(input.slice.id, "testing");
+            slices.moveSlice(input.slice.id, "passed", outcome.commit);
+          }
+          return outcome;
+        },
+      }),
       profile: () => REACT_NODE,
-      pageName: () => "#1 Todo",
-    }),
-    sliceRunner: async () => ({
-      runSlice: async (input) => {
-        runnerCalls.push(input);
-        const outcome = outcomes.shift() ?? {
-          status: "passed",
-          commit: `commit-${runnerCalls.length}`,
-          attempts: 1,
-        };
-        // Moves the Slice the way the real runner does, from wherever it is.
-        const now = () =>
-          slices.listSlices(input.runId).find((s) => s.id === input.slice.id)!
-            .status;
-        if (now() === "pending") slices.moveSlice(input.slice.id, "building");
-        if (outcome.status === "passed") {
-          slices.moveSlice(input.slice.id, "testing");
-          slices.moveSlice(input.slice.id, "passed", outcome.commit);
-        }
-        return outcome;
+      capabilities: {
+        backend: { vision: false, penpotMcp: false },
+        frontend: { vision: true, penpotMcp: false },
       },
-    }),
-    profile: () => REACT_NODE,
-    capabilities: {
-      backend: { vision: false, penpotMcp: false },
-      frontend: { vision: true, penpotMcp: false },
-    },
-    penpotPage: () => "#1 Todo",
-  });
+      penpotPage: () => "#1 Todo",
+    });
+  const orchestrator = build();
   const status = () => runs.getRun(run.id)!.status;
   const sliceStatuses = () =>
     slices.listSlices(run.id).map((slice) => [slice.title, slice.status]);
   return {
     orchestrator,
+    restart: build,
     runId: run.id,
     status,
     sliceStatuses,
@@ -224,6 +228,98 @@ const escalatedWith = (
   summary: "Still failing after 3 retries: TodoList > empty state",
   reports: [issueReport()],
   history: HISTORY,
+});
+
+describe("AgentRunOrchestrator: resuming a Run (T18)", () => {
+  it("writes a Checkpoint at every Step boundary", async () => {
+    const { orchestrator, runId, runs } = await approved({});
+
+    expect(runs.latestCheckpoint(runId)).not.toBeNull();
+
+    await orchestrator.advance(runId);
+
+    expect(runs.latestCheckpoint(runId)?.payload).toMatchObject({
+      version: 1,
+      revisions: [],
+      hints: {},
+    });
+  });
+
+  // The Run stops mid-build: a spent budget, a closed laptop, a kill -9.
+  it("a restarted process takes the same next action", async () => {
+    const context = await approved({ outcomes: [escalatedWith()] });
+    await context.orchestrator.advance(context.runId);
+    expect(context.status()).toBe("escalated");
+    const before = context.sliceStatuses();
+
+    // Nothing of the first orchestrator survives, only what it wrote down.
+    const resumed = context.restart();
+    const progress = await resumed.advance(context.runId);
+
+    expect(progress).toMatchObject({ waitingFor: "escalation" });
+    expect(context.sliceStatuses()).toEqual(before);
+  });
+
+  it("gives a resumed Slice what it already failed on, from the Checkpoint", async () => {
+    const failed: SliceOutcome = {
+      status: "escalated",
+      trigger: "retryBudget",
+      summary: "Still failing",
+      reports: [issueReport()],
+      history: {
+        earlier: { backend: [issueReport()], frontend: [], design: [] },
+        retryBaseline: { backend: 2 },
+      },
+    };
+    const context = await approved({ outcomes: [failed] });
+    await context.orchestrator.advance(context.runId);
+
+    // A person retries with a hint, then the process restarts.
+    context.orchestrator.resolveEscalation(context.runId, {
+      choice: "retryWithHint",
+      hint: "Validate the title before saving it.",
+    });
+    const resumed = context.restart();
+    await resumed.advance(context.runId);
+
+    // The retry of the Slice that failed, not whatever ran after it.
+    const first = context.runnerCalls[0]!.slice.id;
+    const retry = context.runnerCalls
+      .slice(1)
+      .find((call) => call.slice.id === first)!;
+    expect(retry.hint).toBe("Validate the title before saving it.");
+    expect(retry.history).toEqual(failed.history);
+  });
+
+  it("keeps a person's document edits when the process restarts", async () => {
+    const context = await approved({ outcomes: [escalatedWith()] });
+    await context.orchestrator.advance(context.runId);
+    context.orchestrator.resolveEscalation(context.runId, {
+      choice: "editDocuments",
+      edits: [
+        { documentKind: "apiContract", comments: "POST /todos needs a 400." },
+      ],
+    });
+
+    const resumed = context.restart();
+    await resumed.advance(context.runId);
+
+    // The revision the person asked for reached the agent that owns it.
+    expect(context.designCalls.at(-1)?.revision?.comments).toContain(
+      "POST /todos needs a 400.",
+    );
+  });
+
+  it("ignores a Checkpoint it cannot read, and builds the Slice again", async () => {
+    const context = await approved({ outcomes: [escalatedWith()] });
+    await context.orchestrator.advance(context.runId);
+    context.runs.saveCheckpoint(context.runId, { version: 99 });
+
+    const resumed = context.restart();
+    await resumed.advance(context.runId);
+
+    expect(context.status()).toBe("escalated");
+  });
 });
 
 describe("AgentRunOrchestrator: design", () => {
