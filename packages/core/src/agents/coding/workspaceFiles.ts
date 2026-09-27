@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { isSecretFile } from "../../testRuns/sandboxFiles.js";
+import { manifestChangeProblem, MANIFEST_PATH } from "./manifestGuard.js";
 
 /** Never shown or written: git's own files and installed packages. */
 const HIDDEN = new Set([".git", "node_modules", "dist", ".sdlc"]);
@@ -133,6 +134,10 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
       );
     if (existsSync(full) && statSync(full).isDirectory())
       throw new WorkspaceFileError(`"${path}" is a folder.`);
+    if (checked.toLowerCase() === MANIFEST_PATH && existsSync(full)) {
+      const problem = manifestChangeProblem(readText(full) ?? "", contents);
+      if (problem) throw new WorkspaceFileError(problem);
+    }
     mkdirSync(dirname(full), { recursive: true });
     // Checked again once the folders exist. No tool can create a link, so
     // nothing can swap one in between this check and the write.

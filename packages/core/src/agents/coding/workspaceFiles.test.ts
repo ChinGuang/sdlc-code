@@ -258,6 +258,25 @@ describe("LocalWorkspaceFiles writing", () => {
     expect(existsSync(join(root, "server/SUMMARY.txt"))).toBe(false);
   });
 
+  // Seen live: an agent rewrote package.json with vitest downgraded, npm
+  // install failed with ERESOLVE, and the Run ended with nothing built.
+  it("keeps the dependencies package.json already has", () => {
+    const { files } = setup(["server/", "package.json"]);
+    const manifest = JSON.parse(files.readFile("package.json")) as {
+      name: string;
+    };
+
+    expect(() =>
+      files.writeFile(
+        "package.json",
+        JSON.stringify({ ...manifest, dependencies: { vitest: "0.30.1" } }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      files.writeFile("package.json", JSON.stringify({ name: manifest.name })),
+    ).toThrow(/dependencies\.vitest was removed/);
+  });
+
   it("never writes a secret file", () => {
     const { files } = setup(["server/", ".env"]);
 

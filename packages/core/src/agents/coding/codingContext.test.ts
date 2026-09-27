@@ -269,6 +269,12 @@ describe("codingContext inputs", () => {
     );
   });
 
+  it("tells the agent not to rewrite what package.json already depends on", () => {
+    expect(codingContext(input()).task.system).toContain(
+      "never change or remove a version or script that is already there",
+    );
+  });
+
   it("tells the agent what it may write and the rules it is reviewed against", () => {
     const { system } = codingContext(input({ side: "backend" })).task;
 

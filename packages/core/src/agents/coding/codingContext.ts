@@ -184,6 +184,7 @@ How to work:
 - Never write secrets or real credentials; configuration comes from environment variables, with placeholders in .env.example.
 - Keep files small and focused. Make small edits with edit_file, and write whole files only when creating them.
 - Write only source code and configuration. Notes, summaries and plans go in your reply, never into a file.
+- In package.json you may add an entry; never change or remove a version or script that is already there, or the application stops installing.
 - Your turns are limited: read what you need, make the changes, then reply. Finish the code you started before you run out, because a half-written screen or route fails the Test Run. Do not re-read a file you have already read.
 
 ${SIDE_RULES[side]}
