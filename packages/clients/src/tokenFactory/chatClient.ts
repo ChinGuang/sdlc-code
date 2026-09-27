@@ -73,6 +73,12 @@ export type ChatClientOptions = {
   baseUrl?: string;
   fetch?: typeof fetch;
   now?: () => number;
+  /**
+   * How long one request may take before it counts as unreachable. Seen live:
+   * a Run sat for hours on a connection that never answered, because only an
+   * answer, never silence, ended a call.
+   */
+  timeoutMs?: number;
 };
 
 /** Chat completions used by agents. */
@@ -82,6 +88,12 @@ export interface ChatClient {
   stream: (request: ChatRequest) => AsyncIterable<ChatStreamEvent>;
   listModels: () => Promise<ModelInfo[]>;
 }
+
+/** The status of a request that never reached Token Factory. */
+export const UNREACHABLE = 0;
+
+/** Long enough for a large model to think, short enough to notice silence. */
+export const DEFAULT_CHAT_TIMEOUT_MS = 300_000;
 
 export class ChatApiError extends Error {
   readonly status: number;
@@ -121,8 +133,10 @@ export class TokenFactoryChatClient implements ChatClient {
   #baseUrl: string;
   #fetch: typeof fetch;
   #now: () => number;
+  #timeoutMs: number;
 
   constructor(options: ChatClientOptions) {
+    this.#timeoutMs = options.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS;
     this.#apiKey = options.apiKey;
     this.#baseUrl = (options.baseUrl ?? TOKEN_FACTORY_DEFAULT_BASE_URL).replace(
       /\/$/,
@@ -182,11 +196,25 @@ export class TokenFactoryChatClient implements ChatClient {
       Authorization: `Bearer ${this.#apiKey}`,
     };
     if (body !== undefined) headers["Content-Type"] = "application/json";
-    const response = await this.#fetch(`${this.#baseUrl}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await this.#fetch(`${this.#baseUrl}${path}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        // A request that is never answered ends as an aborted one, which is
+        // retried like a dropped connection instead of hanging the Run.
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch (error) {
+      // A dropped connection is status 0: retryable, like a 5xx (seen live:
+      // "SocketError: other side closed" ended a Run mid-design).
+      throw new ChatApiError(
+        UNREACHABLE,
+        null,
+        `Token Factory could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     if (!response.ok) {
       const text = await response.text();
       const retryAfter = Number(response.headers.get("retry-after"));

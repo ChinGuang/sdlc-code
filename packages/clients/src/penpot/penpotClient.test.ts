@@ -33,6 +33,25 @@ describe("classifyPenpotError", () => {
     );
   });
 
+  // Seen live: this ended a Run while the design was being drawn.
+  it("recognises the connection Penpot loses when its tab closes", () => {
+    expect(
+      classifyPenpotError(
+        "Tool execution failed: Error: No Penpot instance connected for user token. Please ensure that Penpot is connected.",
+      ),
+    ).toBe("disconnected");
+  });
+
+  // Seen live: export_shape returned Penpot's own 500 :timeout and ended a Run
+  // whose design had already been drawn.
+  it("recognises Penpot answering too slowly as something to retry", () => {
+    expect(
+      classifyPenpotError(
+        'Tool execution failed: Error: Error handling task: http error ({:type :server-error, :code :timeout, :hint "ResourceRequest timed out", :uri "https://design.penpot.app/api/export", :status 500})',
+      ),
+    ).toBe("unavailable");
+  });
+
   it("treats anything else as an execution error", () => {
     expect(
       classifyPenpotError(
@@ -116,7 +135,116 @@ describe("PenpotClient.executeCode", () => {
     expect(sleep).toHaveBeenCalledWith(5);
   });
 
-  it("does not retry when no plugin is connected", async () => {
+  it("reports every wait, so a caller can ask for the tab to be focused", async () => {
+    const callTool: CallTool = vi
+      .fn()
+      .mockResolvedValueOnce(
+        text(
+          "The Penpot plugin tab appears to be suspended by the browser",
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(
+        text(
+          "The Penpot plugin tab appears to be suspended by the browser",
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
+    const waits: Array<{ attempt: number; delayMs: number; kind: string }> = [];
+    const client = makeClient({
+      callTool,
+      sleep: async () => {},
+      retryDelaysMs: [5, 10],
+      onWaiting: (wait) => waits.push(wait),
+    });
+
+    await expect(client.executeCode("x")).resolves.toBe("ok");
+    expect(waits).toEqual([
+      { attempt: 1, delayMs: 5, kind: "suspended" },
+      { attempt: 2, delayMs: 10, kind: "suspended" },
+    ]);
+  });
+
+  // Seen live: a Run lost its design work when the plugin tab was closed.
+  it("waits for a plugin tab that went away, then goes on", async () => {
+    const callTool: CallTool = vi
+      .fn()
+      .mockResolvedValueOnce(
+        text(
+          "Tool execution failed: Error: No Penpot instance connected for user token.",
+        ),
+      )
+      .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
+    const waits: Array<{ attempt: number; delayMs: number; kind: string }> = [];
+    const client = makeClient({
+      callTool,
+      sleep: async () => {},
+      retryDelaysMs: [1, 1],
+      onWaiting: (wait) => waits.push(wait),
+    });
+
+    await expect(client.executeCode("x")).resolves.toBe("ok");
+    expect(waits).toEqual([{ attempt: 1, delayMs: 1, kind: "disconnected" }]);
+  });
+
+  it("retries an export Penpot was too busy to finish", async () => {
+    const callTool: CallTool = vi
+      .fn()
+      .mockResolvedValueOnce(
+        text(
+          "Tool execution failed: Error: http error ({:code :timeout, :status 500})",
+        ),
+      )
+      .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
+    const waits: Array<{ kind: string }> = [];
+    const client = makeClient({
+      callTool,
+      sleep: async () => {},
+      retryDelaysMs: [1, 1],
+      onWaiting: ({ kind }) => waits.push({ kind }),
+    });
+
+    await expect(client.executeCode("x")).resolves.toBe("ok");
+    expect(waits).toEqual([{ kind: "unavailable" }]);
+  });
+
+  // Seen live: a Run waited three and a half hours on a call that never
+  // answered, because every retry only ever looked at answers.
+  it("treats a call Penpot never answers as something to retry", async () => {
+    const never = new Promise<never>(() => {});
+    const callTool: CallTool = vi
+      .fn()
+      .mockReturnValueOnce(never)
+      .mockResolvedValueOnce(text(JSON.stringify({ result: "ok" })));
+    const waits: Array<{ kind: string }> = [];
+    const client = makeClient({
+      callTool,
+      sleep: async () => {},
+      retryDelaysMs: [1, 1],
+      timeoutMs: 5,
+      onWaiting: ({ kind }) => waits.push({ kind }),
+    });
+
+    await expect(client.executeCode("x")).resolves.toBe("ok");
+    expect(waits).toEqual([{ kind: "unavailable" }]);
+  });
+
+  it("says how long it waited when Penpot never answers at all", async () => {
+    const client = makeClient({
+      callTool: () => new Promise<never>(() => {}),
+      sleep: async () => {},
+      retryDelaysMs: [],
+      timeoutMs: 5,
+    });
+
+    await expect(client.executeCode("x")).rejects.toMatchObject({
+      kind: "unavailable",
+      message: expect.stringMatching(/did not answer execute_code/),
+    });
+  });
+
+  it("gives up on a plugin that never comes back, saying what to do", async () => {
     const callTool: CallTool = vi.fn(async () =>
       text("Tool execution failed: No Penpot plugin instance is connected"),
     );
@@ -128,8 +256,9 @@ describe("PenpotClient.executeCode", () => {
 
     await expect(client.executeCode("x")).rejects.toMatchObject({
       kind: "disconnected",
+      message: expect.stringMatching(/start the MCP plugin/i),
     });
-    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(callTool).toHaveBeenCalledTimes(3);
   });
 
   it("returns undefined when the code returns nothing", async () => {

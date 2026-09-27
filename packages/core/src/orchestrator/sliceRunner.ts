@@ -457,12 +457,25 @@ export class OrchestratedSliceRunner implements SliceRunner {
       await this.#options.workspaces.resetWorkspace(workspace);
       throw error;
     }
-    if (result.problem === "notAnswered") {
+    // An agent that ran out of turns has usually written working code; the
+    // Test Run judges it, rather than the turn counter throwing it away. Only
+    // a Step with nothing to keep is discarded and redone.
+    if (result.problem === "notAnswered" && result.changes.length === 0) {
       store.discardStep(step.id);
       await this.#options.workspaces.resetWorkspace(workspace);
       return { side, outcome: "stopped", reason: result.loop.stopReason };
     }
     store.completeStep(step.id, result.loop.workingMemory);
+    if (result.problem === "notAnswered") {
+      await this.#options.workspaces.saveWorkspace(
+        workspace,
+        `${side}: ${input.plan.title} (attempt ${attempt}, unfinished: ${STOPPED[result.loop.stopReason] ?? result.loop.stopReason})`,
+      );
+      // The Token Budget is the one stop no attempt can recover from.
+      return result.loop.stopReason === "tokenBudget"
+        ? { side, outcome: "stopped", reason: "tokenBudget" }
+        : { side, outcome: "changed" };
+    }
     const saved = await this.#options.workspaces.saveWorkspace(
       workspace,
       `${side}: ${input.plan.title} (attempt ${attempt})${result.summary ? `\n\n${result.summary}` : ""}`,

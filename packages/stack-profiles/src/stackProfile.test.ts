@@ -70,10 +70,25 @@ describe("templateFiles", () => {
         "server/main.ts",
         "src/App.tsx",
         "src/App.test.tsx",
+        "src/screens/HealthScreen.tsx",
+        "src/screens/HealthScreen.test.tsx",
         "src/api.ts",
         "scripts/sdlcTest.mjs",
       ]),
     );
+  });
+
+  // Seen live: without this, renders stacked up and every query by role found
+  // two elements, and the Coding Agent rewrote a correct screen three times.
+  it("unmounts a screen after each test, which Vitest does not do on its own", () => {
+    const setup = files.find((file) => file.path === "src/testSetup.ts")!;
+
+    expect(setup.contents).toContain(
+      'import { cleanup } from "@testing-library/react"',
+    );
+    expect(setup.contents).toContain("afterEach(cleanup)");
+    const config = files.find((file) => file.path === "vite.config.ts")!;
+    expect(config.contents).toContain("./src/testSetup.ts");
   });
 
   it("uses repo-relative paths with forward slashes, and no build output", () => {

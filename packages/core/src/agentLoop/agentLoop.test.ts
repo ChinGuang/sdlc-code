@@ -211,6 +211,52 @@ describe("ChatAgentLoop: tool call → result → final answer", () => {
   });
 });
 
+describe("ChatAgentLoop: keeping a Step's prompt short", () => {
+  // Seen live: 322 coding turns cost 4M tokens, because every turn re-sent
+  // every file the Step had ever read.
+  it("sends older tool results as a note, keeping the Task and replies in full", async () => {
+    const { loop, requests } = makeLoop(
+      [
+        {
+          toolCalls: [toolCall("read_file", { path: "a.ts" }, "call-1")],
+          finishReason: "tool_calls",
+        },
+        {
+          toolCalls: [toolCall("read_file", { path: "b.ts" }, "call-2")],
+          finishReason: "tool_calls",
+        },
+        { content: "a.ts exports a." },
+        memoryReply,
+      ],
+      { keepRecentToolResults: 1 },
+    );
+
+    await loop.run(task);
+
+    const last = requests.at(-2)!.messages;
+    expect(last[0]).toEqual({ role: "system", content: task.system });
+    expect(last[1]).toEqual({ role: "user", content: task.user });
+    const results = last.filter((message) => message.role === "tool");
+    expect(results[0]?.content).toMatch(/read_file .*a\.ts.*dropped here/);
+    expect(results[1]?.content).toContain("no such file: b.ts");
+  });
+
+  it("sends every result in full while they still fit the window", async () => {
+    const { loop, requests } = makeLoop([
+      {
+        toolCalls: [toolCall("read_file", { path: "a.ts" }, "call-1")],
+        finishReason: "tool_calls",
+      },
+      { content: "Done." },
+      memoryReply,
+    ]);
+
+    await loop.run(task);
+
+    expect(requests[1]!.messages.at(-1)?.content).toBe("export const a = 1;");
+  });
+});
+
 describe("ChatAgentLoop: images for a model with vision", () => {
   it("sends images as data URLs after the text, and keeps them out of the Transcript", async () => {
     const { loop, requests, events } = makeLoop([
@@ -415,6 +461,23 @@ describe("ChatAgentLoop: limits", () => {
 });
 
 describe("ChatAgentLoop: API errors", () => {
+  it("retries a connection that never reached Token Factory", async () => {
+    const { loop, sleeps } = makeLoop([
+      new ChatApiError(
+        0,
+        null,
+        "Token Factory could not be reached: fetch failed",
+      ),
+      { content: "done" },
+      memoryReply,
+    ]);
+
+    const result = await loop.run(task);
+
+    expect(result.stopReason).toBe("answered");
+    expect(sleeps).toEqual([1000]);
+  });
+
   it("retries a 429 after Retry-After, then continues", async () => {
     const { loop, sleeps, events } = makeLoop([
       new ChatApiError(429, 7, "Token Factory 429: rate limited"),

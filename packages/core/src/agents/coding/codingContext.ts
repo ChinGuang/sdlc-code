@@ -37,6 +37,12 @@ export type CodingTaskInput = {
   capabilities: ModelCapabilities;
   /** The Design Phase's board exports, by screen name. */
   screenImages: ReadonlyMap<string, ExportedImage>;
+  /**
+   * Every file the Workspace holds, so the agent reads what it needs instead
+   * of paying to rediscover the application (seen live: over twenty list_files
+   * and read_file calls before the first edit, on every attempt).
+   */
+  applicationFiles?: readonly string[];
 };
 
 export type CodingContext = {
@@ -49,6 +55,26 @@ export type CodingContext = {
 const SIDE_NAMES: Record<CodingSide, string> = {
   backend: "Backend Coding Agent",
   frontend: "Frontend Coding Agent",
+};
+
+/**
+ * What each side gets wrong without being told. Seen live: a frontend agent
+ * asserted on data that arrives after a fetch with a synchronous query, could
+ * not see why its own test failed, and rewrote the screen instead of the test
+ * until the Slice looped.
+ */
+const SIDE_RULES: Record<CodingSide, string> = {
+  backend: `Writing the API:
+- Answer exactly what the API Contract defines: path, status code and body shape, including the fields a smoke test reads.
+- Validate request bodies with zod and answer 400 when they do not fit, rather than letting the route throw.
+- Test a route through the app (supertest against createApp()), not by calling the handler.`,
+  frontend: `Writing screens and their tests (Vitest, Testing Library):
+- Anything that appears after a fetch needs "await screen.findBy…"; "getBy…" only sees what is on screen before the first await, which is the loading state.
+- Stub fetch per test and assert each state the UI Spec lists: loading, empty, error, and data.
+- One <h1> per screen: change the screen the template already has instead of adding a second heading, or queries by role match two elements and fail.
+- When you change what a screen renders, update the tests that assert the old text in the same edit.
+- Screens are routed: add each one as a <Route> in App.tsx and move between them with <Link> or useNavigate. Never assign window.location; jsdom cannot replace it, so a test of that screen cannot run.
+- Render a screen that uses routing inside <MemoryRouter initialEntries={["/its/path"]}>, as App.test.tsx does.`,
 };
 
 const SIDE_WORK: Record<CodingSide, string> = {
@@ -78,6 +104,7 @@ export function codingContext(input: CodingTaskInput): CodingContext {
   const user = [
     `Project Request:\n${input.projectRequest}`,
     taskSection(input),
+    ...fileListSection(input),
     ...issueSection(input.issueReports),
     ...(input.workingMemory
       ? [
@@ -151,11 +178,16 @@ function systemPrompt(
 ${SIDE_WORK[side]}
 
 How to work:
-- Start by reading the files you will change and the ones they use (list_files, read_file). Reuse the helpers the application already has.
+- The application's files are listed below. Read the ones you will change and the ones they use (read_file), and reuse the helpers it already has. Do not list or re-read what the list and your notes already tell you.
 - You may write only: ${profile.writablePaths[side].join(", ")}. The other Coding Agent writes the rest at the same time; read its files, never change them.
 - Every change comes with Vitest tests beside it. You cannot run them: when you finish, a Test Run installs, tests, boots and smoke-tests the merged Slice, and any failure comes back to you as an Issue Report.
 - Never write secrets or real credentials; configuration comes from environment variables, with placeholders in .env.example.
 - Keep files small and focused. Make small edits with edit_file, and write whole files only when creating them.
+- Write only source code and configuration. Notes, summaries and plans go in your reply, never into a file.
+- In package.json you may add an entry; never change or remove a version or script that is already there, or the application stops installing.
+- Your turns are limited: read what you need, make the changes, then reply. Finish the code you started before you run out, because a half-written screen or route fails the Test Run. Do not re-read a file you have already read.
+
+${SIDE_RULES[side]}
 
 Your tools: ${tools}.
 
@@ -173,6 +205,25 @@ function taskSection(input: CodingTaskInput): string {
   return `Your Task: build the ${input.side} of Slice "${input.slice.title}".
 Goal: ${input.slice.goal}
 Endpoints of this Slice: ${endpoints}`;
+}
+
+/** The application as it is now, with the files this side may write marked. */
+function fileListSection(input: CodingTaskInput): string[] {
+  const files = input.applicationFiles ?? [];
+  if (files.length === 0) return [];
+  const writable = input.profile.writablePaths[input.side];
+  const mayWrite = (path: string) =>
+    writable.some((allowed) =>
+      allowed.endsWith("/")
+        ? path.toLowerCase().startsWith(allowed.toLowerCase())
+        : path.toLowerCase() === allowed.toLowerCase(),
+    );
+  const listed = files
+    .map((path) => `${mayWrite(path) ? "* " : "  "}${path}`)
+    .join("\n");
+  return [
+    `The application already has these files; * marks the ones you may write. Read only the ones you need, and do not list folders you can already see here:\n${listed}`,
+  ];
 }
 
 function issueSection(issues: readonly CodingIssue[]): string[] {

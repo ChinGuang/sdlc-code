@@ -245,6 +245,38 @@ describe("LocalWorkspaceFiles writing", () => {
     expect(() => files.writeFile("serverx/a.ts", "x")).toThrow(/may not write/);
   });
 
+  // Seen live: a Coding Agent committed server/SUMMARY.txt into the app.
+  it("writes source and configuration, not notes to itself", () => {
+    const { files, root } = setup(["server/", "package.json", ".env.example"]);
+
+    for (const path of ["server/todos.ts", "server/schema.sql", ".env.example"])
+      expect(() => files.writeFile(path, "x")).not.toThrow();
+    for (const path of ["server/SUMMARY.txt", "server/notes.md", "server/plan"])
+      expect(() => files.writeFile(path, "x"), path).toThrow(
+        /not source code or configuration/,
+      );
+    expect(existsSync(join(root, "server/SUMMARY.txt"))).toBe(false);
+  });
+
+  // Seen live: an agent rewrote package.json with vitest downgraded, npm
+  // install failed with ERESOLVE, and the Run ended with nothing built.
+  it("keeps the dependencies package.json already has", () => {
+    const { files } = setup(["server/", "package.json"]);
+    const manifest = JSON.parse(files.readFile("package.json")) as {
+      name: string;
+    };
+
+    expect(() =>
+      files.writeFile(
+        "package.json",
+        JSON.stringify({ ...manifest, dependencies: { vitest: "0.30.1" } }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      files.writeFile("package.json", JSON.stringify({ name: manifest.name })),
+    ).toThrow(/dependencies\.vitest was removed/);
+  });
+
   it("never writes a secret file", () => {
     const { files } = setup(["server/", ".env"]);
 

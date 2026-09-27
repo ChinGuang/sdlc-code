@@ -15,7 +15,12 @@ export type CallTool = (
   args: Record<string, unknown>,
 ) => Promise<ToolResult>;
 
-export type PenpotErrorKind = "suspended" | "disconnected" | "execution";
+export type PenpotErrorKind =
+  | "suspended"
+  | "disconnected"
+  /** Penpot itself is busy or timed out; the same call may work in a moment. */
+  | "unavailable"
+  | "execution";
 
 export class PenpotError extends Error {
   readonly kind: PenpotErrorKind;
@@ -30,12 +35,22 @@ export class PenpotError extends Error {
 export function classifyPenpotError(message: string): PenpotErrorKind {
   if (/suspended by the browser|no heartbeat/i.test(message))
     return "suspended";
+  // Seen live: "No Penpot instance connected for user token" ended a Run when
+  // the plugin tab was closed while the design was being drawn.
   if (
-    /not connected|no .*plugin.*connected|plugin .*not (found|available)/i.test(
+    /not connected|no [^.]*\bconnected\b|plugin .*not (found|available)/i.test(
       message,
     )
   )
     return "disconnected";
+  // Seen live: exporting a board returned Penpot's own 500 :timeout and ended
+  // a Run after the whole design had been drawn.
+  if (
+    /:timed? ?out|timed out|:server-error|http error .*:status 50\d|\b50[0234]\b/i.test(
+      message,
+    )
+  )
+    return "unavailable";
   return "execution";
 }
 
@@ -44,6 +59,7 @@ const GUIDANCE: Record<Exclude<PenpotErrorKind, "execution">, string> = {
     "Penpot plugin tab is suspended. Focus the Penpot tab (keep it visible) and retry.",
   disconnected:
     "No Penpot plugin is connected. Open the Penpot file and start the MCP plugin.",
+  unavailable: "Penpot did not answer in time and kept failing on retry.",
 };
 
 const FAILURE_PREFIX = /^Tool execution failed:/;
@@ -64,11 +80,27 @@ export type PenpotClientOptions = {
   callTool: CallTool;
   sleep?: (ms: number) => Promise<void>;
   /**
-   * Delay before each retry while the tab is suspended. Retries only bridge a
-   * brief refocus; if the user is away the error surfaces for Escalation.
+   * Delay before each retry while the tab is asleep or gone. A background tab
+   * stays asleep until someone clicks it, so a caller that can ask for that
+   * (the CLI, the dashboard) passes a longer schedule and reports each wait.
    */
   retryDelaysMs?: number[];
+  /**
+   * How long one tool call may take before it counts as Penpot not answering.
+   * Seen live: a Run waited three and a half hours on a call that never came
+   * back, because the retries only ever saw answers, never silence.
+   */
+  timeoutMs?: number;
+  /** Called before each wait, so the caller can ask the user to fix the tab. */
+  onWaiting?: (wait: {
+    attempt: number;
+    delayMs: number;
+    kind: Exclude<PenpotErrorKind, "execution">;
+  }) => void;
 };
+
+/** Long enough for Penpot to draw a board, short enough to notice silence. */
+export const DEFAULT_PENPOT_TIMEOUT_MS = 90_000;
 
 export type ExportedImage = { bytes: Buffer; mimeType: string };
 
@@ -87,15 +119,21 @@ export class McpPenpotClient implements PenpotClient {
   #callTool: CallTool;
   #sleep: (ms: number) => Promise<void>;
   #retryDelaysMs: number[];
+  #timeoutMs: number;
+  #onWaiting: PenpotClientOptions["onWaiting"];
 
   constructor({
     callTool,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     retryDelaysMs = [2000, 5000, 10000],
+    timeoutMs = DEFAULT_PENPOT_TIMEOUT_MS,
+    onWaiting,
   }: PenpotClientOptions) {
     this.#callTool = callTool;
     this.#sleep = sleep;
     this.#retryDelaysMs = retryDelaysMs;
+    this.#timeoutMs = timeoutMs;
+    this.#onWaiting = onWaiting;
   }
 
   executeCode = async <T = unknown>(code: string): Promise<T> => {
@@ -136,27 +174,63 @@ export class McpPenpotClient implements PenpotClient {
     };
   };
 
+  /** The call, or an "unavailable" PenpotError once it has taken too long. */
+  async #withTimeout(name: string, call: Promise<ToolResult>) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const silence = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new PenpotError(
+              "unavailable",
+              `Penpot did not answer ${name} in time (${this.#timeoutMs} ms).`,
+            ),
+          ),
+        this.#timeoutMs,
+      );
+    });
+    try {
+      return await Promise.race([call, silence]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async #call(
     name: string,
     args: Record<string, unknown>,
   ): Promise<ToolResult> {
     for (let attempt = 0; ; attempt++) {
-      const result = await this.#callTool(name, args);
-      const message = textOf(result);
-      // Penpot Cloud MCP reports failures as text without setting isError.
-      if (!result.isError && !FAILURE_PREFIX.test(message)) return result;
+      let message: string;
+      // Silence is Penpot not answering, which the waits below treat as the
+      // timeout it already is, rather than reading it as a message.
+      let silent = false;
+      try {
+        const result = await this.#withTimeout(
+          name,
+          this.#callTool(name, args),
+        );
+        message = textOf(result);
+        // Penpot Cloud MCP reports failures as text without setting isError.
+        if (!result.isError && !FAILURE_PREFIX.test(message)) return result;
+      } catch (error) {
+        if (!(error instanceof PenpotError)) throw error;
+        message = error.message;
+        silent = true;
+      }
 
-      const kind = classifyPenpotError(message);
+      const kind = silent ? "unavailable" : classifyPenpotError(message);
       if (kind === "execution")
         throw new PenpotError(kind, redactToken(message));
-      // Only a suspended tab can come back on its own; a missing plugin needs a human now.
-      const delay =
-        kind === "suspended" ? this.#retryDelaysMs[attempt] : undefined;
+      // A sleeping tab wakes on a click and a closed one is reopened, so both
+      // wait for the person instead of throwing away the Run's design work.
+      const delay = this.#retryDelaysMs[attempt];
       if (delay === undefined)
         throw new PenpotError(
           kind,
           `${GUIDANCE[kind]} (${redactToken(message)})`,
         );
+      this.#onWaiting?.({ attempt: attempt + 1, delayMs: delay, kind });
       await this.#sleep(delay);
     }
   }

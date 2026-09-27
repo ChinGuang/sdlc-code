@@ -8,6 +8,7 @@ import {
   LoopUiDesignAgent,
   SUBMIT_UI_SPEC,
   type UiDesignAgent,
+  type UiDesignAgentOptions,
 } from "./uiDesignAgent.js";
 import type { DrawScreenRequest, UiCanvas } from "./uiCanvas.js";
 
@@ -50,12 +51,17 @@ function fakeCanvas(overrides: Partial<UiCanvas> = {}) {
   return { canvas, drawn, exported, swept };
 }
 
-function agentReplaying(replies: Reply[], canvas: UiCanvas) {
+function agentReplaying(
+  replies: Reply[],
+  canvas: UiCanvas,
+  options: Partial<UiDesignAgentOptions> = {},
+) {
   const requests: ChatRequest[] = [];
   const queue = [...replies];
   // Tests depend on the interface; only this factory knows the class.
   const agent: UiDesignAgent = new LoopUiDesignAgent({
     canvas,
+    ...options,
     createLoop: (tools) =>
       new ChatAgentLoop({
         client: {
@@ -137,6 +143,33 @@ describe("LoopUiDesignAgent", () => {
         boardId: "board-2",
         export: { bytes: Buffer.from("png"), mimeType: "image/png" },
       },
+    ]);
+  });
+
+  // Seen live: Penpot's export API timed out and ended a Run whose design was
+  // already drawn, after the Token Budget had paid for it.
+  it("keeps a design whose PNG Penpot would not export", async () => {
+    const { canvas } = fakeCanvas({
+      exportBoard: async (boardId) => {
+        if (boardId === "board-2")
+          throw new Error("Penpot did not answer in time");
+        return { bytes: Buffer.from("png"), mimeType: "image/png" };
+      },
+    });
+    const failures: Array<{ screen: string; reason: string }> = [];
+    const { agent } = agentReplaying([submit(goodUiSpec()), answer()], canvas, {
+      onExportFailed: (failure) => failures.push(failure),
+    });
+
+    const { spec, screens } = await agent.design(input);
+
+    expect(spec).toEqual(goodUiSpec());
+    expect(screens.map((screen) => screen.export !== null)).toEqual([
+      true,
+      false,
+    ]);
+    expect(failures).toEqual([
+      { screen: "Todo list", reason: "Penpot did not answer in time" },
     ]);
   });
 

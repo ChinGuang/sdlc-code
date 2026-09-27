@@ -71,9 +71,13 @@ export function decideRetry({
     return {
       action: "escalate",
       trigger: "retryBudget",
-      summary: `Still failing after ${retries} ${retries === 1 ? "retry" : "retries"}: ${reports
-        .map((report) => report.failingTest ?? `${report.step} step`)
-        .join(", ")}`,
+      summary: `Still failing after ${retries} ${retries === 1 ? "retry" : "retries"}: ${
+        reports.length > 0
+          ? reports
+              .map((report) => report.failingTest ?? `${report.step} step`)
+              .join(", ")
+          : "the Coding Agents did not finish their work."
+      }`,
     };
   return { action: "retry" };
 }

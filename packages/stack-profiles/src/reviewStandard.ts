@@ -75,6 +75,12 @@ export const BASELINE_RULES: readonly Rule[] = [
     severity: "blocking",
   },
   {
+    id: "STRUCT-04",
+    description:
+      "Each screen of the UI Spec is a Route in App.tsx, and screens move with <Link> or useNavigate; nothing assigns window.location.",
+    severity: "major",
+  },
+  {
     id: "TEST-01",
     description:
       "Every endpoint in the API Contract has a test that calls it and asserts its response shape.",

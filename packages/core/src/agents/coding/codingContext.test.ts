@@ -229,6 +229,52 @@ describe("codingContext inputs", () => {
     expect(codingContext(input()).task.user).not.toContain("previous attempt");
   });
 
+  // Seen live: the frontend agent asserted on data a fetch had not returned
+  // yet, then rewrote the screen instead of the test until the Slice looped.
+  it("tells the frontend how to test what a fetch brings in", () => {
+    const { system } = codingContext(input()).task;
+
+    expect(system).toContain("await screen.findBy");
+    expect(system).toContain("One <h1> per screen");
+    expect(system).not.toContain("supertest");
+  });
+
+  it("tells the backend to answer the Contract and validate input", () => {
+    const { system } = codingContext(input({ side: "backend" })).task;
+
+    expect(system).toContain("supertest");
+    expect(system).toContain("answer 400");
+    expect(system).not.toContain("findBy");
+  });
+
+  // Seen live: over twenty list_files and read_file calls before the first
+  // edit, repeated on every attempt, spent most of a Run's Token Budget.
+  it("lists the application's files, marking the ones this side may write", () => {
+    const { user } = codingContext(
+      input({
+        side: "backend",
+        applicationFiles: ["package.json", "server/app.ts", "src/App.tsx"],
+      }),
+    ).task;
+
+    expect(user).toContain("* package.json");
+    expect(user).toContain("* server/app.ts");
+    expect(user).toContain("  src/App.tsx");
+    expect(user).toContain("do not list folders");
+  });
+
+  it("says nothing about files when the Workspace was not read", () => {
+    expect(codingContext(input()).task.user).not.toContain(
+      "The application already has these files",
+    );
+  });
+
+  it("tells the agent not to rewrite what package.json already depends on", () => {
+    expect(codingContext(input()).task.system).toContain(
+      "never change or remove a version or script that is already there",
+    );
+  });
+
   it("tells the agent what it may write and the rules it is reviewed against", () => {
     const { system } = codingContext(input({ side: "backend" })).task;
 

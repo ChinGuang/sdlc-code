@@ -16,11 +16,36 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { isSecretFile } from "../../testRuns/sandboxFiles.js";
+import { manifestChangeProblem, MANIFEST_PATH } from "./manifestGuard.js";
 
 /** Never shown or written: git's own files and installed packages. */
 const HIDDEN = new Set([".git", "node_modules", "dist", ".sdlc"]);
 /** A generated file bigger than this is a mistake, not source code. */
 const MAX_FILE_BYTES = 200_000;
+/**
+ * What an application is made of. Anything else an agent writes is a note to
+ * itself (seen live: a Coding Agent committed server/SUMMARY.txt), and notes
+ * belong in its reply, not in the user's repository.
+ */
+const SOURCE_EXTENSIONS = new Set([
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "json",
+  "css",
+  "scss",
+  "html",
+  "svg",
+  "prisma",
+  "sql",
+  "yml",
+  "yaml",
+]);
+/** Configuration files an application needs that have no source extension. */
+const SOURCE_NAMES = new Set([".env.example", ".gitignore", ".npmrc"]);
 export const MAX_LISTED_FILES = 500;
 const MAX_SEARCH_MATCHES = 100;
 
@@ -109,6 +134,10 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
       );
     if (existsSync(full) && statSync(full).isDirectory())
       throw new WorkspaceFileError(`"${path}" is a folder.`);
+    if (checked.toLowerCase() === MANIFEST_PATH && existsSync(full)) {
+      const problem = manifestChangeProblem(readText(full) ?? "", contents);
+      if (problem) throw new WorkspaceFileError(problem);
+    }
     mkdirSync(dirname(full), { recursive: true });
     // Checked again once the folders exist. No tool can create a link, so
     // nothing can swap one in between this check and the write.
@@ -209,6 +238,10 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
       throw new WorkspaceFileError(
         `You may not write "${path}". You may write: ${this.#writable.join(", ")}.`,
       );
+    if (access === "write" && !isSourceFile(checked))
+      throw new WorkspaceFileError(
+        `"${path}" is not source code or configuration, so it does not belong in the application. Put notes and summaries in your reply instead.`,
+      );
     return { full, path: checked };
   }
 
@@ -229,6 +262,14 @@ type Checked = {
 };
 
 const isHidden = (name: string): boolean => HIDDEN.has(name.toLowerCase());
+
+/** Whether a path is part of the application rather than a note about it. */
+export function isSourceFile(path: string): boolean {
+  const name = path.split("/").pop()!.toLowerCase();
+  if (SOURCE_NAMES.has(name)) return true;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 && SOURCE_EXTENSIONS.has(name.slice(dot + 1));
+}
 
 /** CON, NUL, COM1…: Windows devices, whatever the extension. */
 const DEVICE_NAME = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;

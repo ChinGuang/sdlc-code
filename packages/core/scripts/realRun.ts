@@ -155,7 +155,21 @@ const loopFor =
   };
 
 console.log("Connecting to Penpot…");
-const penpot = await connectPenpotMcp({ url: penpotUrl });
+const penpot = await connectPenpotMcp({
+  url: penpotUrl,
+  // A background tab sleeps until someone clicks it, so a Run waits minutes
+  // for that rather than throwing away the design it has already paid for.
+  retryDelaysMs: [5_000, 10_000, 15_000, 30_000, 30_000, 60_000, 60_000],
+  onWaiting: ({ attempt, delayMs, kind }) => {
+    const waiting = `(waiting ${delayMs / 1000}s, attempt ${attempt})`;
+    const what = {
+      suspended: `Penpot tab is asleep: click it to wake it ${waiting}`,
+      disconnected: `Penpot plugin is not connected: open the file and start the plugin ${waiting}`,
+      unavailable: `Penpot did not answer in time ${waiting}`,
+    };
+    console.log(`  ${what[kind]}`);
+  },
+});
 const canvas = new PenpotUiCanvas(penpot.penpot);
 const file = await canvas.checkConnection();
 console.log(`  Penpot file "${file.file}"`);
@@ -224,7 +238,9 @@ const sliceRunner = new OrchestratedSliceRunner({
     new LoopCodingAgent({
       createLoop: loopFor(
         side === "backend" ? "backendCoding" : "frontendCoding",
-        30,
+        // Seen live: a frontend Step wrote the tests, ran out of turns before
+        // the screen they test, and every retry started that work again.
+        45,
         stepId,
       ),
       canvas,
@@ -249,6 +265,10 @@ const orchestrator = new AgentRunOrchestrator({
     uiDesign: new LoopUiDesignAgent({
       canvas,
       createLoop: loopFor("uiDesign", 10),
+      onExportFailed: ({ screen, reason }) =>
+        console.log(
+          `  no PNG of "${screen}": ${reason.slice(0, 120)} (the design is drawn; only this image is missing)`,
+        ),
     }),
     profile: () => REACT_NODE,
     pageName: () => pageName,

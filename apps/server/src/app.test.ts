@@ -1,12 +1,16 @@
 import "reflect-metadata";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppModule } from "./app.module.js";
 import {
   HEALTH_REPORTER,
   type HealthReporter,
 } from "./health/health.service.js";
+
+// Each test boots a Nest application: ~5s alone on Windows, and longer when
+// every Vitest project runs at once, so this file gets a longer timeout.
+vi.setConfig({ testTimeout: 60_000 });
 
 const apps: INestApplication[] = [];
 

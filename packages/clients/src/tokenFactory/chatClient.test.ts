@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  UNREACHABLE,
   ChatApiError,
   costUsd,
   parseToolArguments,
@@ -158,6 +159,47 @@ describe("TokenFactoryChatClient.complete", () => {
       status: 429,
       retryAfterSeconds: 7,
       message: expect.stringMatching(/429.*rate limited/),
+    });
+  });
+
+  // Seen live: "SocketError: other side closed" ended a Run mid-design.
+  it("reports a dropped connection as an unreachable API, not a crash", async () => {
+    const dropped = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      makeClient({ ...base, fetch: dropped }).complete({
+        model: "m",
+        messages: [],
+      }),
+    ).rejects.toMatchObject({
+      name: "ChatApiError",
+      status: UNREACHABLE,
+      message: expect.stringMatching(/could not be reached.*fetch failed/),
+    });
+  });
+
+  // Seen live: a Run sat for hours on a request that was never answered.
+  it("gives up on a request that is never answered, as unreachable", async () => {
+    const silent = ((_url: string | URL, init: RequestInit = {}) =>
+      new Promise<Response>((_, reject) => {
+        init.signal?.addEventListener("abort", () =>
+          reject(
+            new DOMException("The operation was aborted.", "TimeoutError"),
+          ),
+        );
+      })) as unknown as typeof fetch;
+
+    await expect(
+      makeClient({ ...base, fetch: silent, timeoutMs: 5 }).complete({
+        model: "m",
+        messages: [],
+      }),
+    ).rejects.toMatchObject({
+      name: "ChatApiError",
+      status: UNREACHABLE,
+      message: expect.stringMatching(/could not be reached/),
     });
   });
 
