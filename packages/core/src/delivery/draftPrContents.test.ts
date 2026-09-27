@@ -17,6 +17,7 @@ import { SqliteSliceStore } from "../persistence/sliceStore.js";
 import { SqliteTaskStore } from "../persistence/taskStore.js";
 import {
   GitWorkspaceManager,
+  type PassedTestRun,
   type WorkspaceManager,
 } from "../workspaces/workspaceManager.js";
 import { GitHubRunDelivery, type RunDelivery } from "./runDelivery.js";
@@ -37,9 +38,10 @@ const git = (repoDir: string, ...args: string[]): string =>
     encoding: "utf8",
   }).trim();
 
-const PASSED_TEST_RUN = {
-  status: "passed" as const,
-  result: { passed: true, steps: [], log: "" },
+/** What a passing Test Run of the merged code hands back. */
+const PASSED_TEST_RUN: PassedTestRun = {
+  status: "passed",
+  result: { profile: REACT_NODE.id, passed: true, steps: [], durationMs: 1 },
   evidence: {
     operationId: "op-1",
     exitCode: 0,

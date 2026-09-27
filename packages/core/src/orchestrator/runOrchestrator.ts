@@ -435,7 +435,10 @@ export class AgentRunOrchestrator implements RunOrchestrator {
    * it records is what stops it being offered twice.
    */
   async #deliverIfOwed(run: Run): Promise<void> {
-    if (run.status === "done" || run.pullRequest) return;
+    // Only a Run that stopped early owes one: a Run that is done opened its
+    // pull request in #review, and every other status is still going.
+    if (run.status !== "failed" && run.status !== "aborted") return;
+    if (run.pullRequest) return;
     await this.#options.delivery.deliver(run.id, {
       ended: run.status,
       // A failure in auto mode has nobody to ask, so it always offers one.
