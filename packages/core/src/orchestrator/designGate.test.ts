@@ -293,30 +293,18 @@ describe("DocumentDesignGate.decide", () => {
     expect(gateStatus(db, first.gateId!)).toBe("changesRequested");
   });
 
-  it("checkpoints the Approved Documents when the Gate passes (diagram 5)", () => {
-    const { gate, runs, runId } = setup();
+  // The Checkpoint is the Orchestrator's to write (runCheckpoint.ts); a Gate
+  // that wrote its own shape into the same place destroyed the Run's memory.
+  it("leaves the Checkpoint alone, and says what it approved in the documents", () => {
+    const { gate, runs, documents, runId } = setup();
     gate.open(runId);
 
     gate.decide(runId, approveAll());
 
-    expect(runs.latestCheckpoint(runId)?.payload).toEqual({
-      reason: "Approved Documents",
-      documents: DOCUMENT_KINDS.map((kind) => ({
-        kind,
-        version: 1,
-        status: "approved",
-      })),
-    });
-  });
-
-  it("checkpoints the accepted documents in auto mode", () => {
-    const { gate, runs, runId } = setup("auto");
-
-    gate.open(runId);
-
-    expect(runs.latestCheckpoint(runId)?.payload).toMatchObject({
-      reason: "documents accepted (auto mode)",
-    });
+    expect(runs.latestCheckpoint(runId)).toBeNull();
+    expect(
+      documents.listLatest(runId).map(({ kind, status }) => [kind, status]),
+    ).toEqual(DOCUMENT_KINDS.map((kind) => [kind, "approved"]));
   });
 
   it("refuses a verdict for a document that was not judged, or judged twice", () => {

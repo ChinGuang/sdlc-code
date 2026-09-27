@@ -101,6 +101,23 @@ describe("SqliteRunStore runs", () => {
     expect(() => store.addTokensUsed(id, 1.5)).toThrow(RangeError);
   });
 
+  // A Run that stopped because its budget ran out is resumed, not restarted.
+  it("gives a Run more budget, but never less than it has spent", () => {
+    const store = makeStore();
+    const { id, tokenBudget } = store.createRun(newRun);
+    store.addTokensUsed(id, 2000);
+
+    expect(store.setTokenBudget(id, tokenBudget * 2).tokenBudget).toBe(
+      tokenBudget * 2,
+    );
+    expect(() => store.setTokenBudget(id, 1999)).toThrow(
+      /already spent 2000 tokens/,
+    );
+    expect(() => store.setTokenBudget(id, 0)).toThrow(RangeError);
+    expect(() => store.setTokenBudget(id, 1.5)).toThrow(RangeError);
+    expect(() => store.setTokenBudget("nope", 10)).toThrow(/not found/);
+  });
+
   it("records the pull request", () => {
     const store = makeStore();
     const { id } = store.createRun(newRun);

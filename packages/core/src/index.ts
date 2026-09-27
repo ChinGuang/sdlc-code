@@ -52,3 +52,5 @@ export * from "./orchestrator/sliceRunner.js";
 export * from "./orchestrator/approvedDocuments.js";
 export * from "./orchestrator/designPhase.js";
 export * from "./orchestrator/runOrchestrator.js";
+export * from "./orchestrator/runCheckpoint.js";
+export * from "./orchestrator/resumeRun.js";

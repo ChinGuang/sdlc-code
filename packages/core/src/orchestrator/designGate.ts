@@ -100,7 +100,6 @@ export class DocumentDesignGate implements DesignGate {
         for (const kind of this.#awaitingVerdict(runId))
           this.#documents.applyEvent(runId, kind, "approved");
         this.#runs.applyEvent(runId, { type: "documentsReady" });
-        this.#checkpoint(runId, "documents accepted (auto mode)");
         return { mode: "auto", gateId: null };
       }
       this.#runs.applyEvent(runId, { type: "documentsReady" });
@@ -141,7 +140,6 @@ export class DocumentDesignGate implements DesignGate {
       if (changed.length === 0) {
         this.#gates.closeGate(gate.id, "passed");
         this.#runs.applyEvent(runId, { type: "designApproved" });
-        this.#checkpoint(runId, "Approved Documents");
         return { outcome: "approved", revisions: [], staleDocuments: [] };
       }
       this.#gates.closeGate(gate.id, "changesRequested");
@@ -178,16 +176,6 @@ export class DocumentDesignGate implements DesignGate {
         revisions: stale.map((staleKind) => revisionFor(staleKind, "")),
       };
     });
-
-  /** Everything needed to continue this Run, at a Design Phase boundary (T18 defines the shape). */
-  #checkpoint(runId: string, reason: string): void {
-    this.#runs.saveCheckpoint(runId, {
-      reason,
-      documents: this.#documents
-        .listLatest(runId)
-        .map(({ kind, version, status }) => ({ kind, version, status })),
-    });
-  }
 
   /** The documents a human still has to judge: everything now in review. */
   #awaitingVerdict(runId: string): DocumentKind[] {

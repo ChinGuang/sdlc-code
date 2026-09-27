@@ -12,7 +12,9 @@
  *   reviewing onwards  → T19/T20
  *
  * What a later step needs from an earlier one (revisions to make, a Slice's
- * history, a hint) is kept here per Run; T18 moves it into Checkpoints.
+ * history, a hint) is written to a Checkpoint at every Step boundary
+ * (runCheckpoint.ts), so a Run that stopped continues where it was. The board
+ * PNGs are the exception: a resumed Run works from the UI Spec without them.
  */
 import type { ExportedImage } from "@sdlc-code/clients";
 import type { CodingSide, StackProfile } from "@sdlc-code/stack-profiles";
@@ -36,7 +38,12 @@ import type {
   Revision,
 } from "./designGate.js";
 import { DesignPhaseError, type DesignPhase } from "./designPhase.js";
-import type { SliceHistory, SliceRunner } from "./sliceRunner.js";
+import {
+  checkpointPayload,
+  memoryFromCheckpoint,
+  type RunMemoryState,
+} from "./runCheckpoint.js";
+import type { SliceCheckpoint, SliceRunner } from "./sliceRunner.js";
 
 /** Where a Run stopped, and why. */
 export type RunProgress =
@@ -73,18 +80,21 @@ export type RunOrchestratorOptions = {
   escalations: EscalationStore;
   gate: DesignGate;
   designPhase: DesignPhase;
-  /** The Slice runner for a Run: its Workspaces, agents and budget. */
-  sliceRunner: (run: Run) => Promise<SliceRunner>;
+  /**
+   * The Slice runner for a Run: its Workspaces, agents and budget. It reports
+   * each Checkpoint of diagram 6 to `onCheckpoint`, which writes it down.
+   */
+  sliceRunner: (
+    run: Run,
+    onCheckpoint: (checkpoint: SliceCheckpoint) => void,
+  ) => Promise<SliceRunner>;
   profile: (run: Run) => StackProfile;
   capabilities: Record<CodingSide, ModelCapabilities>;
   penpotPage: (run: Run) => string | null;
 };
 
-/** What a Run carries from one step to the next (T18 persists it). */
-type RunMemory = {
-  revisions: Revision[];
-  histories: Map<string, SliceHistory>;
-  hints: Map<string, string>;
+/** What a Run carries from one step to the next. */
+type RunMemory = RunMemoryState & {
   screenImages: Map<string, ExportedImage>;
 };
 
@@ -137,6 +147,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
   decideDesign = (runId: string, verdicts: DesignVerdict[]): GateDecision => {
     const decision = this.#options.gate.decide(runId, verdicts);
     this.#memoryOf(runId).revisions.push(...decision.revisions);
+    this.#checkpoint(runId);
     return decision;
   };
 
@@ -172,20 +183,22 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     switch (resolution.choice) {
       case "retryWithHint":
         if (current) memory.hints.set(current.id, resolution.hint);
-        return;
+        break;
       case "skipSlice":
         if (current) {
           slices.moveSlice(current.id, "skipped");
           this.#failTasks(runId, current.id);
         }
-        return;
+        break;
       case "editDocuments":
         for (const edit of edits) this.#reopen(runId, edit);
-        return;
+        break;
       case "abort":
         if (current) this.#failTasks(runId, current.id);
-        return;
+        break;
     }
+    // The person's decision is the thing a resumed Run must not lose.
+    this.#checkpoint(runId);
   };
 
   /**
@@ -257,6 +270,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     }
     memory.revisions = [];
     if (result.screenImages.size > 0) memory.screenImages = result.screenImages;
+    this.#checkpoint(run.id);
   }
 
   /** Builds Slices until the Run leaves building. */
@@ -283,7 +297,9 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     const memory = this.#memoryOf(run.id);
     const hint = memory.hints.get(current.id);
     memory.hints.delete(current.id);
-    const runner = await this.#options.sliceRunner(run);
+    const runner = await this.#options.sliceRunner(run, (checkpoint) =>
+      this.#sliceCheckpoint(run.id, checkpoint),
+    );
     const outcome = await runner.runSlice({
       runId: run.id,
       slice: current,
@@ -300,9 +316,11 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     switch (outcome.status) {
       case "passed":
         memory.histories.delete(current.id);
+        this.#checkpoint(run.id);
         return;
       case "escalated":
         memory.histories.set(current.id, outcome.history);
+        this.#checkpoint(run.id);
         this.#limit(run, outcome.trigger, outcome.summary, outcome.reports);
         return;
       case "designIssue":
@@ -318,6 +336,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
               )
               .join("\n"),
           });
+        this.#checkpoint(run.id);
         return;
     }
   }
@@ -373,17 +392,46 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     return run;
   }
 
+  /**
+   * What this Run carries. The first time a process asks for a Run it did not
+   * build itself, the latest Checkpoint is read: that is how a resumed Run
+   * knows what its Slices already failed on and what a person asked for.
+   */
   #memoryOf(runId: string): RunMemory {
     let memory = this.#memory.get(runId);
     if (!memory) {
+      const saved = memoryFromCheckpoint(
+        this.#options.runs.latestCheckpoint(runId)?.payload,
+      );
       memory = {
-        revisions: [],
-        histories: new Map(),
-        hints: new Map(),
+        revisions: saved?.revisions ?? [],
+        histories: saved?.histories ?? new Map(),
+        hints: saved?.hints ?? new Map(),
         screenImages: new Map(),
       };
       this.#memory.set(runId, memory);
     }
     return memory;
+  }
+
+  /**
+   * A Checkpoint from inside a Slice (diagram 6). A Run killed between attempts
+   * must come back knowing what it already failed on, so the retry it takes
+   * next is the one it would have taken.
+   */
+  #sliceCheckpoint(runId: string, checkpoint: SliceCheckpoint): void {
+    const memory = this.#memoryOf(runId);
+    if (checkpoint.at === "retrying")
+      memory.histories.set(checkpoint.sliceId, checkpoint.history);
+    if (checkpoint.at === "committed")
+      memory.histories.delete(checkpoint.sliceId);
+    this.#checkpoint(runId);
+  }
+
+  #checkpoint(runId: string): void {
+    this.#options.runs.saveCheckpoint(
+      runId,
+      checkpointPayload(this.#memoryOf(runId)),
+    );
   }
 }
