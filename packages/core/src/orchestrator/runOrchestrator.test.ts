@@ -32,6 +32,11 @@ import { SqliteTaskStore } from "../persistence/taskStore.js";
 import { DocumentDesignGate } from "./designGate.js";
 import { AgentDesignPhase } from "./designPhase.js";
 import { issueReport } from "./fixtures/issueReport.js";
+import type {
+  DeliveryOutcome,
+  DeliveryReason,
+  RunDelivery,
+} from "../delivery/runDelivery.js";
 import {
   AgentRunOrchestrator,
   type RunOrchestrator,
@@ -74,6 +79,8 @@ function setup(options: {
   revisedPlan?: Design["slicePlan"];
   /** Design calls that fail (no valid design), by call number from 1. */
   failDesign?: number[];
+  /** What delivering the pull request does; it opens one by default. */
+  delivery?: DeliveryOutcome;
   /**
    * The process dies inside the first Slice, between two attempts, with this
    * as what the Slice had failed on so far.
@@ -87,12 +94,8 @@ function setup(options: {
   const slices = new SqliteSliceStore(store);
   const tasks = new SqliteTaskStore(store);
   const escalations = new SqliteEscalationStore(store);
-  const gate = new DocumentDesignGate({
-    db,
-    runs,
-    documents,
-    gates: new SqliteGateStore(store),
-  });
+  const gates = new SqliteGateStore(store);
+  const gate = new DocumentDesignGate({ db, runs, documents, gates });
   const run = runs.createRun({
     projectRequest: "Build a todo app",
     mode: options.mode ?? "gated",
@@ -149,6 +152,30 @@ function setup(options: {
     },
   };
 
+  const deliveries: Array<{ runId: string; reason: DeliveryReason }> = [];
+  const delivery: RunDelivery = {
+    deliver: async (runId, reason) => {
+      deliveries.push({ runId, reason });
+      const outcome: DeliveryOutcome = options.delivery ?? {
+        status: "opened",
+        pullRequest: {
+          number: 7,
+          url: "https://github.com/o/r/pull/7",
+          draft: reason.ended !== "complete",
+          branch: "sdlc/todo",
+        },
+      };
+      // The real delivery records the pull request on the Run; so must this.
+      if (outcome.status === "opened")
+        runs.setPullRequest(runId, {
+          number: outcome.pullRequest.number,
+          url: outcome.pullRequest.url,
+          draft: outcome.pullRequest.draft,
+        });
+      return outcome;
+    },
+  };
+
   const runnerCalls: SliceRunInput[] = [];
   const sliceCheckpoints: Array<(checkpoint: SliceCheckpoint) => void> = [];
   const outcomes = [...(options.outcomes ?? [])];
@@ -161,7 +188,9 @@ function setup(options: {
       slices,
       tasks,
       escalations,
+      gates,
       gate,
+      delivery,
       designPhase: new AgentDesignPhase({
         documents,
         slices,
@@ -218,6 +247,8 @@ function setup(options: {
   return {
     orchestrator,
     restart: build,
+    gates,
+    deliveries,
     /** Reports a Checkpoint from inside a Slice, as the real runner does. */
     sliceCheckpoint: (checkpoint: SliceCheckpoint) =>
       sliceCheckpoints.at(-1)!(checkpoint),
@@ -251,6 +282,153 @@ const escalatedWith = (
   summary: "Still failing after 3 retries: TodoList > empty state",
   reports: [issueReport()],
   history: HISTORY,
+});
+
+describe("AgentRunOrchestrator: the PR Gate (T20)", () => {
+  /** A gated Run with every Slice built, waiting at the PR Gate. */
+  async function atPrGate() {
+    const context = await approved({});
+    await context.orchestrator.advance(context.runId);
+    return context;
+  }
+
+  it("opens the pull request, then waits for a person at the PR Gate", async () => {
+    const { runId, status, gates, deliveries, runs } = await atPrGate();
+
+    expect(status()).toBe("awaitingPrGate");
+    expect(gates.getOpenGate(runId)?.kind).toBe("pr");
+    expect(deliveries).toEqual([
+      { runId, reason: { ended: "complete", findings: [] } },
+    ]);
+    expect(runs.getRun(runId)?.pullRequest).toMatchObject({ draft: false });
+  });
+
+  it("approve: the Run is done and the Gate records it", async () => {
+    const context = await atPrGate();
+    const gateId = context.gates.getOpenGate(context.runId)!.id;
+
+    context.orchestrator.decidePullRequest(context.runId, {
+      choice: "approve",
+    });
+
+    expect(context.status()).toBe("done");
+    expect(context.gates.getOpenGate(context.runId)).toBeNull();
+    expect(
+      context.gates.listVerdicts(gateId).map((verdict) => verdict.decision),
+    ).toEqual(["approve"]);
+    await expect(context.orchestrator.advance(context.runId)).resolves.toEqual({
+      finished: "done",
+    });
+  });
+
+  it("request changes: the last Slice is built again with the comments", async () => {
+    const context = await atPrGate();
+
+    context.orchestrator.decidePullRequest(context.runId, {
+      choice: "requestChanges",
+      comments: "The delete button needs a confirmation.",
+    });
+
+    expect(context.status()).toBe("building");
+    expect(context.sliceStatuses()).toEqual([
+      ["Walking Skeleton", "passed"],
+      ["Todos", "building"],
+    ]);
+
+    await context.orchestrator.advance(context.runId);
+
+    expect(context.runnerCalls.at(-1)?.hint).toBe(
+      "The delete button needs a confirmation.",
+    );
+  });
+
+  it("refuses a decision with nothing to change, and one with no Gate", async () => {
+    const context = await atPrGate();
+
+    expect(() =>
+      context.orchestrator.decidePullRequest(context.runId, {
+        choice: "requestChanges",
+        comments: "  ",
+      }),
+    ).toThrow(/Say what to change/);
+    expect(context.status()).toBe("awaitingPrGate");
+
+    context.orchestrator.decidePullRequest(context.runId, {
+      choice: "approve",
+    });
+    expect(() =>
+      context.orchestrator.decidePullRequest(context.runId, {
+        choice: "approve",
+      }),
+    ).toThrow(/no open PR Gate/);
+  });
+
+  // Every Slice skipped: the plan finished, but there is no code to push.
+  it("finishes without a pull request when there is no Slice Commit", async () => {
+    const context = await approved({
+      delivery: { status: "keptLocal", reason: "noSliceCommit" },
+    });
+
+    const progress = await context.orchestrator.advance(context.runId);
+
+    expect(progress).toEqual({ finished: "done" });
+    expect(context.gates.getOpenGate(context.runId)).toBeNull();
+    expect(context.runs.getRun(context.runId)?.pullRequest).toBeNull();
+  });
+});
+
+describe("AgentRunOrchestrator: the Draft PR of a Run that stopped (T20)", () => {
+  it("offers the passed Slices when a person aborts with the checkbox ticked", async () => {
+    const context = await approved({ outcomes: [escalatedWith()] });
+    await context.orchestrator.advance(context.runId);
+
+    context.orchestrator.resolveEscalation(context.runId, { choice: "abort" });
+    await expect(context.orchestrator.advance(context.runId)).resolves.toEqual({
+      finished: "aborted",
+    });
+
+    expect(context.deliveries).toEqual([
+      { runId: context.runId, reason: { ended: "aborted", openDraftPr: true } },
+    ]);
+  });
+
+  it("pushes nothing when the person unticks the checkbox", async () => {
+    const context = await approved({ outcomes: [escalatedWith()] });
+    await context.orchestrator.advance(context.runId);
+    context.orchestrator.resolveEscalation(context.runId, {
+      choice: "abort",
+      openDraftPrOnAbort: false,
+    });
+    await context.orchestrator.advance(context.runId);
+
+    expect(context.deliveries).toEqual([
+      {
+        runId: context.runId,
+        reason: { ended: "aborted", openDraftPr: false },
+      },
+    ]);
+  });
+
+  it("always offers a Draft PR when an auto-mode Run fails", async () => {
+    const context = setup({ mode: "auto", outcomes: [escalatedWith()] });
+
+    await expect(context.orchestrator.advance(context.runId)).resolves.toEqual({
+      finished: "failed",
+    });
+
+    expect(context.deliveries).toEqual([
+      { runId: context.runId, reason: { ended: "failed", openDraftPr: true } },
+    ]);
+  });
+
+  it("delivers once, however often advance is called afterwards", async () => {
+    const context = setup({ mode: "auto", outcomes: [escalatedWith()] });
+    await context.orchestrator.advance(context.runId);
+
+    await context.orchestrator.advance(context.runId);
+
+    expect(context.deliveries).toHaveLength(1);
+  });
 });
 
 describe("AgentRunOrchestrator: resuming a Run (T18)", () => {
@@ -378,8 +556,15 @@ describe("AgentRunOrchestrator: design", () => {
 
     const progress = await orchestrator.advance(runId);
 
-    expect(progress).toEqual({ waitingFor: "codeReview" });
-    expect(status()).toBe("reviewing");
+    expect(progress).toEqual({
+      waitingFor: "prGate",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/o/r/pull/7",
+        draft: false,
+      },
+    });
+    expect(status()).toBe("awaitingPrGate");
     expect(runnerCalls.map((call) => call.plan.title)).toEqual([
       "Walking Skeleton",
       "Todos",
@@ -422,13 +607,23 @@ describe("AgentRunOrchestrator: design", () => {
     expect(status()).toBe("awaitingDesignGate");
   });
 
-  it("goes from Project Request to review with no one asked in auto mode", async () => {
-    const { orchestrator, runId, status } = setup({ mode: "auto" });
-
-    await expect(orchestrator.advance(runId)).resolves.toEqual({
-      waitingFor: "codeReview",
+  it("goes from Project Request to a pull request with no one asked in auto mode", async () => {
+    const { orchestrator, runId, status, runs, deliveries } = setup({
+      mode: "auto",
     });
-    expect(status()).toBe("reviewing");
+
+    // No Design Gate and no PR Gate: the pull request is the Run's result.
+    await expect(orchestrator.advance(runId)).resolves.toEqual({
+      finished: "done",
+    });
+    expect(status()).toBe("done");
+    expect(deliveries).toEqual([
+      { runId, reason: { ended: "complete", findings: [] } },
+    ]);
+    expect(runs.getRun(runId)?.pullRequest).toMatchObject({
+      number: 7,
+      draft: false,
+    });
   });
 });
 
@@ -468,7 +663,14 @@ describe("AgentRunOrchestrator: Escalations", () => {
     });
     const progress = await orchestrator.advance(runId);
 
-    expect(progress).toEqual({ waitingFor: "codeReview" });
+    expect(progress).toEqual({
+      waitingFor: "prGate",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/o/r/pull/7",
+        draft: false,
+      },
+    });
     expect(runnerCalls.at(-1)).toMatchObject({
       plan: { title: "Todos" },
       hint: "Render the empty state before the fetch resolves.",
@@ -493,7 +695,14 @@ describe("AgentRunOrchestrator: Escalations", () => {
     orchestrator.resolveEscalation(runId, { choice: "skipSlice" });
     const progress = await orchestrator.advance(runId);
 
-    expect(progress).toEqual({ waitingFor: "codeReview" });
+    expect(progress).toEqual({
+      waitingFor: "prGate",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/o/r/pull/7",
+        draft: false,
+      },
+    });
     expect(sliceStatuses()).toEqual([
       ["Walking Skeleton", "skipped"],
       ["Todos", "passed"],
@@ -609,7 +818,12 @@ describe("AgentRunOrchestrator: a Slice finds a design problem", () => {
     // The Penpot page and boards are the same, so only the UI Spec is judged.
     orchestrator.decideDesign(runId, approveAll(["uiSpec"]));
     await expect(orchestrator.advance(runId)).resolves.toEqual({
-      waitingFor: "codeReview",
+      waitingFor: "prGate",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/o/r/pull/7",
+        draft: false,
+      },
     });
     expect(runnerCalls.at(-1)).toMatchObject({
       plan: { title: "Todos" },
@@ -754,7 +968,12 @@ describe("AgentRunOrchestrator: a revised Slice Plan", () => {
 
     orchestrator.resolveEscalation(runId, { choice: "skipSlice" });
     await expect(orchestrator.advance(runId)).resolves.toEqual({
-      waitingFor: "codeReview",
+      waitingFor: "prGate",
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/o/r/pull/7",
+        draft: false,
+      },
     });
     expect(sliceStatuses()).toEqual([
       ["Walking Skeleton", "passed"],

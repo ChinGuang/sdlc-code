@@ -5,6 +5,7 @@ export * from "./agentLoop/storeAdapters.js";
 export * from "./config/agentConfig.js";
 export * from "./config/readConfigFile.js";
 export * from "./delivery/pullRequestText.js";
+export * from "./delivery/runDelivery.js";
 export * from "./domain/runLifecycle.js";
 export * from "./domain/documentLifecycle.js";
 export * from "./domain/sliceLifecycle.js";

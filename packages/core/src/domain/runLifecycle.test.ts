@@ -71,6 +71,9 @@ const LEGAL: Array<[RunStatus, RunEvent, RunMode, RunStatus]> = [
     "gated",
     "aborted",
   ],
+  // A Run whose plan finished with no pull request to judge (T20).
+  ["reviewing", { type: "nothingToDeliver" }, "gated", "done"],
+  ["reviewing", { type: "nothingToDeliver" }, "auto", "done"],
 ];
 
 /** One sample of every event shape, including every payload variant. */
@@ -83,6 +86,7 @@ const ALL_EVENTS: RunEvent[] = [
   { type: "allSlicesCommitted" },
   { type: "blockingFindings" },
   { type: "prOpened" },
+  { type: "nothingToDeliver" },
   { type: "prChangesRequested" },
   { type: "prApproved" },
   ...(["retryBudget", "tokenBudget", "loop", "undecidableOwner"] as const).map(

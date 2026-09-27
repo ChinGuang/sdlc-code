@@ -109,9 +109,13 @@ export class SqliteSliceStore implements SliceStore {
         throw new Error(
           "A Slice Commit SHA is required to pass a Slice, and only then",
         );
+      // A Slice the PR Gate reopened keeps the Slice Commit it earned: it is
+      // still on the run branch, and it is the only record of which commit
+      // holds that Slice until a new attempt earns its own.
+      const sha = commitSha ?? (to === "building" ? slice.commitSha : null);
       this.#ctx.db
         .prepare("UPDATE slices SET status = ?, commit_sha = ? WHERE id = ?")
-        .run(to, commitSha ?? null, sliceId);
+        .run(to, sha, sliceId);
       return this.#require(sliceId);
     });
 

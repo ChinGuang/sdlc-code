@@ -9,7 +9,10 @@
  *                        (auto mode: the Run fails)
  *   escalated          → waits for resolveEscalation: retry with hint, edit
  *                        documents, skip the Slice, or abort
- *   reviewing onwards  → T19/T20
+ *   reviewing          → the Slices are built: the run branch is pushed and a
+ *                        pull request opened (T20; T19's review comes first
+ *                        once it exists), then the PR Gate opens (auto: done)
+ *   awaitingPrGate     → waits for decidePullRequest
  *
  * What a later step needs from an earlier one (revisions to make, a Slice's
  * history, a hint) is written to a Checkpoint at every Step boundary
@@ -22,7 +25,12 @@ import { documentOwner } from "../agentRoles.js";
 import type { IssueReport } from "../agents/testing/issueReports.js";
 import type { ModelCapabilities } from "../config/agentConfig.js";
 import type { DocumentKind } from "../domain/documentLifecycle.js";
-import type { Escalation, Run, Slice } from "../domain/entities.js";
+import type {
+  Escalation,
+  Run,
+  RunPullRequest,
+  Slice,
+} from "../domain/entities.js";
 import type { EscalationTrigger, RunStatus } from "../domain/runLifecycle.js";
 import type { EscalationStore } from "../persistence/escalationStore.js";
 import type { RunStore } from "../persistence/runStore.js";
@@ -44,14 +52,19 @@ import {
   type RunMemoryState,
 } from "./runCheckpoint.js";
 import type { SliceCheckpoint, SliceRunner } from "./sliceRunner.js";
+import type { RunDelivery } from "../delivery/runDelivery.js";
+import type { GateStore } from "../persistence/gateStore.js";
 
 /** Where a Run stopped, and why. */
 export type RunProgress =
   | { waitingFor: "designGate" }
   | { waitingFor: "escalation"; escalation: Escalation }
-  | { waitingFor: "codeReview" }
-  | { waitingFor: "prGate" }
+  | { waitingFor: "prGate"; pullRequest: RunPullRequest | null }
   | { finished: Extract<RunStatus, "done" | "failed" | "aborted"> };
+
+/** The human's decision at the PR Gate (diagram 8). */
+export type PullRequestDecision =
+  { choice: "approve" } | { choice: "requestChanges"; comments: string };
 
 export type EscalationResolution =
   | { choice: "retryWithHint"; hint: string }
@@ -70,6 +83,8 @@ export interface RunOrchestrator {
   decideDesign: (runId: string, verdicts: DesignVerdict[]) => GateDecision;
   /** The human's choice at an Escalation; then call advance. */
   resolveEscalation: (runId: string, resolution: EscalationResolution) => void;
+  /** The human's decision at the PR Gate; then call advance. */
+  decidePullRequest: (runId: string, decision: PullRequestDecision) => void;
 }
 
 export type RunOrchestratorOptions = {
@@ -78,7 +93,10 @@ export type RunOrchestratorOptions = {
   slices: SliceStore;
   tasks: TaskStore;
   escalations: EscalationStore;
+  gates: GateStore;
   gate: DesignGate;
+  /** Pushes the run branch and opens the pull request (T20). */
+  delivery: RunDelivery;
   designPhase: DesignPhase;
   /**
    * The Slice runner for a Run: its Workspaces, agents and budget. It reports
@@ -133,12 +151,19 @@ export class AgentRunOrchestrator implements RunOrchestrator {
           return { waitingFor: "escalation", escalation };
         }
         case "reviewing":
-          return { waitingFor: "codeReview" };
-        case "awaitingPrGate":
-          return { waitingFor: "prGate" };
+          await this.#review(run);
+          continue;
+        case "awaitingPrGate": {
+          // A process that died between opening the pull request and opening
+          // the Gate would otherwise leave nothing for a person to answer.
+          if (!this.#options.gates.getOpenGate(run.id))
+            this.#options.gates.openGate(run.id, "pr");
+          return { waitingFor: "prGate", pullRequest: run.pullRequest };
+        }
         case "done":
         case "failed":
         case "aborted":
+          await this.#deliverIfOwed(run);
           return { finished: run.status };
       }
     }
@@ -195,11 +220,73 @@ export class AgentRunOrchestrator implements RunOrchestrator {
         break;
       case "abort":
         if (current) this.#failTasks(runId, current.id);
+        // Diagram 3b: the passed Slices still reach the Target Repo unless the
+        // person unticked the checkbox, which the Escalation records. advance
+        // does the pushing, so answering a person never waits for GitHub.
         break;
     }
     // The person's decision is the thing a resumed Run must not lose.
     this.#checkpoint(runId);
   };
+
+  decidePullRequest = (runId: string, decision: PullRequestDecision): void => {
+    const { runs, gates, slices } = this.#options;
+    if (decision.choice === "requestChanges" && !decision.comments.trim())
+      throw new Error("Say what to change, or approve the pull request.");
+    const gate = gates.getOpenGate(runId);
+    if (!gate || gate.kind !== "pr")
+      throw new Error(`Run ${runId} has no open PR Gate.`);
+    gates.recordVerdict(gate.id, {
+      // A PR Gate judges the whole pull request, not one document.
+      documentId: null,
+      decision: decision.choice === "approve" ? "approve" : "requestChanges",
+      comments: decision.choice === "approve" ? "" : decision.comments,
+    });
+    gates.closeGate(
+      gate.id,
+      decision.choice === "approve" ? "passed" : "changesRequested",
+    );
+    runs.applyEvent(runId, {
+      type: decision.choice === "approve" ? "prApproved" : "prChangesRequested",
+    });
+    if (decision.choice === "approve") {
+      this.#checkpoint(runId);
+      return;
+    }
+    // Diagram 8: the changes are a fix Task, so the last Slice is built again
+    // with the comments as its hint. Its Slice Commit stays until a new one
+    // replaces it.
+    const last = slices
+      .listSlices(runId)
+      .filter((slice) => slice.status === "passed")
+      .at(-1);
+    if (last) {
+      slices.moveSlice(last.id, "building");
+      this.#memoryOf(runId).hints.set(last.id, decision.comments);
+    }
+    this.#checkpoint(runId);
+  };
+
+  /**
+   * The Slices are built and tested: push the run branch and open the pull
+   * request. T19's Code Review comes before this once it exists, which is why
+   * the pull request carries no Findings yet.
+   */
+  async #review(run: Run): Promise<void> {
+    const { runs, gates, delivery } = this.#options;
+    const outcome = await delivery.deliver(run.id, {
+      ended: "complete",
+      findings: [],
+    });
+    // A Run whose every Slice was skipped finished its plan with nothing to
+    // push, so there is no pull request and no Gate to hold it at.
+    if (outcome.status === "keptLocal") {
+      runs.applyEvent(run.id, { type: "nothingToDeliver" });
+      return;
+    }
+    const next = runs.applyEvent(run.id, { type: "prOpened" });
+    if (next.status === "awaitingPrGate") gates.openGate(run.id, "pr");
+  }
 
   /**
    * A person's document edits, checked before anything changes: one Revision
@@ -342,6 +429,34 @@ export class AgentRunOrchestrator implements RunOrchestrator {
   }
 
   /**
+   * The Draft PR a Run that stopped early still owes (diagram 3b). Read from
+   * the Run and its Escalation rather than remembered, so a Run that stopped
+   * and then lost its process still offers what it finished; the pull request
+   * it records is what stops it being offered twice.
+   */
+  async #deliverIfOwed(run: Run): Promise<void> {
+    // Only a Run that stopped early owes one: a Run that is done opened its
+    // pull request in #review, and every other status is still going.
+    if (run.status !== "failed" && run.status !== "aborted") return;
+    if (run.pullRequest) return;
+    await this.#options.delivery.deliver(run.id, {
+      ended: run.status,
+      // A failure in auto mode has nobody to ask, so it always offers one.
+      openDraftPr:
+        run.status === "failed" ? true : this.#abortedWithDraftPr(run.id),
+    });
+  }
+
+  /** What the person ticked when they aborted; the default is to offer one. */
+  #abortedWithDraftPr(runId: string): boolean {
+    const abort = this.#options.escalations
+      .listEscalations(runId)
+      .filter((escalation) => escalation.choice === "abort")
+      .at(-1);
+    return abort?.openDraftPrOnAbort ?? true;
+  }
+
+  /**
    * A limit stops the build: a person decides at an Escalation, or, with no
    * one to ask (auto mode), the Run fails and says why.
    */
@@ -359,7 +474,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     }
     const current = this.#currentSlice(run.id);
     if (current) this.#failTasks(run.id, current.id);
-    // The failure report the Draft PR will carry (T20).
+    // The failure report the Draft PR carries (diagram 3b).
     runs.recordFailure(run.id, {
       trigger,
       summary,

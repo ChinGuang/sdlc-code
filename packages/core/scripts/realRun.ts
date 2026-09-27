@@ -17,7 +17,9 @@
 import {
   connectPenpotMcp,
   NebiusSandboxClient,
+  RestGitHubClient,
   TokenFactoryChatClient,
+  TokenGitPusher,
   type ChatClient,
 } from "@sdlc-code/clients";
 import { REACT_NODE, templateFiles } from "@sdlc-code/stack-profiles";
@@ -30,6 +32,7 @@ import {
   AgentRunOrchestrator,
   ChatAgentLoop,
   DocumentDesignGate,
+  GitHubRunDelivery,
   GitWorkspaceManager,
   LoopCodingAgent,
   LoopSystemDesignAgent,
@@ -59,6 +62,7 @@ import {
   type AgentRole,
   type AgentTool,
   type DocumentKind,
+  type RunDelivery,
   type SliceCheckpoint,
   type TranscriptEvent,
 } from "../src/index.js";
@@ -78,11 +82,22 @@ const projectRequest =
   ) ??
   "Build a todo app where a user can add todos, mark them done and delete them.";
 const mode = flag("auto") ? "auto" : "gated";
+/**
+ * Where the pull request goes, as "owner/name". Without it the Run keeps its
+ * Slice Commits in the local repository and opens nothing, so a Run costs no
+ * GitHub access (T20).
+ */
+const targetRepo = value("repo");
+if (targetRepo && !/^[\w.-]+\/[\w.-]+$/.test(targetRepo)) {
+  console.error(`--repo must be "owner/name", not "${targetRepo}".`);
+  process.exit(1);
+}
 const tokenBudget = Number(value("budget") ?? 2_000_000);
 const dataDir =
   value("data") ??
   fileURLToPath(new URL("../../../.sdlc-runs", import.meta.url));
 
+const githubToken = targetRepo ? requireEnv("GITHUB_TOKEN") : null;
 const apiKey = requireEnv("NEBIUS_API_KEY");
 const project = requireEnv("NEBIUS_AI_PROJECT");
 const penpotUrl = requireEnv("PENPOT_MCP_URL");
@@ -101,12 +116,8 @@ const documents = new SqliteDocumentStore(store);
 const slices = new SqliteSliceStore(store);
 const tasks = new SqliteTaskStore(store);
 const escalations = new SqliteEscalationStore(store);
-const gate = new DocumentDesignGate({
-  db,
-  runs,
-  documents,
-  gates: new SqliteGateStore(store),
-});
+const gates = new SqliteGateStore(store);
+const gate = new DocumentDesignGate({ db, runs, documents, gates });
 
 /**
  * A new Run, or the one --resume names (the newest unfinished one when it names
@@ -120,8 +131,8 @@ function createRun() {
     projectRequest,
     mode,
     targetRepo: {
-      owner: "local",
-      name: "app",
+      owner: targetRepo?.split("/")[0] ?? "local",
+      name: targetRepo?.split("/")[1] ?? "app",
       baseBranch: "main",
       runBranch: "sdlc/run",
     },
@@ -145,6 +156,8 @@ function runToResume() {
   return value("budget") ? runs.setTokenBudget(found.id, tokenBudget) : found;
 }
 const runDir = join(dataDir, run.id);
+/** The one repository the Slices are built in, tested from and pushed from. */
+const repoDir = join(runDir, "repo.git");
 console.log(
   `Run ${run.id} (${run.mode}, ${run.tokensUsed.toLocaleString()} of ${run.tokenBudget.toLocaleString()} tokens spent)
   ${run.projectRequest}
@@ -211,7 +224,7 @@ console.log(`  Penpot file "${file.file}"`);
 const pageName = runPageName(`#${run.id.slice(0, 8)}`, projectRequest);
 
 const workspaces = new GitWorkspaceManager({
-  repoDir: join(runDir, "repo.git"),
+  repoDir,
   runBranch: run.targetRepo.runBranch,
   workspacesDir: join(runDir, "workspaces"),
 });
@@ -300,13 +313,41 @@ const sliceRunnerFor = (onCheckpoint: (checkpoint: SliceCheckpoint) => void) =>
     },
   });
 
+/**
+ * With a --repo, the Run pushes its Slice Commits there and opens the pull
+ * request; without one there is nowhere to push, so it says so and the work
+ * stays in the local repository this script prints at the end.
+ */
+const delivery: RunDelivery = githubToken
+  ? new GitHubRunDelivery({
+      runs,
+      slices,
+      tasks,
+      workspaces,
+      repoDir,
+      pusher: new TokenGitPusher({ token: githubToken }),
+      github: new RestGitHubClient({ token: githubToken }),
+    })
+  : {
+      deliver: async (_runId, reason) => {
+        console.log(
+          reason.ended === "complete"
+            ? "  no --repo: the Slice Commits stay in the local repository"
+            : `  no --repo: nothing pushed (${reason.ended})`,
+        );
+        return { status: "keptLocal", reason: "noTargetRepo" };
+      },
+    };
+
 const orchestrator = new AgentRunOrchestrator({
   runs,
   documents,
   slices,
   tasks,
   escalations,
+  gates,
   gate,
+  delivery,
   designPhase: new AgentDesignPhase({
     documents,
     slices,
@@ -445,6 +486,30 @@ async function resolveEscalation(summary: string): Promise<void> {
   }
 }
 
+/** The PR Gate (diagram 8): approve what the Run built, or ask for changes. */
+async function decidePullRequest(
+  pullRequest: { number: number; url: string } | null,
+): Promise<void> {
+  console.log(
+    `
+PR Gate: ${pullRequest ? `#${pullRequest.number} ${pullRequest.url}` : "no pull request"}`,
+  );
+  if (mode === "auto") {
+    orchestrator.decidePullRequest(run.id, { choice: "approve" });
+    return;
+  }
+  const answer = (await ask.ask("  [1] approve  [2] request changes: ")).trim();
+  if (answer !== "2") {
+    orchestrator.decidePullRequest(run.id, { choice: "approve" });
+    return;
+  }
+  const comments = await ask.ask("  What needs changing: ");
+  orchestrator.decidePullRequest(run.id, {
+    choice: "requestChanges",
+    comments,
+  });
+}
+
 const started = Date.now();
 try {
   for (;;) {
@@ -464,19 +529,17 @@ try {
       await resolveEscalation(progress.escalation.summary);
       continue;
     }
-    // Code review and the PR Gate are T19/T20; the Slices are built.
-    console.log(`Waiting for ${progress.waitingFor}: the Slices are built.`);
-    break;
+    await decidePullRequest(progress.pullRequest);
   }
   const commits = await workspaces.sliceCommits();
   console.log(
-    `\n${commits.length} Slice Commit${commits.length === 1 ? "" : "s"} in ${join(runDir, "repo.git")} on ${run.targetRepo.runBranch}`,
+    `\n${commits.length} Slice Commit${commits.length === 1 ? "" : "s"} in ${repoDir} on ${run.targetRepo.runBranch}`,
   );
   console.log(
-    `  See them: git --git-dir="${join(runDir, "repo.git")}" log --stat ${run.targetRepo.runBranch}`,
+    `  See them: git --git-dir="${repoDir}" log --stat ${run.targetRepo.runBranch}`,
   );
   console.log(
-    `  Try the app: git clone "${join(runDir, "repo.git")}" app && cd app && npm install && npm run dev`,
+    `  Try the app: git clone "${repoDir}" app && cd app && npm install && npm run dev`,
   );
 } finally {
   ask.close();

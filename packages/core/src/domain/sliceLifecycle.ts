@@ -1,7 +1,9 @@
 /**
  * Slice progress inside the Run's "building" status (UML diagram 3, Building):
  * in progress → testing → committed, back to building when an issue is routed,
- * or skipped by a human at an Escalation.
+ * or skipped by a human at an Escalation. A Slice that passed is built again
+ * only when the PR Gate asks for changes (diagram 8): its Slice Commit stays on
+ * the run branch until the new attempt earns its own.
  */
 import type { SliceStatus } from "./entities.js";
 import { IllegalTransitionError } from "./illegalTransitionError.js";
@@ -11,7 +13,7 @@ const ALLOWED: Record<SliceStatus, readonly SliceStatus[]> = {
   pending: ["building", "skipped"],
   building: ["testing", "skipped"],
   testing: ["building", "passed", "skipped"],
-  passed: [],
+  passed: ["building"],
   skipped: [],
 };
 

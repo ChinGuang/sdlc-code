@@ -16,6 +16,20 @@ const plan = [
 ];
 
 describe("SqliteSliceStore", () => {
+  // The PR Gate asked for changes: the Slice is built again, and the commit it
+  // already earned is still on the run branch.
+  it("keeps the Slice Commit of a Slice that is built again", () => {
+    const { store, runId } = setup();
+    const [slice] = store.saveSlices(runId, [
+      { title: "Walking Skeleton", isWalkingSkeleton: true },
+    ]);
+    store.moveSlice(slice!.id, "building");
+    store.moveSlice(slice!.id, "testing");
+    store.moveSlice(slice!.id, "passed", "commit-1");
+
+    expect(store.moveSlice(slice!.id, "building").commitSha).toBe("commit-1");
+  });
+
   it("saves the Slice Plan in order, all pending", () => {
     const { store, runId } = setup();
 
