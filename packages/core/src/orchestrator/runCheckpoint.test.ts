@@ -43,6 +43,7 @@ function memory(): RunMemoryState {
       ],
     ]),
     hints: new Map([["slice-2", "Validate the title before saving it."]]),
+    reviewRetries: 2,
   };
 }
 
@@ -82,6 +83,7 @@ describe("checkpointPayload and memoryFromCheckpoint", () => {
       revisions: [],
       histories: new Map(),
       hints: new Map(),
+      reviewRetries: 0,
     };
 
     expect(checkpointPayload(empty)).toEqual({
@@ -89,6 +91,7 @@ describe("checkpointPayload and memoryFromCheckpoint", () => {
       revisions: [],
       histories: {},
       hints: {},
+      reviewRetries: 0,
     });
     expect(memoryFromCheckpoint(checkpointPayload(empty))).toEqual(empty);
   });

@@ -66,6 +66,12 @@ export const CheckpointPayloadSchema = z.strictObject({
   histories: z.record(z.string(), SliceHistorySchema),
   /** The hint an Escalation left for a Slice's next attempt, by Slice id. */
   hints: z.record(z.string(), z.string()),
+  /**
+   * How often blocking Findings have sent this Run's code back (T19). Counted
+   * here because a Run that keeps failing its review must stop asking, and a
+   * restart must not give it a fresh count.
+   */
+  reviewRetries: z.number().int().min(0).default(0),
 });
 
 export type CheckpointPayload = z.infer<typeof CheckpointPayloadSchema>;
@@ -75,6 +81,7 @@ export type RunMemoryState = {
   revisions: Revision[];
   histories: Map<string, SliceHistory>;
   hints: Map<string, string>;
+  reviewRetries: number;
 };
 
 /**
@@ -106,6 +113,7 @@ export function checkpointPayload(memory: RunMemoryState): CheckpointPayload {
       ]),
     ),
     hints: Object.fromEntries(memory.hints),
+    reviewRetries: memory.reviewRetries,
   };
 }
 
@@ -129,5 +137,6 @@ export function memoryFromCheckpoint(payload: unknown): RunMemoryState | null {
       ]),
     ),
     hints: new Map(Object.entries(parsed.data.hints)),
+    reviewRetries: parsed.data.reviewRetries,
   };
 }

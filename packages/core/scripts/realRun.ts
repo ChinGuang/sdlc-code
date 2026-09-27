@@ -6,6 +6,9 @@
  *
  *   pnpm --filter @sdlc-code/core run:real "Build a todo app" [--auto] [--budget 2000000]
  *
+ * --repo owner/name pushes the Slice Commits there and opens the pull request;
+ * --agents-md points at the user's own Review Standard (T19).
+ *
  * A Run that stopped is continued rather than started again, with a new total
  * to spend; --resume takes a Run id, or the newest unfinished Run without one:
  *
@@ -23,17 +26,19 @@ import {
   type ChatClient,
 } from "@sdlc-code/clients";
 import { REACT_NODE, templateFiles } from "@sdlc-code/stack-profiles";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AgentDesignPhase,
   AgentRunOrchestrator,
+  AgentRunReview,
   ChatAgentLoop,
   DocumentDesignGate,
   GitHubRunDelivery,
   GitWorkspaceManager,
+  LoopCodeReviewAgent,
   LoopCodingAgent,
   LoopSystemDesignAgent,
   LoopUiDesignAgent,
@@ -48,6 +53,7 @@ import {
   RunTokenBudget,
   runPageName,
   SandboxBaseSnapshots,
+  SandboxLintRunner,
   SandboxTestingAgent,
   SandboxTestRunner,
   SqliteDocumentStore,
@@ -339,6 +345,33 @@ const delivery: RunDelivery = githubToken
       },
     };
 
+/**
+ * The review that runs before the pull request (T19): the linters in a sandbox,
+ * then the Code Review Agent over the diff. --agents-md points at a file of the
+ * user's own Rules, as a Target Repo's AGENTS.md would.
+ */
+const userStandardsFile = value("agents-md");
+const codeReview = new AgentRunReview({
+  documents,
+  workspaces,
+  profile: () => REACT_NODE,
+  linters: new SandboxLintRunner({
+    sandbox,
+    snapshots: new SandboxBaseSnapshots({
+      sandbox,
+      store: new SqliteSnapshotStore(store),
+      uploaded,
+    }),
+    uploaded,
+  }),
+  agent: new LoopCodeReviewAgent({
+    createLoop: loopFor("codeReview", 12),
+  }),
+  userStandards: async () =>
+    userStandardsFile ? readFileSync(userStandardsFile, "utf8") : null,
+  onProblem: (problem) => console.log(`  review: ${problem}`),
+});
+
 const orchestrator = new AgentRunOrchestrator({
   runs,
   documents,
@@ -348,6 +381,8 @@ const orchestrator = new AgentRunOrchestrator({
   gates,
   gate,
   delivery,
+  codeReview,
+  onReviewProblem: (problem) => console.log(`  review: ${problem}`),
   designPhase: new AgentDesignPhase({
     documents,
     slices,

@@ -53,6 +53,14 @@ import {
 } from "./runCheckpoint.js";
 import type { SliceCheckpoint, SliceRunner } from "./sliceRunner.js";
 import type { RunDelivery } from "../delivery/runDelivery.js";
+import {
+  asCodingIssue,
+  asPullRequestFinding,
+  blockingFindings,
+  nonBlockingFindings,
+  type Finding,
+} from "../agents/codeReview/findings.js";
+import type { RunReview } from "./runReview.js";
 import type { GateStore } from "../persistence/gateStore.js";
 
 /** Where a Run stopped, and why. */
@@ -97,6 +105,15 @@ export type RunOrchestratorOptions = {
   gate: DesignGate;
   /** Pushes the run branch and opens the pull request (T20). */
   delivery: RunDelivery;
+  /**
+   * The review that runs before the pull request (T19). Without it a Run's code
+   * is delivered unreviewed, which is what happened before T19 existed.
+   */
+  codeReview?: RunReview;
+  /** Told when a review could not be trusted, e.g. an invented Rule ID. */
+  onReviewProblem?: (problem: string) => void;
+  /** How often blocking Findings may send the code back. Defaults to 3. */
+  reviewRetryBudget?: number;
   designPhase: DesignPhase;
   /**
    * The Slice runner for a Run: its Workspaces, agents and budget. It reports
@@ -115,6 +132,9 @@ export type RunOrchestratorOptions = {
 type RunMemory = RunMemoryState & {
   screenImages: Map<string, ExportedImage>;
 };
+
+/** The Retry Budget of CONTEXT.md, applied to the review as to a Slice. */
+const DEFAULT_REVIEW_RETRIES = 3;
 
 const REVISED_DOCUMENT: Record<"systemDesign" | "uiDesign", DocumentKind> = {
   // The API Contract lacks what the Slice Plan or a test needs.
@@ -268,15 +288,23 @@ export class AgentRunOrchestrator implements RunOrchestrator {
   };
 
   /**
-   * The Slices are built and tested: push the run branch and open the pull
-   * request. T19's Code Review comes before this once it exists, which is why
-   * the pull request carries no Findings yet.
+   * The Slices are built and tested, so the code is reviewed before anyone is
+   * asked to look at it (diagram 8): the linters run in the sandbox, then the
+   * Code Review Agent reads the diff against the Review Standard and the
+   * Approved Documents. Blocking Findings send the work back; the rest travel
+   * to the pull request's description.
    */
   async #review(run: Run): Promise<void> {
-    const { runs, gates, delivery } = this.#options;
+    const { runs, gates, delivery, codeReview } = this.#options;
+    const findings = codeReview ? await this.#findings(run) : [];
+    const blocking = blockingFindings(findings);
+    if (blocking.length > 0) {
+      this.#sendBack(run, blocking);
+      return;
+    }
     const outcome = await delivery.deliver(run.id, {
       ended: "complete",
-      findings: [],
+      findings: nonBlockingFindings(findings).map(asPullRequestFinding),
     });
     // A Run whose every Slice was skipped finished its plan with nothing to
     // push, so there is no pull request and no Gate to hold it at.
@@ -286,6 +314,61 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     }
     const next = runs.applyEvent(run.id, { type: "prOpened" });
     if (next.status === "awaitingPrGate") gates.openGate(run.id, "pr");
+  }
+
+  /** What the linters and the Code Review Agent found, against this Run's Rules. */
+  async #findings(run: Run): Promise<Finding[]> {
+    const { codeReview, profile } = this.#options;
+    if (!codeReview) return [];
+    const standard = await codeReview.reviewStandard(run);
+    const lint = await codeReview.runLinters(run, standard);
+    const reviewed = await codeReview.review(run, standard, lint);
+    // A Rule ID nobody has is not a Finding, but it is worth knowing about.
+    for (const unknown of reviewed.unknownRuleIds)
+      this.#options.onReviewProblem?.(
+        `The Code Review Agent cited ${unknown}, which the Review Standard of ${profile(run).name} does not have.`,
+      );
+    return [...lint, ...reviewed.findings];
+  }
+
+  /**
+   * Blocking Findings are a fix Task (diagram 8): the last Slice is built again
+   * with them, as the PR Gate's changes are. The Run leaves reviewing, so the
+   * review runs again once the Slice passes.
+   */
+  #sendBack(run: Run, blocking: readonly Finding[]): void {
+    const { runs, slices } = this.#options;
+    const memory = this.#memoryOf(run.id);
+    const budget = this.#options.reviewRetryBudget ?? DEFAULT_REVIEW_RETRIES;
+    // A review that keeps refusing the same code must stop asking, or a Run
+    // rebuilds its last Slice for ever (diagram 3: reviewing → escalated).
+    if (memory.reviewRetries >= budget) {
+      this.#limit(
+        run,
+        "retryBudget",
+        `The review still refuses the code after ${budget} attempts: ${blocking
+          .map((finding) => asCodingIssue(finding).summary)
+          .join("; ")}`,
+        [],
+      );
+      return;
+    }
+    memory.reviewRetries++;
+    runs.applyEvent(run.id, { type: "blockingFindings" });
+    const last = slices
+      .listSlices(run.id)
+      .filter((slice) => slice.status === "passed")
+      .at(-1);
+    if (last) {
+      slices.moveSlice(last.id, "building");
+      memory.hints.set(
+        last.id,
+        blocking
+          .map((finding) => `- ${asCodingIssue(finding).summary}`)
+          .join("\n"),
+      );
+    }
+    this.#checkpoint(run.id);
   }
 
   /**
@@ -522,6 +605,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
         revisions: saved?.revisions ?? [],
         histories: saved?.histories ?? new Map(),
         hints: saved?.hints ?? new Map(),
+        reviewRetries: saved?.reviewRetries ?? 0,
         screenImages: new Map(),
       };
       this.#memory.set(runId, memory);

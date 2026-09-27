@@ -32,11 +32,14 @@ import { SqliteTaskStore } from "../persistence/taskStore.js";
 import { DocumentDesignGate } from "./designGate.js";
 import { AgentDesignPhase } from "./designPhase.js";
 import { issueReport } from "./fixtures/issueReport.js";
+import { BASELINE_RULES } from "@sdlc-code/stack-profiles";
+import type { Finding } from "../agents/codeReview/findings.js";
 import type {
   DeliveryOutcome,
   DeliveryReason,
   RunDelivery,
 } from "../delivery/runDelivery.js";
+import type { RunReview } from "./runReview.js";
 import {
   AgentRunOrchestrator,
   type RunOrchestrator,
@@ -81,6 +84,10 @@ function setup(options: {
   failDesign?: number[];
   /** What delivering the pull request does; it opens one by default. */
   delivery?: DeliveryOutcome;
+  /** What the review finds; without it a Run is delivered unreviewed. */
+  review?: { linter?: Finding[]; agent?: Finding[]; unknownRuleIds?: string[] };
+  /** How often blocking Findings may send the code back. */
+  reviewRetryBudget?: number;
   /**
    * The process dies inside the first Slice, between two attempts, with this
    * as what the Slice had failed on so far.
@@ -176,6 +183,20 @@ function setup(options: {
     },
   };
 
+  const reviews: Array<{ runId: string; standard: number }> = [];
+  const codeReview: RunReview | undefined = options.review && {
+    reviewStandard: async () => [...BASELINE_RULES],
+    runLinters: async (run, standard) => {
+      reviews.push({ runId: run.id, standard: standard.length });
+      return options.review?.linter ?? [];
+    },
+    review: async () => ({
+      findings: options.review?.agent ?? [],
+      unknownRuleIds: options.review?.unknownRuleIds ?? [],
+    }),
+  };
+  const reviewProblems: string[] = [];
+
   const runnerCalls: SliceRunInput[] = [];
   const sliceCheckpoints: Array<(checkpoint: SliceCheckpoint) => void> = [];
   const outcomes = [...(options.outcomes ?? [])];
@@ -191,6 +212,9 @@ function setup(options: {
       gates,
       gate,
       delivery,
+      codeReview,
+      onReviewProblem: (problem) => reviewProblems.push(problem),
+      reviewRetryBudget: options.reviewRetryBudget,
       designPhase: new AgentDesignPhase({
         documents,
         slices,
@@ -249,6 +273,8 @@ function setup(options: {
     restart: build,
     gates,
     deliveries,
+    reviews,
+    reviewProblems,
     /** Reports a Checkpoint from inside a Slice, as the real runner does. */
     sliceCheckpoint: (checkpoint: SliceCheckpoint) =>
       sliceCheckpoints.at(-1)!(checkpoint),
@@ -282,6 +308,159 @@ const escalatedWith = (
   summary: "Still failing after 3 retries: TodoList > empty state",
   reports: [issueReport()],
   history: HISTORY,
+});
+
+describe("AgentRunOrchestrator: the review before the pull request (T19)", () => {
+  const finding = (overrides: Partial<Finding> = {}): Finding => ({
+    ruleId: "CLEAN-01",
+    file: "src/App.tsx",
+    line: 4,
+    message: "`d` says nothing about what it holds.",
+    severity: "minor",
+    source: "codeReview",
+    ...overrides,
+  });
+
+  it("reviews the code, then opens the pull request with what it found", async () => {
+    const context = await approved({
+      review: {
+        linter: [finding({ ruleId: "LINT-02", source: "linter" })],
+        agent: [finding()],
+      },
+    });
+
+    await context.orchestrator.advance(context.runId);
+
+    expect(context.reviews).toEqual([
+      { runId: context.runId, standard: BASELINE_RULES.length },
+    ]);
+    expect(context.deliveries).toEqual([
+      {
+        runId: context.runId,
+        reason: {
+          ended: "complete",
+          findings: [
+            {
+              ruleId: "LINT-02",
+              location: "src/App.tsx:4",
+              message: "`d` says nothing about what it holds.",
+            },
+            {
+              ruleId: "CLEAN-01",
+              location: "src/App.tsx:4",
+              message: "`d` says nothing about what it holds.",
+            },
+          ],
+        },
+      },
+    ]);
+    expect(context.status()).toBe("awaitingPrGate");
+  });
+
+  it("sends a blocking Finding back to the Slice, and pushes nothing", async () => {
+    const context = await approved({
+      review: {
+        agent: [
+          finding({
+            ruleId: "SEC-01",
+            severity: "blocking",
+            message: "The API key is in the source.",
+          }),
+        ],
+      },
+      reviewRetryBudget: 1,
+    });
+    await context.orchestrator.advance(context.runId);
+
+    // The last Slice was built again, told which Rule it broke and where.
+    const again = context.runnerCalls.at(-1);
+    expect(again?.slice.title).toBe("Todos");
+    expect(again?.hint).toContain("SEC-01 (blocking) in src/App.tsx:4");
+    expect(again?.hint).toContain("The API key is in the source.");
+    // Nothing reaches the Target Repo while the review refuses it.
+    expect(context.deliveries).toEqual([]);
+  });
+
+  // Otherwise a review that keeps refusing the same code rebuilds the last
+  // Slice for ever, which is what this test found the first time it ran.
+  it("stops sending the code back once the Retry Budget is spent", async () => {
+    const context = setup({
+      mode: "auto",
+      review: {
+        agent: [finding({ ruleId: "SEC-01", severity: "blocking" })],
+      },
+      reviewRetryBudget: 2,
+    });
+
+    await expect(context.orchestrator.advance(context.runId)).resolves.toEqual({
+      finished: "failed",
+    });
+
+    expect(context.reviews).toHaveLength(3);
+    expect(context.runs.getRun(context.runId)?.failure).toMatchObject({
+      trigger: "retryBudget",
+      summary: expect.stringContaining("still refuses the code after 2"),
+    });
+    // A Draft PR of the Slices that did pass, as any auto-mode failure gets.
+    expect(context.deliveries).toEqual([
+      { runId: context.runId, reason: { ended: "failed", openDraftPr: true } },
+    ]);
+  });
+
+  it("a person decides at an Escalation when the review will not pass", async () => {
+    const context = await approved({
+      review: {
+        agent: [finding({ ruleId: "SEC-01", severity: "blocking" })],
+      },
+      reviewRetryBudget: 1,
+    });
+
+    const progress = await context.orchestrator.advance(context.runId);
+
+    expect(progress).toMatchObject({ waitingFor: "escalation" });
+    expect(context.escalations.getOpenEscalation(context.runId)?.trigger).toBe(
+      "retryBudget",
+    );
+  });
+
+  it("counts the send-backs in the Checkpoint, so a restart cannot reset them", async () => {
+    const context = await approved({
+      review: {
+        agent: [finding({ ruleId: "SEC-01", severity: "blocking" })],
+      },
+      reviewRetryBudget: 1,
+    });
+
+    await context.orchestrator.advance(context.runId);
+
+    expect(context.runs.latestCheckpoint(context.runId)?.payload).toMatchObject(
+      { reviewRetries: 1 },
+    );
+  });
+
+  it("delivers unreviewed when no review is configured, and says nothing about it", async () => {
+    const context = await approved({});
+
+    await context.orchestrator.advance(context.runId);
+
+    expect(context.reviews).toEqual([]);
+    expect(context.deliveries).toEqual([
+      { runId: context.runId, reason: { ended: "complete", findings: [] } },
+    ]);
+  });
+
+  it("says so when the review cited a Rule nobody has", async () => {
+    const context = await approved({
+      review: { unknownRuleIds: ["VIBES-01"] },
+    });
+
+    await context.orchestrator.advance(context.runId);
+
+    expect(context.reviewProblems).toEqual([
+      expect.stringContaining("VIBES-01"),
+    ]);
+    expect(context.status()).toBe("awaitingPrGate");
+  });
 });
 
 describe("AgentRunOrchestrator: the PR Gate (T20)", () => {
