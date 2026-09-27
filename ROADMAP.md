@@ -1,0 +1,108 @@
+# sdlc-code — Roadmap
+
+Where the project actually is, checked against the code rather than the plan.
+
+- Written: 2026-09-27 · **MVP complete:** 2026-10-18 · **Submission:** 2026-10-25
+- Plan: [docs/PLAN.md](docs/PLAN.md) · Terms: [CONTEXT.md](CONTEXT.md) · Design: [docs/design/uml.md](docs/design/uml.md)
+- Method: each task is a branch from `main`, implemented with tests, reviewed on two axes (standards and spec), then merged by a human.
+
+## In one line
+
+The whole pipeline works end to end against the real world — Nemotron on Token Factory, Penpot, Nebius Sandboxes — and produces committed, sandbox-tested Slices of a real application. What is missing is the review step, the delivery of a pull request, and every user interface.
+
+| Milestone | State | Evidence |
+|---|---|---|
+| M0 Spikes | Done | 3 spike documents, PRs #1–#3 |
+| M1 Foundation | Done | PRs #4–#9 |
+| M2 Design Phase | Done | PRs #10–#12 |
+| M3 Build loop | Done (T18 in review) | PRs #13–#21, #23 |
+| M4 Review & delivery | Not started | — |
+| M5 Interfaces | Scaffolds only | PRs #4, #6 |
+| M6 Hardening & submission | Not started | — |
+
+---
+
+## Done
+
+Everything here is merged into `main`, has tests, and has been exercised by a real Run unless noted.
+
+### M0 — the three unknowns, removed
+
+| What | Where | Result |
+|---|---|---|
+| Nebius Sandboxes from Node | [docs/spikes/sandbox.md](docs/spikes/sandbox.md) | A full Test Run — branch a snapshot, upload changed files, unit tests + boot + smoke — in 1.5 s wall time. Confirmed [ADR 0001](docs/adr/0001-local-git-is-source-of-truth-sandbox-only-executes.md). |
+| Penpot MCP from Node | [docs/spikes/penpot-mcp.md](docs/spikes/penpot-mcp.md) | Works through the plugin in a browser tab; the tab is a hard dependency. Led to [ADR 0002](docs/adr/0002-one-penpot-page-per-run.md). |
+| Nemotron tool calling | [docs/spikes/nemotron-tools.md](docs/spikes/nemotron-tools.md) | 0 malformed arguments in 521 tool calls; the four models differ in parallel calls and long-context recall, which the agent loop is built around. |
+
+### M1 — Foundation
+
+- **T04 Monorepo** — pnpm workspaces (`packages/core`, `packages/clients`, `packages/stack-profiles`, `apps/server`, `apps/web`, `apps/cli`), TypeScript strict, ESLint enforcing [CODING_STANDARDS.md](CODING_STANDARDS.md), Prettier, Vitest projects, GitHub Actions in `.github/workflows/ci.yml`.
+- **T05 Token Factory client + agent config** — `packages/clients/src/tokenFactory`: completions, streaming, tool calls, JSON-schema output, usage and pricing. `packages/core/src/config/agentConfig.ts`: per-role model and Model Capabilities, overridable by file and by `SDLC_MODEL_*`.
+- **T06 GitHub client** — `packages/clients/src/github`: branch, push, PR and draft PR; `packages/core/src/delivery/pullRequestText.ts` for the description. Built but **not yet used by a Run** (that is T20).
+- **T07 Domain model + persistence** — entities from UML diagram 2; Run and Document lifecycles as pure functions (diagrams 3 and 4); SQLite with migrations per [ADR 0003](docs/adr/0003-better-sqlite3-for-persistence.md); stores for runs, documents, gates, slices, tasks, steps, escalations, snapshots and checkpoints.
+- **T08 Agent loop** — `packages/core/src/agentLoop`: tool registry, iteration cap, Transcript, Token Budget accounting, Working Memory note, retries for rate limits, server errors, dropped connections and timeouts, and prompt trimming so a Step's cost does not grow with the square of its turns.
+
+### M2 — Design Phase
+
+- **T09 System Design Agent** — System Design (validated Mermaid), Slice Plan (Walking Skeleton first), API Contract (OpenAPI), with validators that reject a design the build could not use.
+- **T10 Penpot client + UI Design Agent** — one page per Run ([ADR 0002](docs/adr/0002-one-penpot-page-per-run.md)), one board per screen, drawn by our own code rather than model-written plugin JavaScript; board PNG exports for models with `vision`; survives a sleeping tab, a closed tab, a Penpot timeout and a failed export.
+- **T11 Design Gate** — per-document Verdicts, comments routed to the owning agent, Stale cascade, re-open on any change to an Approved Document, auto mode skips the Gate.
+
+### M3 — Build loop
+
+- **T12 Stack Profile v1** — React + Vite + Tailwind + react-router frontend, Express + Prisma backend, Vitest both sides, a test script emitting machine-readable results, and a 16-rule baseline Review Standard (`CLEAN/REUSE/STRUCT/TEST/SEC`). Verified by installing and testing the template for real (`STACK_PROFILE_LIVE=1`).
+- **T13 Sandbox client + Test Runs** — Base Snapshot per Stack Profile built once and reused, Test Run uploads only changed files, disposable runs, live tests behind `NEBIUS_LIVE=1`.
+- **T14 Workspace manager** — a git worktree per Coding Agent per Slice, merge into the run branch, Slice Commit only after a passing Test Run, discard unfinished worktrees, reset to a Slice Commit.
+- **T15 Coding Agents** — Backend and Frontend, file tools scoped to their Workspace and refused outside it, context per Model Capabilities, the application's file list up front, side-specific rules, source-only writes, and a `package.json` that cannot lose a dependency.
+- **T16 Testing Agent + Issue Reports** — Test Run results become Issue Reports with failing test, error, evidence, suspected owner and a signature for Loop detection.
+- **T17 Orchestrator** — Slice Plan execution, Owner resolution in the fixed order of diagram 7, Retry Budget of 3, Token Budget, Loop detection, Escalation with its four choices, and the auto-mode Failed path.
+- **Real runs** — `packages/core/scripts/realRun.ts` wires the real clients together and is how the product is exercised end to end. Latest result: **3 Slice Commits** of a todo app, each passing `install, unit, boot, smoke, stop` in the sandbox, in 11.7 minutes.
+
+### Proven by running it, not only by tests
+
+Eleven failures found by real Runs are fixed, each with a test and a comment recording the live origin: an empty Penpot label, `list_files(".")`, piped input, a sleeping tab, a closed tab, a Penpot timeout, a dropped connection, a call that never answered, discarded work, a missing Testing Library cleanup, and an agent downgrading vitest until `npm install` broke.
+
+---
+
+## In progress
+
+| Item | State | What is left |
+|---|---|---|
+| **T18 Checkpoints + resume** | Implemented with tests on `feat/checkpoints-resume`, both review axes done and their findings fixed. Not merged. | Open the PR and merge it. |
+| **Finishing a whole application in one Run** | Three Slices of five fit in a 2M Token Budget; the fourth runs out. Nothing is broken — it costs about 700k tokens per Slice. | With T18 merged, finish the demo app across resumed Runs (`--resume --budget`), or reduce per-Slice cost first. |
+| **Unowned install failures** | An Issue Report from a failed `install` step belongs to no owner, so it escalates and ends an auto-mode Run. The manifest guard removed the likeliest cause. | Route an install failure to whoever last wrote `package.json`. |
+| **Board images after a resume** | Deliberate: Penpot exports are not in a Checkpoint, so a resumed Run works from the UI Spec alone. | Decide whether to re-export from the board ids the `penpotDesign` document already keeps. |
+
+---
+
+## To do
+
+In the plan's order. Dates are from [docs/PLAN.md](docs/PLAN.md); M4 and M5 overlap by design.
+
+### M4 — Review & delivery
+
+- **T19 Linters + Code Review Agent** · Oct 9–10 — ESLint and `tsc --strict` in the sandbox as linter Findings; a Code Review Agent reviewing the diff against the layered Review Standard (the 16 baseline rules plus the user's `AGENTS.md`) and the Approved Documents. Every Finding cites a Rule ID; only blocking Findings send work back. The `codeReview` role and the `blockingFindings` event already exist and are unused, so the seams are in place.
+- **T20 PR Gate + Draft PR** · Oct 11–12 — push the run branch, open a PR carrying the non-blocking Findings, and a PR Gate to approve or request changes. An aborted or auto-failed Run opens a Draft PR containing only Slice Commits, and pushes nothing when there are none. The GitHub client, the git pusher and the PR text exist from T06 but nothing calls them yet.
+
+### M5 — Interfaces
+
+- **T21 Server API + SSE** · Oct 9–10 — a local-only API for runs, gates, verdicts, escalation decisions and abort, with an SSE stream per Run. `apps/server` is a NestJS app with only a health endpoint today, and this is also where "resume unfinished Runs on startup" belongs.
+- **T22 Dashboard: Runs + Run Overview** · Oct 11–13 — boards 01 and 02. `apps/web` is a Vite scaffold today.
+- **T23 Dashboard: Design Gate, PR Gate, Escalation** · Oct 14–15 — boards 03, 04 and 05.
+- **T24 CLI `sdlccode`** · Oct 16 — `run`, `gate show`, `gate approve`, `gate request-changes`, `status --follow`, `abort`. `apps/cli` handles `--help` and `--version` today.
+
+### M6 — Hardening & submission
+
+- **T25 End-to-end demo run** · Oct 17–20 — a full gated Run against `ChinGuang/sdlc-code-demo-todo`, with timings and token usage recorded.
+- **T26 README + compliance** · Oct 21–22 — setup and instructions, how Nemotron is used per agent, where Token Factory and Nebius Sandboxes are used, third-party licence checks, MPL 2.0 headers.
+- **T27 Demo video + submission** · Oct 23–25 — record the dashboard, the Penpot canvas filling live and the PR on GitHub, then submit.
+
+### Stretch, only after T25
+
+Playwright tests in the Stack Profile · deploying the server on Nebius AI Cloud · zip export with no Target Repo · self-hosted Penpot · parallel Slices · the sandbox tools as an MCP server.
+
+---
+
+## What the critical path looks like
+
+A Run today goes: request → design → Design Gate → Slices built, tested and committed → **and stops**, because `reviewing` and `awaitingPrGate` have nothing behind them. The single most valuable next piece is therefore **T20**, which turns Slice Commits into a pull request a person can read: that is the visible output the submission is judged on. **T19** makes that PR trustworthy, and **T21** is what any interface needs underneath it.
