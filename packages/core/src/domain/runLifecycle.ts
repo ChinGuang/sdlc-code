@@ -36,6 +36,12 @@ export type RunEvent =
   | { type: "allSlicesCommitted" }
   | { type: "blockingFindings" }
   | { type: "prOpened" }
+  /**
+   * Every Slice was skipped, so the Run finished its plan with no Slice Commit
+   * and there is no pull request to open (T20). Diagram 3 draws only the path
+   * where one is opened.
+   */
+  | { type: "nothingToDeliver" }
   | { type: "prChangesRequested" }
   | { type: "prApproved" }
   | { type: "limitHit"; trigger: EscalationTrigger }
@@ -98,6 +104,7 @@ export function nextRunStatus(
       case "reviewing":
         if (event.type === "blockingFindings") return "building";
         if (event.type === "prOpened") return gated ? "awaitingPrGate" : "done";
+        if (event.type === "nothingToDeliver") return "done";
         if (event.type === "limitHit" && REVIEW_LIMITS.has(event.trigger))
           return gated ? "escalated" : "failed";
         return null;

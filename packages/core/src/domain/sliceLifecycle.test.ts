@@ -11,6 +11,8 @@ const LEGAL: Array<[SliceStatus, SliceStatus]> = [
   ["testing", "passed"],
   ["building", "skipped"],
   ["testing", "skipped"],
+  // The PR Gate asked for changes, so a Slice that passed is built again.
+  ["passed", "building"],
 ];
 
 describe("assertSliceMove", () => {
