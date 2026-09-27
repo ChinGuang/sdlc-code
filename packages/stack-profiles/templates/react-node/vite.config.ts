@@ -13,10 +13,27 @@ export default defineConfig({
     },
   },
   test: {
-    // Screens need a DOM; the API and its tests belong in Node.
-    environment: "jsdom",
-    environmentMatchGlobs: [["server/**", "node"]],
-    include: ["server/**/*.test.ts", "src/**/*.test.tsx"],
-    setupFiles: ["./src/testSetup.ts"],
+    // Screens need a DOM and the React plugin; the API and its tests belong in
+    // Node. Two projects rather than one environment with exceptions, which is
+    // what Vitest asks for now.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "screens",
+          environment: "jsdom",
+          include: ["src/**/*.test.tsx"],
+          setupFiles: ["./src/testSetup.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "api",
+          environment: "node",
+          include: ["server/**/*.test.ts"],
+        },
+      },
+    ],
   },
 });

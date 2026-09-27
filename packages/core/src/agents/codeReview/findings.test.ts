@@ -12,7 +12,11 @@ import {
 
 const STANDARD: Rule[] = [
   { id: "SEC-01", description: "No secrets in code.", severity: "blocking" },
-  { id: "CLEAN-01", description: "Names say what a thing is.", severity: "minor" },
+  {
+    id: "CLEAN-01",
+    description: "Names say what a thing is.",
+    severity: "minor",
+  },
   { id: "TEST-02", description: "Every screen has a test.", severity: "major" },
 ];
 
@@ -98,13 +102,18 @@ describe("blocking and non-blocking Findings", () => {
   const findings: Finding[] = [
     { ...reported, severity: "blocking", source: "linter" },
     { ...reported, ruleId: "TEST-02", severity: "major", source: "codeReview" },
-    { ...reported, ruleId: "CLEAN-01", severity: "minor", source: "codeReview" },
+    {
+      ...reported,
+      ruleId: "CLEAN-01",
+      severity: "minor",
+      source: "codeReview",
+    },
   ];
 
   it("sends back only the blocking ones", () => {
-    expect(blockingFindings(findings).map((finding) => finding.ruleId)).toEqual([
-      "SEC-01",
-    ]);
+    expect(blockingFindings(findings).map((finding) => finding.ruleId)).toEqual(
+      ["SEC-01"],
+    );
   });
 
   it("carries the rest to the pull request", () => {
@@ -129,9 +138,9 @@ describe("how a Finding is read elsewhere", () => {
       message: "The API key is written in the source.",
       suggestion: "Read it from process.env.",
     });
-    expect(
-      asPullRequestFinding({ ...finding, line: 0 }).location,
-    ).toBe("server/app.ts");
+    expect(asPullRequestFinding({ ...finding, line: 0 }).location).toBe(
+      "server/app.ts",
+    );
   });
 
   it("reads as a problem to fix for a Coding Agent, Rule and all", () => {

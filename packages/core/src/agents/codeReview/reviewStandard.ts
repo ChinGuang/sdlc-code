@@ -74,10 +74,7 @@ export function layerReviewStandard(
   const overrides = new Map(userRules.map((rule) => [rule.id, rule]));
   const layered = baseline.map((rule) => overrides.get(rule.id) ?? rule);
   const baselineIds = new Set(baseline.map((rule) => rule.id));
-  return [
-    ...layered,
-    ...userRules.filter((rule) => !baselineIds.has(rule.id)),
-  ];
+  return [...layered, ...userRules.filter((rule) => !baselineIds.has(rule.id))];
 }
 
 /** Which of the user's Rules replaced a baseline one, for the Run's record. */

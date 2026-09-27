@@ -7,7 +7,11 @@ import {
 } from "./reviewStandard.js";
 
 const BASELINE: Rule[] = [
-  { id: "CLEAN-01", description: "Names say what the thing is.", severity: "minor" },
+  {
+    id: "CLEAN-01",
+    description: "Names say what the thing is.",
+    severity: "minor",
+  },
   { id: "SEC-01", description: "No secrets in code.", severity: "blocking" },
 ];
 
@@ -91,11 +95,19 @@ describe("parseUserRules", () => {
 describe("layerReviewStandard", () => {
   it("replaces a baseline Rule with the user's version of the same ID", () => {
     const layered = layerReviewStandard(BASELINE, [
-      { id: "CLEAN-01", description: "Names are full words.", severity: "major" },
+      {
+        id: "CLEAN-01",
+        description: "Names are full words.",
+        severity: "major",
+      },
     ]);
 
     expect(layered).toEqual([
-      { id: "CLEAN-01", description: "Names are full words.", severity: "major" },
+      {
+        id: "CLEAN-01",
+        description: "Names are full words.",
+        severity: "major",
+      },
       BASELINE[1],
     ]);
   });

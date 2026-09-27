@@ -71,7 +71,8 @@ export function nonBlockingFindings(findings: readonly Finding[]): Finding[] {
 export function asPullRequestFinding(finding: Finding): PullRequestFinding {
   return {
     ruleId: finding.ruleId,
-    location: finding.line > 0 ? `${finding.file}:${finding.line}` : finding.file,
+    location:
+      finding.line > 0 ? `${finding.file}:${finding.line}` : finding.file,
     message: finding.message,
     ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
   };

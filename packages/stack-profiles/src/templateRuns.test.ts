@@ -16,15 +16,21 @@ import {
   parseTestScriptOutput,
   TEST_STEPS,
 } from "./testScriptResult.js";
+import {
+  parseLintScriptOutput,
+  type LintScriptResult,
+} from "./lintScriptResult.js";
 
 const live = process.env.STACK_PROFILE_LIVE === "1";
 const run = promisify(execFile);
 const directories: string[] = [];
 
+// Deleting three installed copies of the application takes longer than a
+// hook's ten seconds, and leaving them behind fills the temp folder.
 afterAll(() => {
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
-});
+}, 300_000);
 
 function copyTemplate(): string {
   const directory = mkdtempSync(join(tmpdir(), "sdlc-template-"));
@@ -33,9 +39,20 @@ function copyTemplate(): string {
   return directory;
 }
 
-async function runTestScript(directory: string) {
-  const [command, ...args] = REACT_NODE.testCommand.split(" ");
+async function runLintScript(directory: string) {
+  const [command, ...args] = REACT_NODE.lintCommand.split(" ");
   const { stdout } = await run(command!, args, {
+    cwd: directory,
+    maxBuffer: 50 * 1024 * 1024,
+  }).catch((error: { stdout?: string; stderr?: string }) => ({
+    stdout: `${error.stdout ?? ""}${error.stderr ?? ""}`,
+  }));
+  return stdout;
+}
+
+async function runTestScript(directory: string, ...extra: string[]) {
+  const [command, ...args] = REACT_NODE.testCommand.split(" ");
+  const { stdout } = await run(command!, [...args, ...extra], {
     cwd: directory,
     maxBuffer: 50 * 1024 * 1024,
   }).catch((error: { stdout?: string; stderr?: string }) => ({
@@ -93,8 +110,66 @@ describe.runIf(live)("the template passes its own test script", () => {
   );
 });
 
-describe.runIf(!live)("the template test script", () => {
-  it("is skipped unless STACK_PROFILE_LIVE=1 (it installs dependencies)", () => {
+describe.runIf(live)("the template passes its own lint script", () => {
+  it(
+    "finds nothing in the template, and finds what a Coding Agent breaks",
+    { timeout: 900_000 },
+    async () => {
+      const directory = copyTemplate();
+      // The lint script does not install; a Test Run has already done it.
+      await runTestScript(directory, "--install-only");
+
+      const clean = parseLintScriptOutput(await runLintScript(directory));
+
+      expect(clean).not.toHaveProperty("problem");
+      const { result } = clean as Extract<typeof clean, { result: unknown }>;
+      expect(result.checks.map((check) => [check.name, check.ok])).toEqual([
+        ["eslint", true],
+        ["tsc", true],
+      ]);
+      expect(result.problems).toEqual([]);
+
+      // An unused import (ESLint) and a type error (tsc), in one file.
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(
+        join(directory, "src", "Broken.tsx"),
+        [
+          'import { useState } from "react";',
+          "",
+          "export function Broken() {",
+          '  const total: number = "three";',
+          "  return <p>{total}</p>;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      const broken = parseLintScriptOutput(await runLintScript(directory));
+      const found = (
+        broken as Extract<typeof broken, { result: LintScriptResult }>
+      ).result;
+
+      expect(found.checks.every((check) => check.ok)).toBe(false);
+      expect(
+        found.problems.map((problem) => [problem.tool, problem.file]),
+      ).toEqual(
+        expect.arrayContaining([
+          ["eslint", "src/Broken.tsx"],
+          ["tsc", "src/Broken.tsx"],
+        ]),
+      );
+      const typeError = found.problems.find(
+        (problem) => problem.tool === "tsc",
+      );
+      expect(typeError?.rule).toMatch(/^TS\d+$/);
+      expect(typeError?.line).toBeGreaterThan(0);
+    },
+  );
+});
+
+describe.runIf(!live)("the template scripts", () => {
+  it("are skipped unless STACK_PROFILE_LIVE=1 (they install dependencies)", () => {
     expect(REACT_NODE.testCommand).toBe("node scripts/sdlcTest.mjs");
+    expect(REACT_NODE.lintCommand).toBe("node scripts/sdlcLint.mjs");
   });
 });
