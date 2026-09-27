@@ -35,9 +35,10 @@ export type LinterFindings = {
 };
 
 /**
- * The Findings a Lint Run's result carries. A tool that could not run at all is
- * not silently a pass: the Orchestrator sees that through `brokenChecks`, so
- * this maps only what the tools actually reported.
+ * The Findings a Lint Run's result carries: only what the tools reported. A tool
+ * that could not run at all reported nothing, and the review says so separately
+ * (runReview.ts calls brokenChecks), because our own tooling failing is not a
+ * Finding against the application.
  */
 export function findingsFromLint(
   result: LintScriptResult,

@@ -40,13 +40,13 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Step** — One agent working on one Task until it hands back a result. A Step either completes or is discarded; an interrupted Step is redone from the last Slice Commit, never resumed mid-way.
 
-**Checkpoint** — Everything saved at a Step boundary that lets a Run continue after the system stops: Approved Documents, Slice plan, Task status, last Slice Commit, Issue Reports, Findings, Gate decisions, retry counts and Working Memory.
+**Checkpoint** — Everything saved at a Step boundary that lets a Run continue after the system stops: Approved Documents, Slice plan, Task status, last Slice Commit, Issue Reports, the blocking Findings a Slice was sent back to fix, Gate decisions, retry counts and Working Memory. Non-blocking Findings are not kept: they are written into the pull request instead.
 
 **Working Memory** — A short note an agent writes at the end of each Step (what was tried, what failed, what to try next). Given to the agent's fresh context on retry or resume so it does not repeat failed attempts.
 
 **Transcript** — The full record of an agent's messages and tool calls. For display and debugging only; never used to resume a Run.
 
-**Retry Budget** — How many times a Task may loop back after Issue Reports or blocking Findings before the Run escalates. Default 3.
+**Retry Budget** — How many times a Task may loop back after Issue Reports before the Run escalates, and separately how many times blocking Findings may send a Run's code back to be built again. Default 3 each.
 
 **Token Budget** — The maximum model usage a Run may spend before it escalates.
 
@@ -76,11 +76,13 @@ _Avoid_: "subagent" as a synonym for a specific agent role.
 
 **Stack Profile** — A supported target stack: the starter template, how it is tested, and its baseline Review Standards. One exists at launch.
 
-**Review Standard** — A layered set of Rules: the Stack Profile baseline, extended or overridden by the user's own standards.
+**Review Standard** — A layered set of Rules: the Stack Profile baseline, extended or overridden by the user's own standards, which they write in an `AGENTS.md` in their Target Repo under a "Review Standard" heading. A Rule with a baseline ID replaces it; a new ID is added.
 
 **Rule** — A single checkable requirement with an ID (e.g. `SEC-01`), a pass/fail test and a severity (minor, major, blocking).
 
-**Finding** — A Rule violation reported by linting or the Code Review Agent. Always cites a Rule ID. Only blocking Findings send work back.
+**Finding** — A Rule violation reported by linting or the Code Review Agent. Always cites a Rule ID, and takes that Rule's severity: a reporter cannot decide how serious its own Finding is. Only blocking Findings send work back.
+
+**Lint Run** — One sandbox run of a Stack Profile's lint script (ESLint and the TypeScript compiler) over the Slice Commits, whose complaints become Findings. Like a Test Run it only executes; the files come from the Workspace.
 
 **Target Repo** — The user's existing GitHub repository the Run delivers into via a feature branch and pull request.
 

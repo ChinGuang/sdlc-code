@@ -353,10 +353,13 @@ export class GitWorkspaceManager implements WorkspaceManager {
       "--no-color",
       `${await this.#commitOf(START_REF)}..${await this.lastSliceCommit()}`,
     ]);
-    const text = diff.stdout;
-    if (Buffer.byteLength(text) <= maxBytes) return text;
-    const kept = text.slice(0, maxBytes);
-    return `${kept.slice(0, kept.lastIndexOf("\n") + 1)}…(the diff is ${Buffer.byteLength(text)} bytes; cut here)\n`;
+    const bytes = Buffer.from(diff.stdout, "utf8");
+    if (bytes.byteLength <= maxBytes) return diff.stdout;
+    // Cut the bytes, then the partial line, and any half-written character the
+    // cut left behind (toString turns those into U+FFFD).
+    const kept = bytes.subarray(0, maxBytes).toString("utf8");
+    const whole = kept.slice(0, kept.lastIndexOf("\n") + 1).replace(/�/g, "");
+    return `${whole}…(the diff is ${bytes.byteLength} bytes; cut here)\n`;
   };
 
   readFiles = async (commit: string): Promise<TemplateFile[]> => {

@@ -1,53 +1,64 @@
 /**
  * The review seam over a real database: which Rules a Run reviews against, what
- * the linters contribute, and what is said out loud rather than passed quietly.
+ * the linters contribute, what the agent is told, and what is said out loud
+ * rather than passed off as a clean review.
  */
 import {
   BASELINE_RULES,
+  parseLintScriptOutput,
   REACT_NODE,
   type LintProblem,
   type TemplateFile,
 } from "@sdlc-code/stack-profiles";
 import { describe, expect, it } from "vitest";
-import type { CodeReviewAgent } from "../agents/codeReview/codeReviewAgent.js";
-import type { LintRunner, LintRunOutcome } from "../testRuns/lintRunner.js";
-import type { WorkspaceManager } from "../workspaces/workspaceManager.js";
+import type {
+  CodeReviewAgent,
+  CodeReviewInput,
+} from "../agents/codeReview/codeReviewAgent.js";
+import type { ReportedFinding } from "../agents/codeReview/findings.js";
 import { openDatabase } from "../persistence/database.js";
 import { SqliteDocumentStore } from "../persistence/documentStore.js";
 import { SqliteRunStore } from "../persistence/runStore.js";
-import { AgentRunReview, type RunReview } from "./runReview.js";
+import { lintOutput } from "../testRuns/fixtures/fakeSandbox.js";
+import type { LintRunner, LintRunOutcome } from "../testRuns/lintRunner.js";
 import { storedDesignDocuments } from "./fixtures/storedDocuments.js";
+import { AgentRunReview, type RunReview } from "./runReview.js";
 
 const FILES: TemplateFile[] = [
   { path: "src/App.tsx", contents: "export const App = () => null;\n" },
 ];
 
-const linted = (problems: LintProblem[]): LintRunOutcome => ({
-  status: "linted",
-  result: {
-    profile: "react-node",
-    checks: [
-      { name: "eslint", ok: problems.length === 0, durationMs: 1, output: "" },
-      { name: "tsc", ok: true, durationMs: 1, output: "" },
-    ],
-    problems,
-    durationMs: 2,
-  },
-  evidence: {
-    operationId: "op",
-    exitCode: problems.length === 0 ? 0 : 1,
-    timedOut: false,
-    durationSeconds: 1,
-    cost: 0,
-    log: "",
-    changedFiles: [],
-    removedFiles: [],
-    withheldFiles: [],
-  },
-});
+const EVIDENCE = {
+  operationId: "op",
+  exitCode: 0,
+  timedOut: false,
+  durationSeconds: 1,
+  cost: 0,
+  log: "",
+  changedFiles: [],
+  removedFiles: [],
+  withheldFiles: [],
+};
+
+/**
+ * A Lint Run built from the fixture the sandbox tests use and read back through
+ * the real parser, so a warning counts here exactly as the script reports one.
+ */
+function linted(
+  problems: Array<Partial<LintProblem> & { tool: "eslint" | "tsc" }>,
+): LintRunOutcome {
+  const parsed = parseLintScriptOutput(lintOutput(problems));
+  if ("problem" in parsed) throw new Error(parsed.problem);
+  return { status: "linted", result: parsed.result, evidence: EVIDENCE };
+}
 
 function setup(
-  options: { lint?: LintRunOutcome; userStandards?: string | null } = {},
+  options: {
+    lint?: LintRunOutcome;
+    userStandards?: string | null;
+    agentFindings?: ReportedFinding[];
+    stopReason?: "answered" | "tokenBudget";
+  } = {},
 ) {
   const db = openDatabase(":memory:");
   const store = { db };
@@ -72,27 +83,35 @@ function setup(
     readFiles: async () => FILES,
     runDiff: async () =>
       "diff --git a/src/App.tsx b/src/App.tsx\n+const d = 1;\n",
-  } as unknown as WorkspaceManager;
+  };
 
   const linters: LintRunner = {
     runLinters: async () => options.lint ?? linted([]),
   };
-  const reviewCalls: Array<{
-    standard: number;
-    diff: string;
-    linters: number;
-  }> = [];
+  const reviewCalls: CodeReviewInput[] = [];
   const agent: CodeReviewAgent = {
     review: async (input) => {
-      reviewCalls.push({
-        standard: input.standard.length,
-        diff: input.diff,
-        linters: input.linterFindings.length,
-      });
-      return { findings: [], unknownRuleIds: [], loop: loopResult() };
+      reviewCalls.push(input);
+      return {
+        findings: (options.agentFindings ?? []).map((finding) => ({
+          ...finding,
+          severity: "major" as const,
+          source: "codeReview" as const,
+        })),
+        unknownRuleIds: [],
+        loop: {
+          stopReason: options.stopReason ?? "answered",
+          answer: "Reviewed.",
+          workingMemory: "-",
+          iterations: 1,
+          toolCalls: 0,
+          failedToolCalls: 0,
+          usage: { promptTokens: 1, completionTokens: 1 },
+          error: null,
+        },
+      };
     },
   };
-  const problems: string[] = [];
   // Tests depend on the interface; only this factory knows the class.
   const review: RunReview = new AgentRunReview({
     documents,
@@ -101,31 +120,22 @@ function setup(
     linters,
     agent,
     userStandards: async () => options.userStandards ?? null,
-    onProblem: (problem) => problems.push(problem),
   });
-  return { review, run, problems, reviewCalls };
+  return { review, run, reviewCalls };
 }
 
-const loopResult = () => ({
-  stopReason: "answered" as const,
-  answer: "Reviewed.",
-  workingMemory: "-",
-  iterations: 1,
-  toolCalls: 0,
-  failedToolCalls: 0,
-  usage: { promptTokens: 1, completionTokens: 1 },
-  error: null,
-});
-
-describe("AgentRunReview.reviewStandard", () => {
+describe("AgentRunReview: the Rules it reviews against", () => {
   it("is the Stack Profile's baseline when the user has no standards", async () => {
-    const { review, run } = setup();
+    const { review, run, reviewCalls } = setup();
 
-    expect(await review.reviewStandard(run)).toEqual([...BASELINE_RULES]);
+    const result = await review.reviewRun(run);
+
+    expect(result.problems).toEqual([]);
+    expect(reviewCalls[0]?.standard).toEqual([...BASELINE_RULES]);
   });
 
   it("layers the user's AGENTS.md on top, and reports what it could not read", async () => {
-    const { review, run, problems } = setup({
+    const { review, run, reviewCalls } = setup({
       userStandards: [
         "## Review Standard",
         "- SEC-09 (blocking): No SQL built by hand.",
@@ -134,8 +144,9 @@ describe("AgentRunReview.reviewStandard", () => {
       ].join("\n"),
     });
 
-    const standard = await review.reviewStandard(run);
+    const result = await review.reviewRun(run);
 
+    const standard = reviewCalls[0]!.standard;
     expect(standard.find((rule) => rule.id === "LINT-02")?.severity).toBe(
       "blocking",
     );
@@ -144,12 +155,12 @@ describe("AgentRunReview.reviewStandard", () => {
       severity: "blocking",
       description: "No SQL built by hand.",
     });
-    expect(problems).toEqual([expect.stringContaining('"- Be nice."')]);
+    expect(result.problems).toEqual([expect.stringContaining('"- Be nice."')]);
   });
 });
 
-describe("AgentRunReview.runLinters", () => {
-  it("turns what the linters found into Findings of this Run's Rules", async () => {
+describe("AgentRunReview: what the linters contribute", () => {
+  it("turns what they found into Findings of this Run's Rules", async () => {
     const { review, run } = setup({
       lint: linted([
         {
@@ -163,7 +174,7 @@ describe("AgentRunReview.runLinters", () => {
       ]),
     });
 
-    const findings = await review.runLinters(run, BASELINE_RULES);
+    const { findings } = await review.reviewRun(run);
 
     expect(findings).toEqual([
       {
@@ -177,17 +188,33 @@ describe("AgentRunReview.runLinters", () => {
     ]);
   });
 
+  it("gives the agent what they found, and the diff, so it adds to them", async () => {
+    const { review, run, reviewCalls } = setup({
+      lint: linted([{ tool: "eslint", severity: "warning" }]),
+    });
+
+    await review.reviewRun(run);
+
+    expect(
+      reviewCalls[0]?.linterFindings.map((finding) => finding.ruleId),
+    ).toEqual(["LINT-02"]);
+    expect(reviewCalls[0]?.diff).toContain("+const d = 1;");
+    expect(reviewCalls[0]?.documents.systemDesign).toContain("# System Design");
+  });
+
   // Our own tooling failing is not the application's fault.
   it("says a broken Lint Run out loud and blocks nothing", async () => {
-    const { review, run, problems } = setup({
+    const { review, run } = setup({
       lint: {
         status: "broken",
         problem: "The lint script printed no SDLC_LINT line.",
-        evidence: linted([]).evidence,
+        evidence: EVIDENCE,
       },
     });
 
-    expect(await review.runLinters(run, BASELINE_RULES)).toEqual([]);
+    const { findings, problems } = await review.reviewRun(run);
+
+    expect(findings).toEqual([]);
     expect(problems).toEqual([
       expect.stringContaining("The linters did not run"),
     ]);
@@ -205,9 +232,9 @@ describe("AgentRunReview.runLinters", () => {
       },
       { name: "tsc", ok: true, durationMs: 1, output: "" },
     ];
-    const { review, run, problems } = setup({ lint: broken });
+    const { review, run } = setup({ lint: broken });
 
-    await review.runLinters(run, BASELINE_RULES);
+    const { problems } = await review.reviewRun(run);
 
     expect(problems).toEqual([
       expect.stringContaining("eslint failed without reporting anything"),
@@ -215,19 +242,42 @@ describe("AgentRunReview.runLinters", () => {
   });
 });
 
-describe("AgentRunReview.review", () => {
-  it("gives the agent the Run's Rules, its diff and what the linters found", async () => {
-    const { review, run, reviewCalls } = setup();
-    const findings = await review.runLinters(run, BASELINE_RULES);
+describe("AgentRunReview: what it says about itself", () => {
+  it("passes on the agent's Findings beside the linters'", async () => {
+    const { review, run } = setup({
+      lint: linted([{ tool: "eslint", severity: "warning" }]),
+      agentFindings: [
+        {
+          ruleId: "TEST-02",
+          file: "src/App.tsx",
+          line: 1,
+          message: "The screen has no test.",
+        },
+      ],
+    });
 
-    await review.review(run, BASELINE_RULES, findings);
+    const { findings } = await review.reviewRun(run);
 
-    expect(reviewCalls).toEqual([
-      {
-        standard: BASELINE_RULES.length,
-        diff: expect.stringContaining("+const d = 1;"),
-        linters: 0,
-      },
-    ]);
+    expect(findings.map((finding) => [finding.ruleId, finding.source])).toEqual(
+      [
+        ["LINT-02", "linter"],
+        ["TEST-02", "codeReview"],
+      ],
+    );
+  });
+
+  // A review that stopped early read part of the diff, so its silence is not
+  // evidence of anything; the Orchestrator has to be able to see that.
+  it("reports how the agent's Step ended", async () => {
+    const finished = setup();
+    expect((await finished.review.reviewRun(finished.run)).stopReason).toBe(
+      "answered",
+    );
+
+    const stopped = setup({ stopReason: "tokenBudget" });
+
+    expect((await stopped.review.reviewRun(stopped.run)).stopReason).toBe(
+      "tokenBudget",
+    );
   });
 });

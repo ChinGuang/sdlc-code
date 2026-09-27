@@ -252,16 +252,18 @@ if (flag("resume")) {
 }
 
 const uploaded = new Map<string, Promise<string>>();
+/**
+ * One Base Snapshot per Stack Profile, shared by the Test Runs and the Lint
+ * Runs: two of these would build the same snapshot twice and each keep a cache
+ * the other's discard cannot clear.
+ */
+const snapshots = new SandboxBaseSnapshots({
+  sandbox,
+  store: new SqliteSnapshotStore(store),
+  uploaded,
+});
 const sandboxTesting = new SandboxTestingAgent({
-  runner: new SandboxTestRunner({
-    sandbox,
-    snapshots: new SandboxBaseSnapshots({
-      sandbox,
-      store: new SqliteSnapshotStore(store),
-      uploaded,
-    }),
-    uploaded,
-  }),
+  runner: new SandboxTestRunner({ sandbox, snapshots, uploaded }),
 });
 
 /** The same Testing Agent, saying on the terminal what each Test Run found. */
@@ -355,21 +357,12 @@ const codeReview = new AgentRunReview({
   documents,
   workspaces,
   profile: () => REACT_NODE,
-  linters: new SandboxLintRunner({
-    sandbox,
-    snapshots: new SandboxBaseSnapshots({
-      sandbox,
-      store: new SqliteSnapshotStore(store),
-      uploaded,
-    }),
-    uploaded,
-  }),
+  linters: new SandboxLintRunner({ sandbox, snapshots, uploaded }),
   agent: new LoopCodeReviewAgent({
     createLoop: loopFor("codeReview", 12),
   }),
   userStandards: async () =>
     userStandardsFile ? readFileSync(userStandardsFile, "utf8") : null,
-  onProblem: (problem) => console.log(`  review: ${problem}`),
 });
 
 const orchestrator = new AgentRunOrchestrator({

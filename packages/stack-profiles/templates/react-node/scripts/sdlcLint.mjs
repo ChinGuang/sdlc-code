@@ -25,11 +25,33 @@ const OUTPUT_TAIL = 2000;
 const appDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 process.chdir(appDir);
 
-/** Runs a command to completion, capturing output, bounded by a timeout. */
+/** Kills a process and everything it started; a shell child is not enough. */
+function killTree(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+    });
+    return;
+  }
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
+}
+
+/**
+ * Runs a command to completion, capturing output, bounded by a timeout. npx
+ * starts the real tool as a child of its own, so the timeout kills the whole
+ * group: killing the wrapper alone would leave eslint or tsc running, which is
+ * the hang the timeout exists for (sdlcTest.mjs does the same).
+ */
 function run(command, args) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       shell: process.platform === "win32",
+      detached: process.platform !== "win32",
       env: process.env,
       // No stdin: a tool that asks a question must fail, not wait for ever.
       stdio: ["ignore", "pipe", "pipe"],
@@ -37,7 +59,7 @@ function run(command, args) {
     let out = "";
     let err = "";
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      killTree(child);
       err += `\nTimed out after ${CHECK_TIMEOUT_MS / 1000}s.`;
     }, CHECK_TIMEOUT_MS);
     child.stdout.on("data", (chunk) => (out += chunk));

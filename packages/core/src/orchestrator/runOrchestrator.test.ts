@@ -85,7 +85,15 @@ function setup(options: {
   /** What delivering the pull request does; it opens one by default. */
   delivery?: DeliveryOutcome;
   /** What the review finds; without it a Run is delivered unreviewed. */
-  review?: { linter?: Finding[]; agent?: Finding[]; unknownRuleIds?: string[] };
+  review?: {
+    linter?: Finding[];
+    agent?: Finding[];
+    unknownRuleIds?: string[];
+    /** How the agent's Step ended; "answered" unless a test says otherwise. */
+    stopReason?: AgentLoopResult["stopReason"];
+  };
+  /** Called per review: true once the Findings are meant to be gone. */
+  reviewsClean?: () => boolean;
   /** How often blocking Findings may send the code back. */
   reviewRetryBudget?: number;
   /**
@@ -185,15 +193,22 @@ function setup(options: {
 
   const reviews: Array<{ runId: string; standard: number }> = [];
   const codeReview: RunReview | undefined = options.review && {
-    reviewStandard: async () => [...BASELINE_RULES],
-    runLinters: async (run, standard) => {
-      reviews.push({ runId: run.id, standard: standard.length });
-      return options.review?.linter ?? [];
+    reviewRun: async (run) => {
+      reviews.push({ runId: run.id, standard: BASELINE_RULES.length });
+      const clean = options.reviewsClean?.() ?? false;
+      return {
+        findings: clean
+          ? []
+          : [
+              ...(options.review?.linter ?? []),
+              ...(options.review?.agent ?? []),
+            ],
+        stopReason: options.review?.stopReason ?? "answered",
+        problems: (options.review?.unknownRuleIds ?? []).map(
+          (id) => `The Code Review Agent cited ${id}, which nobody has.`,
+        ),
+      };
     },
-    review: async () => ({
-      findings: options.review?.agent ?? [],
-      unknownRuleIds: options.review?.unknownRuleIds ?? [],
-    }),
   };
   const reviewProblems: string[] = [];
 
@@ -375,8 +390,16 @@ describe("AgentRunOrchestrator: the review before the pull request (T19)", () =>
     // The last Slice was built again, told which Rule it broke and where.
     const again = context.runnerCalls.at(-1);
     expect(again?.slice.title).toBe("Todos");
-    expect(again?.hint).toContain("SEC-01 (blocking) in src/App.tsx:4");
-    expect(again?.hint).toContain("The API key is in the source.");
+    expect(again?.hint).toEqual({
+      from: "codeReview",
+      issues: [
+        {
+          summary:
+            "SEC-01 (blocking) in src/App.tsx:4: The API key is in the source.",
+          evidence: "The API key is in the source.",
+        },
+      ],
+    });
     // Nothing reaches the Target Repo while the review refuses it.
     expect(context.deliveries).toEqual([]);
   });
@@ -449,6 +472,57 @@ describe("AgentRunOrchestrator: the review before the pull request (T19)", () =>
     ]);
   });
 
+  // The path a Run is meant to take: the review refuses it, the Slice is fixed,
+  // the second review is clean and the pull request opens.
+  it("opens the pull request once a second review comes back clean", async () => {
+    let reviewed = 0;
+    const context = setup({
+      mode: "auto",
+      review: { agent: [finding({ ruleId: "SEC-01", severity: "blocking" })] },
+      reviewsClean: () => ++reviewed > 1,
+    });
+
+    await expect(context.orchestrator.advance(context.runId)).resolves.toEqual({
+      finished: "done",
+    });
+
+    expect(context.reviews).toHaveLength(2);
+    expect(context.deliveries).toEqual([
+      { runId: context.runId, reason: { ended: "complete", findings: [] } },
+    ]);
+  });
+
+  // A review that stopped early read part of the diff, so its silence says
+  // nothing; opening a pull request on it is the one thing this step prevents.
+  it("does not deliver on a review that ran out of Token Budget", async () => {
+    const context = setup({
+      mode: "auto",
+      review: { stopReason: "tokenBudget" },
+    });
+
+    await expect(context.orchestrator.advance(context.runId)).resolves.toEqual({
+      finished: "failed",
+    });
+
+    expect(context.runs.getRun(context.runId)?.failure).toMatchObject({
+      trigger: "tokenBudget",
+      summary: expect.stringContaining("did not finish"),
+    });
+    // Only the Draft PR of what passed, never the reviewed-looking one.
+    expect(context.deliveries).toEqual([
+      { runId: context.runId, reason: { ended: "failed", openDraftPr: true } },
+    ]);
+  });
+
+  it("does not deliver on a review that ran out of turns either", async () => {
+    const context = await approved({ review: { stopReason: "maxIterations" } });
+
+    const progress = await context.orchestrator.advance(context.runId);
+
+    expect(progress).toMatchObject({ waitingFor: "escalation" });
+    expect(context.deliveries).toEqual([]);
+  });
+
   it("says so when the review cited a Rule nobody has", async () => {
     const context = await approved({
       review: { unknownRuleIds: ["VIBES-01"] },
@@ -516,9 +590,15 @@ describe("AgentRunOrchestrator: the PR Gate (T20)", () => {
 
     await context.orchestrator.advance(context.runId);
 
-    expect(context.runnerCalls.at(-1)?.hint).toBe(
-      "The delete button needs a confirmation.",
-    );
+    expect(context.runnerCalls.at(-1)?.hint).toEqual({
+      from: "person",
+      issues: [
+        {
+          summary: "The delete button needs a confirmation.",
+          evidence: "The delete button needs a confirmation.",
+        },
+      ],
+    });
   });
 
   it("refuses a decision with nothing to change, and one with no Gate", async () => {
@@ -677,7 +757,15 @@ describe("AgentRunOrchestrator: resuming a Run (T18)", () => {
     const retry = context.runnerCalls
       .slice(1)
       .find((call) => call.slice.id === first)!;
-    expect(retry.hint).toBe("Validate the title before saving it.");
+    expect(retry.hint).toEqual({
+      from: "person",
+      issues: [
+        {
+          summary: "Validate the title before saving it.",
+          evidence: "Validate the title before saving it.",
+        },
+      ],
+    });
     expect(retry.history).toEqual(failed.history);
   });
 
@@ -852,7 +940,12 @@ describe("AgentRunOrchestrator: Escalations", () => {
     });
     expect(runnerCalls.at(-1)).toMatchObject({
       plan: { title: "Todos" },
-      hint: "Render the empty state before the fetch resolves.",
+      hint: {
+        from: "person",
+        issues: [
+          { evidence: "Render the empty state before the fetch resolves." },
+        ],
+      },
       history: HISTORY,
     });
   });

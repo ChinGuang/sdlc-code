@@ -10,7 +10,6 @@
  */
 import {
   commandSucceeded,
-  SandboxApiError,
   type RunResult,
   type SandboxClient,
 } from "@sdlc-code/clients";
@@ -22,7 +21,13 @@ import {
   type TemplateFile,
 } from "@sdlc-code/stack-profiles";
 import { describeRun, type BaseSnapshots } from "./baseSnapshots.js";
-import { planUpload, type TestRunEvidence } from "./testRunner.js";
+import {
+  isGone,
+  planUpload,
+  runEvidence,
+  type TestRunEvidence,
+  type UploadPlan,
+} from "./testRunner.js";
 import {
   SANDBOX_APP_DIR,
   shellQuote,
@@ -109,10 +114,7 @@ export class SandboxLintRunner implements LintRunner {
     return toOutcome(result, plan);
   };
 
-  async #run(
-    profile: StackProfile,
-    plan: ReturnType<typeof planUpload>,
-  ): Promise<RunResult> {
+  async #run(profile: StackProfile, plan: UploadPlan): Promise<RunResult> {
     const image = await this.#snapshots.snapshotImage(profile);
     return this.#sandbox.run(
       {
@@ -146,29 +148,8 @@ export function lintCommand(
   ].join(" && ");
 }
 
-/** The API no longer has something the run named. */
-function isGone(error: unknown): boolean {
-  return (
-    error instanceof SandboxApiError &&
-    (error.status === 404 || error.status === 410)
-  );
-}
-
-function toOutcome(
-  result: RunResult,
-  plan: ReturnType<typeof planUpload>,
-): LintRunOutcome {
-  const evidence: TestRunEvidence = {
-    operationId: result.operationId,
-    exitCode: result.exitCode,
-    timedOut: result.timedOut,
-    durationSeconds: result.durationSeconds,
-    cost: result.cost,
-    log: `${result.stdout}${result.stderr}`,
-    changedFiles: plan.changed.map((file) => file.path),
-    removedFiles: plan.removed,
-    withheldFiles: plan.withheld,
-  };
+function toOutcome(result: RunResult, plan: UploadPlan): LintRunOutcome {
+  const evidence: TestRunEvidence = runEvidence(result, plan);
   const parsed = parseLintScriptOutput(result.stdout);
   if ("problem" in parsed)
     return {

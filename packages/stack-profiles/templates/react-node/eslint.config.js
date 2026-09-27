@@ -18,8 +18,8 @@ export default tseslint.config(
       parserOptions: { ecmaVersion: 2023, sourceType: "module" },
     },
     rules: {
-      // Unused code is a Finding for CLEAN-02, and an argument named on purpose
-      // (a handler's event) is not.
+      // An unused local is a LINT-01 Finding; an argument named on purpose
+      // (a handler's event) is not, so a leading underscore excuses it.
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },

@@ -15,7 +15,7 @@ import { DOCUMENT_KINDS } from "../domain/documentLifecycle.js";
 import { TEST_STEPS } from "@sdlc-code/stack-profiles";
 import type { IssueReport } from "../agents/testing/issueReports.js";
 import type { Revision } from "./designGate.js";
-import type { SliceHistory } from "./sliceRunner.js";
+import type { SliceHint, SliceHistory } from "./sliceRunner.js";
 
 /**
  * `satisfies` is the link to IssueReport: a field added there and not here
@@ -52,9 +52,10 @@ const RevisionSchema = z.strictObject({
 });
 
 /**
- * A Checkpoint written by any other version of this shape is ignored rather
- * than guessed at, whether it is older or newer: the Run starts its current
- * Slice again, which is safe.
+ * The version of this shape. A Checkpoint that does not carry it, or carries
+ * another, is ignored rather than guessed at and the Run starts its current
+ * Slice again. Fields added since are read with a default, so a Checkpoint an
+ * earlier build of this version wrote is still usable.
  */
 export const CHECKPOINT_VERSION = 1;
 
@@ -64,8 +65,24 @@ export const CheckpointPayloadSchema = z.strictObject({
   revisions: z.array(RevisionSchema),
   /** What each unfinished Slice has already failed on, by Slice id. */
   histories: z.record(z.string(), SliceHistorySchema),
-  /** The hint an Escalation left for a Slice's next attempt, by Slice id. */
-  hints: z.record(z.string(), z.string()),
+  /**
+   * What each Slice is told to fix on its next attempt, by Slice id: an
+   * Escalation's hint, the PR Gate's comments, or blocking Findings. A hint
+   * a Checkpoint from before T19 wrote is a bare string, and is read as a
+   * person's, which is what it was.
+   */
+  hints: z.record(
+    z.string(),
+    z.union([
+      z.string(),
+      z.strictObject({
+        from: z.enum(["person", "codeReview"]),
+        issues: z.array(
+          z.strictObject({ summary: z.string(), evidence: z.string() }),
+        ),
+      }),
+    ]),
+  ),
   /**
    * How often blocking Findings have sent this Run's code back (T19). Counted
    * here because a Run that keeps failing its review must stop asking, and a
@@ -80,7 +97,7 @@ export type CheckpointPayload = z.infer<typeof CheckpointPayloadSchema>;
 export type RunMemoryState = {
   revisions: Revision[];
   histories: Map<string, SliceHistory>;
-  hints: Map<string, string>;
+  hints: Map<string, SliceHint>;
   reviewRetries: number;
 };
 
@@ -112,7 +129,12 @@ export function checkpointPayload(memory: RunMemoryState): CheckpointPayload {
         },
       ]),
     ),
-    hints: Object.fromEntries(memory.hints),
+    hints: Object.fromEntries(
+      [...memory.hints].map(([sliceId, hint]) => [
+        sliceId,
+        { from: hint.from, issues: hint.issues.map((issue) => ({ ...issue })) },
+      ]),
+    ),
     reviewRetries: memory.reviewRetries,
   };
 }
@@ -136,7 +158,17 @@ export function memoryFromCheckpoint(payload: unknown): RunMemoryState | null {
         },
       ]),
     ),
-    hints: new Map(Object.entries(parsed.data.hints)),
+    hints: new Map(
+      Object.entries(parsed.data.hints).map(([sliceId, hint]) => [
+        sliceId,
+        typeof hint === "string"
+          ? {
+              from: "person" as const,
+              issues: [{ summary: hint, evidence: hint }],
+            }
+          : { from: hint.from, issues: hint.issues },
+      ]),
+    ),
     reviewRetries: parsed.data.reviewRetries,
   };
 }

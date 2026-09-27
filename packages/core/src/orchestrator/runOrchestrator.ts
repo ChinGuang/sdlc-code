@@ -51,7 +51,7 @@ import {
   memoryFromCheckpoint,
   type RunMemoryState,
 } from "./runCheckpoint.js";
-import type { SliceCheckpoint, SliceRunner } from "./sliceRunner.js";
+import type { SliceCheckpoint, SliceHint, SliceRunner } from "./sliceRunner.js";
 import type { RunDelivery } from "../delivery/runDelivery.js";
 import {
   asCodingIssue,
@@ -227,7 +227,13 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     const memory = this.#memoryOf(runId);
     switch (resolution.choice) {
       case "retryWithHint":
-        if (current) memory.hints.set(current.id, resolution.hint);
+        if (current)
+          memory.hints.set(current.id, {
+            from: "person",
+            issues: [{ summary: resolution.hint, evidence: resolution.hint }],
+          });
+        // A person chose to try again, so the review gets its attempts back too.
+        memory.reviewRetries = 0;
         break;
       case "skipSlice":
         if (current) {
@@ -250,7 +256,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
   };
 
   decidePullRequest = (runId: string, decision: PullRequestDecision): void => {
-    const { runs, gates, slices } = this.#options;
+    const { runs, gates } = this.#options;
     if (decision.choice === "requestChanges" && !decision.comments.trim())
       throw new Error("Say what to change, or approve the pull request.");
     const gate = gates.getOpenGate(runId);
@@ -273,18 +279,11 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       this.#checkpoint(runId);
       return;
     }
-    // Diagram 8: the changes are a fix Task, so the last Slice is built again
-    // with the comments as its hint. Its Slice Commit stays until a new one
-    // replaces it.
-    const last = slices
-      .listSlices(runId)
-      .filter((slice) => slice.status === "passed")
-      .at(-1);
-    if (last) {
-      slices.moveSlice(last.id, "building");
-      this.#memoryOf(runId).hints.set(last.id, decision.comments);
-    }
-    this.#checkpoint(runId);
+    // Diagram 8: the changes are a fix Task, so the last Slice is built again.
+    this.#reopenLastSlice(runId, {
+      from: "person",
+      issues: [{ summary: decision.comments, evidence: decision.comments }],
+    });
   };
 
   /**
@@ -296,15 +295,31 @@ export class AgentRunOrchestrator implements RunOrchestrator {
    */
   async #review(run: Run): Promise<void> {
     const { runs, gates, delivery, codeReview } = this.#options;
-    const findings = codeReview ? await this.#findings(run) : [];
-    const blocking = blockingFindings(findings);
+    const reviewed = codeReview ? await codeReview.reviewRun(run) : null;
+    for (const problem of reviewed?.problems ?? [])
+      this.#options.onReviewProblem?.(problem);
+    const blocking = blockingFindings(reviewed?.findings ?? []);
     if (blocking.length > 0) {
       this.#sendBack(run, blocking);
       return;
     }
+    // A review that ran out of turns or Token Budget read part of the diff, so
+    // it has not said the code is good; opening a pull request on its silence
+    // would be the one thing this step exists to prevent.
+    if (reviewed && reviewed.stopReason !== "answered") {
+      this.#limit(
+        run,
+        reviewed.stopReason === "tokenBudget" ? "tokenBudget" : "retryBudget",
+        `The review did not finish (${reviewed.stopReason}), so the code is not reviewed.`,
+        [],
+      );
+      return;
+    }
     const outcome = await delivery.deliver(run.id, {
       ended: "complete",
-      findings: nonBlockingFindings(findings).map(asPullRequestFinding),
+      findings: nonBlockingFindings(reviewed?.findings ?? []).map(
+        asPullRequestFinding,
+      ),
     });
     // A Run whose every Slice was skipped finished its plan with nothing to
     // push, so there is no pull request and no Gate to hold it at.
@@ -316,28 +331,13 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     if (next.status === "awaitingPrGate") gates.openGate(run.id, "pr");
   }
 
-  /** What the linters and the Code Review Agent found, against this Run's Rules. */
-  async #findings(run: Run): Promise<Finding[]> {
-    const { codeReview, profile } = this.#options;
-    if (!codeReview) return [];
-    const standard = await codeReview.reviewStandard(run);
-    const lint = await codeReview.runLinters(run, standard);
-    const reviewed = await codeReview.review(run, standard, lint);
-    // A Rule ID nobody has is not a Finding, but it is worth knowing about.
-    for (const unknown of reviewed.unknownRuleIds)
-      this.#options.onReviewProblem?.(
-        `The Code Review Agent cited ${unknown}, which the Review Standard of ${profile(run).name} does not have.`,
-      );
-    return [...lint, ...reviewed.findings];
-  }
-
   /**
    * Blocking Findings are a fix Task (diagram 8): the last Slice is built again
    * with them, as the PR Gate's changes are. The Run leaves reviewing, so the
    * review runs again once the Slice passes.
    */
   #sendBack(run: Run, blocking: readonly Finding[]): void {
-    const { runs, slices } = this.#options;
+    const { runs } = this.#options;
     const memory = this.#memoryOf(run.id);
     const budget = this.#options.reviewRetryBudget ?? DEFAULT_REVIEW_RETRIES;
     // A review that keeps refusing the same code must stop asking, or a Run
@@ -355,20 +355,27 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     }
     memory.reviewRetries++;
     runs.applyEvent(run.id, { type: "blockingFindings" });
-    const last = slices
-      .listSlices(run.id)
+    this.#reopenLastSlice(run.id, {
+      from: "codeReview",
+      issues: blocking.map(asCodingIssue),
+    });
+  }
+
+  /**
+   * Building the last Slice again with something to fix, which is what both a
+   * blocking Finding and the PR Gate's requested changes come down to. Its
+   * Slice Commit stays on the run branch until the new attempt earns one.
+   */
+  #reopenLastSlice(runId: string, hint: SliceHint): void {
+    const last = this.#options.slices
+      .listSlices(runId)
       .filter((slice) => slice.status === "passed")
       .at(-1);
     if (last) {
-      slices.moveSlice(last.id, "building");
-      memory.hints.set(
-        last.id,
-        blocking
-          .map((finding) => `- ${asCodingIssue(finding).summary}`)
-          .join("\n"),
-      );
+      this.#options.slices.moveSlice(last.id, "building");
+      this.#memoryOf(runId).hints.set(last.id, hint);
     }
-    this.#checkpoint(run.id);
+    this.#checkpoint(runId);
   }
 
   /**

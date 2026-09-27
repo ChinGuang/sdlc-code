@@ -10,6 +10,7 @@
 import type { Rule, RuleSeverity } from "@sdlc-code/stack-profiles";
 import { z } from "zod";
 import type { PullRequestFinding } from "../../delivery/pullRequestText.js";
+import type { CodingIssue } from "../coding/codingContext.js";
 
 /** What a reporter says; the severity is looked up from the Rule. */
 export const ReportedFindingSchema = z.strictObject({
@@ -82,10 +83,7 @@ export function asPullRequestFinding(finding: Finding): PullRequestFinding {
  * What a Coding Agent is told to fix, in the shape Issue Reports already use
  * (codingContext.ts), so a Finding and a failing test read the same way.
  */
-export function asCodingIssue(finding: Finding): {
-  summary: string;
-  evidence: string;
-} {
+export function asCodingIssue(finding: Finding): CodingIssue {
   const where =
     finding.line > 0 ? `${finding.file}:${finding.line}` : finding.file;
   return {
