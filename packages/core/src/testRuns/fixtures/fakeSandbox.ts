@@ -5,7 +5,12 @@ import type {
   SandboxClient,
   SpawnRequest,
 } from "@sdlc-code/clients";
-import { RESULT_MARKER, type TestStep } from "@sdlc-code/stack-profiles";
+import {
+  LINT_MARKER,
+  RESULT_MARKER,
+  type LintProblem,
+  type TestStep,
+} from "@sdlc-code/stack-profiles";
 
 export type FakeSandbox = SandboxClient & {
   uploads: string[];
@@ -71,6 +76,37 @@ export function ranOk(overrides: Partial<RunResult> = {}): RunResult {
 }
 
 /** What the Stack Profile's test script prints for these step outcomes. */
+/** A lint script's output: noise, then its one SDLC_LINT line. */
+export function lintOutput(
+  problems: Array<Partial<LintProblem> & Pick<LintProblem, "tool">>,
+  checks?: Array<{ name: LintProblem["tool"]; ok: boolean; output?: string }>,
+): string {
+  const result = {
+    profile: "react-node",
+    checks: (
+      checks ?? [
+        { name: "eslint" as const, ok: !problems.some(isError) },
+        { name: "tsc" as const, ok: !problems.some((p) => p.tool === "tsc") },
+      ]
+    ).map((check) => ({ durationMs: 1, output: "", ...check })),
+    problems: problems.map((problem) => ({
+      severity: "error" as const,
+      file: "src/App.tsx",
+      line: 3,
+      rule: "no-unused-vars",
+      message: "'x' is defined but never used.",
+      ...problem,
+    })),
+    durationMs: 5,
+  };
+  return `eslint chatter
+${LINT_MARKER}${JSON.stringify(result)}
+`;
+}
+
+const isError = (problem: { tool: string; severity?: string }) =>
+  problem.tool === "eslint" && (problem.severity ?? "error") === "error";
+
 export function scriptOutput(
   steps: Array<Partial<TestStep> & Pick<TestStep, "name" | "ok">>,
 ): string {

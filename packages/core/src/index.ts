@@ -1,4 +1,7 @@
 export * from "./agentRoles.js";
+export * from "./agents/codeReview/reviewStandard.js";
+export * from "./agents/codeReview/linterFindings.js";
+export * from "./agents/codeReview/findings.js";
 export * from "./agentLoop/agentLoop.js";
 export * from "./agentLoop/tools.js";
 export * from "./agentLoop/storeAdapters.js";
@@ -37,6 +40,7 @@ export {
 } from "./testRuns/sandboxFiles.js";
 export * from "./testRuns/baseSnapshots.js";
 export * from "./testRuns/testRunner.js";
+export * from "./testRuns/lintRunner.js";
 export * from "./workspaces/git.js";
 export * from "./workspaces/workspaceManager.js";
 export * from "./agents/coding/workspaceFiles.js";

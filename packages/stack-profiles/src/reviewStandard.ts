@@ -18,6 +18,7 @@ export type Rule = {
 
 /** Rule families: what each prefix covers. */
 export const RULE_FAMILIES = {
+  LINT: "What a linter or the compiler can see for itself",
   CLEAN: "Readable code: names, size, dead code",
   REUSE: "Reuse what exists instead of duplicating it",
   STRUCT: "Where code lives and what may depend on what",
@@ -26,6 +27,26 @@ export const RULE_FAMILIES = {
 } as const;
 
 export const BASELINE_RULES: readonly Rule[] = [
+  // The linters report against these three (T19): a tool's own rule name goes
+  // in the Finding's message, so one Rule per tool and severity is enough.
+  {
+    id: "LINT-01",
+    description:
+      "ESLint reports no error; its rule name says which one and where.",
+    severity: "blocking",
+  },
+  {
+    id: "LINT-02",
+    description:
+      "ESLint reports no warning; fix it, or turn the rule off deliberately.",
+    severity: "minor",
+  },
+  {
+    id: "LINT-03",
+    description:
+      "The application compiles: tsc --strict reports no error, in application code or tests.",
+    severity: "blocking",
+  },
   {
     id: "CLEAN-01",
     description:
