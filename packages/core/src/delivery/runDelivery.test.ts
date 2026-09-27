@@ -16,8 +16,8 @@ import { SqliteTaskStore } from "../persistence/taskStore.js";
 import type { WorkspaceManager } from "../workspaces/workspaceManager.js";
 import { GitHubRunDelivery, type RunDelivery } from "./runDelivery.js";
 
-/** What the Workspace manager was asked to do, in order. */
-type GitCall = "discardUnfinished" | "resetToSliceCommit";
+/** What happened to the repository, in order, including the push. */
+type Step = "discardUnfinished" | "push";
 
 function setup(options: { commits?: string[] } = {}) {
   const db = openDatabase(":memory:");
@@ -38,22 +38,20 @@ function setup(options: { commits?: string[] } = {}) {
     tokenBudget: 1_000_000,
   });
 
-  const gitCalls: GitCall[] = [];
+  const steps: Step[] = [];
   let commits = options.commits ?? ["commit-1"];
   const workspaces = {
     sliceCommits: async () => commits,
     lastSliceCommit: async () => commits.at(-1) ?? "start",
     discardUnfinished: async () => {
-      gitCalls.push("discardUnfinished");
-    },
-    resetToSliceCommit: async () => {
-      gitCalls.push("resetToSliceCommit");
+      steps.push("discardUnfinished");
     },
   } as unknown as WorkspaceManager;
 
   const pushes: PushRequest[] = [];
   const pusher: GitPusher = {
     push: async (request) => {
+      steps.push("push");
       pushes.push(request);
     },
   };
@@ -92,7 +90,7 @@ function setup(options: { commits?: string[] } = {}) {
     slices,
     tasks,
     run,
-    gitCalls,
+    steps,
     pushes,
     opened,
     setCommits: (next: string[]) => {
@@ -144,14 +142,13 @@ describe("GitHubRunDelivery: a Run that built every Slice", () => {
         repoDir: "/runs/1/repo.git",
         repo: context.run.targetRepo,
         branch: "sdlc/todo",
-        force: false,
       },
     ]);
     expect(context.opened[0]?.draft).toBe(false);
     expect(context.opened[0]?.body).toContain("CLEAN-01");
     expect(context.opened[0]?.body).toContain("- [x] Walking Skeleton");
     // Nothing is thrown away when every Slice passed.
-    expect(context.gitCalls).toEqual([]);
+    expect(context.steps).toEqual(["push"]);
   });
 
   it("records the pull request on the Run", async () => {
@@ -194,12 +191,8 @@ describe("GitHubRunDelivery: a Run that stopped early (diagram 3b)", () => {
     });
 
     expect(outcome).toMatchObject({ status: "opened" });
-    // Tidying happens before the push, never after it.
-    expect(context.gitCalls).toEqual([
-      "discardUnfinished",
-      "resetToSliceCommit",
-    ]);
-    expect(context.pushes[0]?.force).toBe(true);
+    // The unfinished work is gone before anything is pushed, never after.
+    expect(context.steps).toEqual(["discardUnfinished", "push"]);
     const [pull] = context.opened;
     expect(pull?.draft).toBe(true);
     expect(pull?.body).toContain("- [x] Walking Skeleton");
@@ -258,7 +251,7 @@ describe("GitHubRunDelivery: a Run that stopped early (diagram 3b)", () => {
       status: "keptLocal",
       reason: "draftPrDeclined",
     });
-    expect(context.gitCalls).toEqual([]);
+    expect(context.steps).toEqual([]);
     expect(context.pushes).toEqual([]);
     expect(context.opened).toEqual([]);
     expect(context.runs.getRun(context.run.id)?.pullRequest).toBeNull();
@@ -280,10 +273,7 @@ describe("GitHubRunDelivery: a Run that stopped early (diagram 3b)", () => {
     expect(context.pushes).toEqual([]);
     expect(context.opened).toEqual([]);
     // It still tidied up: the unfinished work is not kept either way.
-    expect(context.gitCalls).toEqual([
-      "discardUnfinished",
-      "resetToSliceCommit",
-    ]);
+    expect(context.steps).toEqual(["discardUnfinished"]);
   });
 });
 
@@ -308,6 +298,17 @@ describe("GitHubRunDelivery: a branch that already has a pull request", () => {
     expect(context.runs.getRun(context.run.id)?.pullRequest).toMatchObject({
       number: 7,
     });
+  });
+});
+
+describe("GitHubRunDelivery and its collaborators' tokens", () => {
+  it("never exposes the clients it pushes and opens pull requests with", () => {
+    const { delivery } = setup();
+
+    expect(Object.keys(delivery)).toEqual(["deliver"]);
+    expect(JSON.stringify(delivery)).toBe("{}");
+    expect("pusher" in delivery).toBe(false);
+    expect("github" in delivery).toBe(false);
   });
 });
 

@@ -88,6 +88,10 @@ const mode = flag("auto") ? "auto" : "gated";
  * GitHub access (T20).
  */
 const targetRepo = value("repo");
+if (targetRepo && !/^[\w.-]+\/[\w.-]+$/.test(targetRepo)) {
+  console.error(`--repo must be "owner/name", not "${targetRepo}".`);
+  process.exit(1);
+}
 const tokenBudget = Number(value("budget") ?? 2_000_000);
 const dataDir =
   value("data") ??
@@ -152,6 +156,8 @@ function runToResume() {
   return value("budget") ? runs.setTokenBudget(found.id, tokenBudget) : found;
 }
 const runDir = join(dataDir, run.id);
+/** The one repository the Slices are built in, tested from and pushed from. */
+const repoDir = join(runDir, "repo.git");
 console.log(
   `Run ${run.id} (${run.mode}, ${run.tokensUsed.toLocaleString()} of ${run.tokenBudget.toLocaleString()} tokens spent)
   ${run.projectRequest}
@@ -218,7 +224,7 @@ console.log(`  Penpot file "${file.file}"`);
 const pageName = runPageName(`#${run.id.slice(0, 8)}`, projectRequest);
 
 const workspaces = new GitWorkspaceManager({
-  repoDir: join(runDir, "repo.git"),
+  repoDir,
   runBranch: run.targetRepo.runBranch,
   workspacesDir: join(runDir, "workspaces"),
 });
@@ -318,7 +324,7 @@ const delivery: RunDelivery = githubToken
       slices,
       tasks,
       workspaces,
-      repoDir: join(runDir, "repo.git"),
+      repoDir,
       pusher: new TokenGitPusher({ token: githubToken }),
       github: new RestGitHubClient({ token: githubToken }),
     })
@@ -329,7 +335,7 @@ const delivery: RunDelivery = githubToken
             ? "  no --repo: the Slice Commits stay in the local repository"
             : `  no --repo: nothing pushed (${reason.ended})`,
         );
-        return { status: "keptLocal", reason: "noSliceCommit" };
+        return { status: "keptLocal", reason: "noTargetRepo" };
       },
     };
 
@@ -523,23 +529,17 @@ try {
       await resolveEscalation(progress.escalation.summary);
       continue;
     }
-    if (progress.waitingFor === "prGate") {
-      await decidePullRequest(progress.pullRequest);
-      continue;
-    }
-    // Code review is T19; the Slices are built and the pull request is open.
-    console.log(`Waiting for ${progress.waitingFor}: the Slices are built.`);
-    break;
+    await decidePullRequest(progress.pullRequest);
   }
   const commits = await workspaces.sliceCommits();
   console.log(
-    `\n${commits.length} Slice Commit${commits.length === 1 ? "" : "s"} in ${join(runDir, "repo.git")} on ${run.targetRepo.runBranch}`,
+    `\n${commits.length} Slice Commit${commits.length === 1 ? "" : "s"} in ${repoDir} on ${run.targetRepo.runBranch}`,
   );
   console.log(
-    `  See them: git --git-dir="${join(runDir, "repo.git")}" log --stat ${run.targetRepo.runBranch}`,
+    `  See them: git --git-dir="${repoDir}" log --stat ${run.targetRepo.runBranch}`,
   );
   console.log(
-    `  Try the app: git clone "${join(runDir, "repo.git")}" app && cd app && npm install && npm run dev`,
+    `  Try the app: git clone "${repoDir}" app && cd app && npm install && npm run dev`,
   );
 } finally {
   ask.close();

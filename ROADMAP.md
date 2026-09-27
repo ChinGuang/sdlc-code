@@ -16,7 +16,7 @@ The whole pipeline works end to end against the real world — Nemotron on Token
 | M1 Foundation | Done | PRs #4–#9 |
 | M2 Design Phase | Done | PRs #10–#12 |
 | M3 Build loop | Done (T18 in review) | PRs #13–#21, #23 |
-| M4 Review & delivery | Not started | — |
+| M4 Review & delivery | T20 done, T19 next | PR #26 |
 | M5 Interfaces | Scaffolds only | PRs #4, #6 |
 | M6 Hardening & submission | Not started | — |
 
@@ -38,7 +38,7 @@ Everything here is merged into `main`, has tests, and has been exercised by a re
 
 - **T04 Monorepo** — pnpm workspaces (`packages/core`, `packages/clients`, `packages/stack-profiles`, `apps/server`, `apps/web`, `apps/cli`), TypeScript strict, ESLint enforcing [CODING_STANDARDS.md](CODING_STANDARDS.md), Prettier, Vitest projects, GitHub Actions in `.github/workflows/ci.yml`.
 - **T05 Token Factory client + agent config** — `packages/clients/src/tokenFactory`: completions, streaming, tool calls, JSON-schema output, usage and pricing. `packages/core/src/config/agentConfig.ts`: per-role model and Model Capabilities, overridable by file and by `SDLC_MODEL_*`.
-- **T06 GitHub client** — `packages/clients/src/github`: branch, push, PR and draft PR; `packages/core/src/delivery/pullRequestText.ts` for the description. Built but **not yet used by a Run** (that is T20).
+- **T06 GitHub client** — `packages/clients/src/github`: branch, push, PR and draft PR; `packages/core/src/delivery/pullRequestText.ts` for the description. Used by T20, which is how a Run delivers its work.
 - **T07 Domain model + persistence** — entities from UML diagram 2; Run and Document lifecycles as pure functions (diagrams 3 and 4); SQLite with migrations per [ADR 0003](docs/adr/0003-better-sqlite3-for-persistence.md); stores for runs, documents, gates, slices, tasks, steps, escalations, snapshots and checkpoints.
 - **T08 Agent loop** — `packages/core/src/agentLoop`: tool registry, iteration cap, Transcript, Token Budget accounting, Working Memory note, retries for rate limits, server errors, dropped connections and timeouts, and prompt trimming so a Step's cost does not grow with the square of its turns.
 
@@ -57,6 +57,10 @@ Everything here is merged into `main`, has tests, and has been exercised by a re
 - **T16 Testing Agent + Issue Reports** — Test Run results become Issue Reports with failing test, error, evidence, suspected owner and a signature for Loop detection.
 - **T17 Orchestrator** — Slice Plan execution, Owner resolution in the fixed order of diagram 7, Retry Budget of 3, Token Budget, Loop detection, Escalation with its four choices, and the auto-mode Failed path.
 - **Real runs** — `packages/core/scripts/realRun.ts` wires the real clients together and is how the product is exercised end to end. Latest result: **3 Slice Commits** of a todo app, each passing `install, unit, boot, smoke, stop` in the sandbox, in 11.7 minutes.
+
+### M4 — Review & delivery
+
+- **T20 PR Gate + Draft PR** — a Run that built every Slice pushes its run branch and opens a pull request, then waits at the PR Gate; approve finishes it, request changes builds the last Slice again with the comments. A Run that stopped early offers a Draft PR of only what passed a Test Run, proved against real git by reading the pushed commits. Nothing is pushed when a person declines it or when no Slice passed. The Findings in the description are empty until T19.
 
 ### Proven by running it, not only by tests
 
@@ -82,7 +86,6 @@ In the plan's order. Dates are from [docs/PLAN.md](docs/PLAN.md); M4 and M5 over
 ### M4 — Review & delivery
 
 - **T19 Linters + Code Review Agent** · Oct 9–10 — ESLint and `tsc --strict` in the sandbox as linter Findings; a Code Review Agent reviewing the diff against the layered Review Standard (the 16 baseline rules plus the user's `AGENTS.md`) and the Approved Documents. Every Finding cites a Rule ID; only blocking Findings send work back. The `codeReview` role and the `blockingFindings` event already exist and are unused, so the seams are in place.
-- **T20 PR Gate + Draft PR** · Oct 11–12 — push the run branch, open a PR carrying the non-blocking Findings, and a PR Gate to approve or request changes. An aborted or auto-failed Run opens a Draft PR containing only Slice Commits, and pushes nothing when there are none. The GitHub client, the git pusher and the PR text exist from T06 but nothing calls them yet.
 
 ### M5 — Interfaces
 
@@ -105,4 +108,4 @@ Playwright tests in the Stack Profile · deploying the server on Nebius AI Cloud
 
 ## What the critical path looks like
 
-A Run today goes: request → design → Design Gate → Slices built, tested and committed → **and stops**, because `reviewing` and `awaitingPrGate` have nothing behind them. The single most valuable next piece is therefore **T20**, which turns Slice Commits into a pull request a person can read: that is the visible output the submission is judged on. **T19** makes that PR trustworthy, and **T21** is what any interface needs underneath it.
+A Run now goes: request → design → Design Gate → Slices built, tested and committed → pull request → PR Gate → done, with a Draft PR of what it finished when it stops early (T20). What that pull request still lacks is the review that makes it trustworthy: **T19** puts ESLint, `tsc --strict` and the Code Review Agent in front of it, and its Findings into the description, which is the next thing worth doing. **T21** is then what any interface needs underneath it.

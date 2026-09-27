@@ -254,6 +254,7 @@ stateDiagram-v2
     Testing --> SliceInProgress : issue routed to Coding Agent
     Testing --> SliceCommitted : Test Run passed
     SliceCommitted --> SliceInProgress : next slice
+    SliceCommitted --> SliceInProgress : PR Gate asked for changes
     SliceCommitted --> [*] : last slice
   }
 
@@ -262,6 +263,7 @@ stateDiagram-v2
   Reviewing --> Building : blocking findings
   Reviewing --> AwaitingPRGate : PR opened (gated)
   Reviewing --> Done : PR opened (auto)
+  Reviewing --> Done : nothing to deliver (every slice skipped, or nowhere to push)
   AwaitingPRGate --> Building : changes requested
   AwaitingPRGate --> Done : approved
 
@@ -282,6 +284,8 @@ stateDiagram-v2
 
 Applies to an auto-mode failure and to an abort with "Open draft PR" ticked. Only Slice Commits are pushed; the unfinished Slice's worktrees are discarded and never merged into the run branch.
 
+The run branch needs no repair: only a passing Test Run ever moves it, so it is already at the last Slice Commit. That is why the implementation discards the worktrees and pushes, without a reset.
+
 ```mermaid
 sequenceDiagram
   autonumber
@@ -298,8 +302,7 @@ sequenceDiagram
     O->>O: fail(openDraftPr = true)
   end
   O->>W: discard backend + frontend worktrees of unfinished Slice
-  O->>W: reset run branch to last Slice Commit
-  W-->>O: run branch = Slice Commits only
+  W-->>O: run branch = Slice Commits only (it never held anything else)
   alt openDraftPr and at least one Slice Commit
     O->>G: push run branch
     O->>G: open draft PR "[Aborted] or [Failed] title — N of M slices"

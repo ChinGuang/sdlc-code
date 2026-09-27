@@ -37,9 +37,10 @@ export type RunEvent =
   | { type: "blockingFindings" }
   | { type: "prOpened" }
   /**
-   * Every Slice was skipped, so the Run finished its plan with no Slice Commit
-   * and there is no pull request to open (T20). Diagram 3 draws only the path
-   * where one is opened.
+   * The Run finished its plan but has no pull request to show for it: every
+   * Slice was skipped, or there is nowhere to push. It cannot wait at a Gate
+   * for a pull request that does not exist (T20); diagram 3 draws only the
+   * path where one is opened.
    */
   | { type: "nothingToDeliver" }
   | { type: "prChangesRequested" }
@@ -56,6 +57,7 @@ export const RUN_EVENT_TYPES = [
   "allSlicesCommitted",
   "blockingFindings",
   "prOpened",
+  "nothingToDeliver",
   "prChangesRequested",
   "prApproved",
   "limitHit",

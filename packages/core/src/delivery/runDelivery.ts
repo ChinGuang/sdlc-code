@@ -5,8 +5,8 @@
  * non-blocking Findings. A Run that stopped early — aborted by a person with
  * "Open draft PR" ticked, or failed in auto mode — opens a Draft PR instead,
  * and only ever with code that passed a Test Run: the unfinished Slice's
- * Workspaces are discarded and the run branch is put back at the last Slice
- * Commit before anything is pushed.
+ * Workspaces are discarded before anything is pushed. The run branch itself
+ * needs no repair, because only a passing Test Run ever moves it.
  *
  * Nothing is pushed when there is no Slice Commit, or when the person said not
  * to. A Run's work then stays in its local repository, where it already is.
@@ -33,7 +33,10 @@ export type DeliveryReason =
 export type DeliveryOutcome =
   | { status: "opened"; pullRequest: PullRequest }
   /** Nothing was pushed, and why not; the Run's work stays local. */
-  | { status: "keptLocal"; reason: "noSliceCommit" | "draftPrDeclined" };
+  | {
+      status: "keptLocal";
+      reason: "noSliceCommit" | "draftPrDeclined" | "noTargetRepo";
+    };
 
 /** Opens the pull request a Run's work belongs in. */
 export interface RunDelivery {
@@ -48,7 +51,7 @@ export type RunDeliveryOptions = {
   workspaces: WorkspaceManager;
   pusher: GitPusher;
   github: GitHubClient;
-  /** The local repository directory, for the push. */
+  /** The repository the Workspaces are in, which is what gets pushed. */
   repoDir: string;
 };
 
@@ -66,31 +69,29 @@ export class GitHubRunDelivery implements RunDelivery {
     const { runs, workspaces, pusher, repoDir } = this.#options;
     const run = runs.getRun(runId);
     if (!run) throw new Error(`No Run ${runId} to deliver.`);
-    if (reason.ended !== "complete" && !reason.openDraftPr)
+    const stoppedEarly = reason.ended !== "complete";
+    if (stoppedEarly && !reason.openDraftPr)
       return { status: "keptLocal", reason: "draftPrDeclined" };
 
-    // Diagram 3b: the unfinished Slice never reaches the Target Repo. Tidying
+    // Diagram 3b: the unfinished Slice never reaches the Target Repo. Discarding
     // before counting means the count is of what will actually be pushed.
-    if (reason.ended !== "complete") await this.#keepOnlySliceCommits();
+    if (stoppedEarly) await workspaces.discardUnfinished();
     const commits = await workspaces.sliceCommits();
     if (commits.length === 0)
       return { status: "keptLocal", reason: "noSliceCommit" };
 
-    const outcome = this.#outcome(run, reason);
+    const content = this.#pullRequestContent(run, reason);
     await pusher.push({
       repoDir,
       repo: run.targetRepo,
       branch: run.targetRepo.runBranch,
-      // The branch may have been reset to an earlier Slice Commit.
-      force: reason.ended !== "complete",
     });
-    const draft = reason.ended !== "complete";
     const pullRequest = await this.#openOrReuse(run, {
       head: run.targetRepo.runBranch,
       base: run.targetRepo.baseBranch,
-      title: pullRequestTitle(outcome),
-      body: pullRequestBody(outcome),
-      draft,
+      title: pullRequestTitle(content),
+      body: pullRequestBody(content),
+      draft: stoppedEarly,
     });
     runs.setPullRequest(runId, {
       number: pullRequest.number,
@@ -99,13 +100,6 @@ export class GitHubRunDelivery implements RunDelivery {
     });
     return { status: "opened", pullRequest };
   };
-
-  /** Throws away everything that is not a Slice Commit (diagram 3b). */
-  async #keepOnlySliceCommits(): Promise<void> {
-    const { workspaces } = this.#options;
-    await workspaces.discardUnfinished();
-    await workspaces.resetToSliceCommit(await workspaces.lastSliceCommit());
-  }
 
   /**
    * A Run's branch may already have a pull request: a Run that was resumed, or
@@ -133,10 +127,10 @@ export class GitHubRunDelivery implements RunDelivery {
   }
 
   /** What the pull request says, read from the Run's own record. */
-  #outcome(run: Run, reason: DeliveryReason): RunOutcome {
-    const all = this.#options.slices.listSlices(run.id);
-    const passed = all.filter((slice) => slice.status === "passed");
-    const summary = `${passed.length} of ${all.length} Slices of "${oneLine(run.projectRequest)}" were built and tested in a sandbox.`;
+  #pullRequestContent(run: Run, reason: DeliveryReason): RunOutcome {
+    const planned = this.#options.slices.listSlices(run.id);
+    const passed = planned.filter((slice) => slice.status === "passed");
+    const summary = `${passed.length} of ${planned.length} Slices of "${oneLine(run.projectRequest)}" were built and tested in a sandbox.`;
     if (reason.ended === "complete")
       return {
         outcome: "complete",
@@ -146,7 +140,7 @@ export class GitHubRunDelivery implements RunDelivery {
         slices: passed.map((slice) => slice.title),
         findings: [...reason.findings],
       };
-    const unfinished = all.find(
+    const unfinished = planned.find(
       (slice) => slice.status !== "passed" && slice.status !== "skipped",
     );
     return {
@@ -156,7 +150,7 @@ export class GitHubRunDelivery implements RunDelivery {
       summary,
       stopReason: run.failure?.summary ?? "The Run was stopped.",
       passedSlices: passed.map((slice) => slice.title),
-      totalSlices: all.length,
+      totalSlices: planned.length,
       failedSlice: unfinished
         ? {
             name: unfinished.title,

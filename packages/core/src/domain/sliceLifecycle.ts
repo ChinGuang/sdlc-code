@@ -13,7 +13,6 @@ const ALLOWED: Record<SliceStatus, readonly SliceStatus[]> = {
   pending: ["building", "skipped"],
   building: ["testing", "skipped"],
   testing: ["building", "passed", "skipped"],
-  // Only the PR Gate reopens a passed Slice, with the changes it asked for.
   passed: ["building"],
   skipped: [],
 };

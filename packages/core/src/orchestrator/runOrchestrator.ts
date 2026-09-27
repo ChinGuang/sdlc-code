@@ -52,14 +52,13 @@ import {
   type RunMemoryState,
 } from "./runCheckpoint.js";
 import type { SliceCheckpoint, SliceRunner } from "./sliceRunner.js";
-import type { DeliveryReason, RunDelivery } from "../delivery/runDelivery.js";
+import type { RunDelivery } from "../delivery/runDelivery.js";
 import type { GateStore } from "../persistence/gateStore.js";
 
 /** Where a Run stopped, and why. */
 export type RunProgress =
   | { waitingFor: "designGate" }
   | { waitingFor: "escalation"; escalation: Escalation }
-  | { waitingFor: "codeReview" }
   | { waitingFor: "prGate"; pullRequest: RunPullRequest | null }
   | { finished: Extract<RunStatus, "done" | "failed" | "aborted"> };
 
@@ -126,11 +125,6 @@ const REVISED_DOCUMENT: Record<"systemDesign" | "uiDesign", DocumentKind> = {
 export class AgentRunOrchestrator implements RunOrchestrator {
   #options: RunOrchestratorOptions;
   #memory = new Map<string, RunMemory>();
-  /**
-   * A Draft PR a stopped Run still owes (diagram 3b). Deciding is a person's
-   * answer and must not wait for a push, so advance does the pushing.
-   */
-  #pendingDelivery = new Map<string, DeliveryReason>();
 
   constructor(options: RunOrchestratorOptions) {
     this.#options = options;
@@ -159,8 +153,13 @@ export class AgentRunOrchestrator implements RunOrchestrator {
         case "reviewing":
           await this.#review(run);
           continue;
-        case "awaitingPrGate":
+        case "awaitingPrGate": {
+          // A process that died between opening the pull request and opening
+          // the Gate would otherwise leave nothing for a person to answer.
+          if (!this.#options.gates.getOpenGate(run.id))
+            this.#options.gates.openGate(run.id, "pr");
           return { waitingFor: "prGate", pullRequest: run.pullRequest };
+        }
         case "done":
         case "failed":
         case "aborted":
@@ -221,14 +220,9 @@ export class AgentRunOrchestrator implements RunOrchestrator {
         break;
       case "abort":
         if (current) this.#failTasks(runId, current.id);
-        // Diagram 3b: the passed Slices still reach the Target Repo, unless the
-        // person untied the checkbox. Awaited by advance, not here, because
-        // resolveEscalation answers the person at once.
-        this.#pendingDelivery.set(runId, {
-          ended: "aborted",
-          // What the person ticked in this dialog, not the Escalation's default.
-          openDraftPr: resolution.openDraftPrOnAbort ?? true,
-        });
+        // Diagram 3b: the passed Slices still reach the Target Repo unless the
+        // person unticked the checkbox, which the Escalation records. advance
+        // does the pushing, so answering a person never waits for GitHub.
         break;
     }
     // The person's decision is the thing a resumed Run must not lose.
@@ -255,7 +249,10 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     runs.applyEvent(runId, {
       type: decision.choice === "approve" ? "prApproved" : "prChangesRequested",
     });
-    if (decision.choice === "approve") return;
+    if (decision.choice === "approve") {
+      this.#checkpoint(runId);
+      return;
+    }
     // Diagram 8: the changes are a fix Task, so the last Slice is built again
     // with the comments as its hint. Its Slice Commit stays until a new one
     // replaces it.
@@ -432,14 +429,28 @@ export class AgentRunOrchestrator implements RunOrchestrator {
   }
 
   /**
-   * The Draft PR a Run that stopped early still owes, pushed once, whether it
-   * stopped by a person's choice or by a limit in auto mode.
+   * The Draft PR a Run that stopped early still owes (diagram 3b). Read from
+   * the Run and its Escalation rather than remembered, so a Run that stopped
+   * and then lost its process still offers what it finished; the pull request
+   * it records is what stops it being offered twice.
    */
   async #deliverIfOwed(run: Run): Promise<void> {
-    const reason = this.#pendingDelivery.get(run.id);
-    if (!reason) return;
-    this.#pendingDelivery.delete(run.id);
-    await this.#options.delivery.deliver(run.id, reason);
+    if (run.status === "done" || run.pullRequest) return;
+    await this.#options.delivery.deliver(run.id, {
+      ended: run.status,
+      // A failure in auto mode has nobody to ask, so it always offers one.
+      openDraftPr:
+        run.status === "failed" ? true : this.#abortedWithDraftPr(run.id),
+    });
+  }
+
+  /** What the person ticked when they aborted; the default is to offer one. */
+  #abortedWithDraftPr(runId: string): boolean {
+    const abort = this.#options.escalations
+      .listEscalations(runId)
+      .filter((escalation) => escalation.choice === "abort")
+      .at(-1);
+    return abort?.openDraftPrOnAbort ?? true;
   }
 
   /**
@@ -467,8 +478,6 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       slice: current?.title ?? null,
       reports: [...reports],
     });
-    // With no one to ask, a failed Run always offers what it did finish.
-    this.#pendingDelivery.set(run.id, { ended: "failed", openDraftPr: true });
   }
 
   /** The first Slice that has not passed or been skipped, in plan order. */
