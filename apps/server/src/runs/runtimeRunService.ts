@@ -35,6 +35,7 @@ export type ServiceRuntime = Pick<
   | "runs"
   | "documents"
   | "slices"
+  | "tasks"
   | "escalations"
   | "orchestrator"
   | "startRun"
@@ -220,6 +221,21 @@ export class RuntimeRunService implements RunService, RunLifecycle {
       documents: runtime.documents
         .listLatest(run.id)
         .map(({ kind, version, status }) => ({ kind, version, status })),
+      tasks: runtime.tasks.listTasks(run.id).map((task) => ({
+        id: task.id,
+        sliceId: task.sliceId,
+        role: task.agentRole,
+        status: task.status,
+        retries: task.retries,
+        // Not the Transcript: when a Step ran and how it ended is enough to
+        // draw a lane, and the rest is Working Memory's to summarise.
+        steps: runtime.tasks.listSteps(task.id).map((step) => ({
+          id: step.id,
+          status: step.status,
+          startedAt: step.startedAt,
+          endedAt: step.endedAt,
+        })),
+      })),
       waiting: this.#waiting(run),
       failure: run.failure
         ? {

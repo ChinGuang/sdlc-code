@@ -14,13 +14,23 @@ import type { RuntimeEvent } from "./runtimeEvents.js";
 
 type Emit = (event: RuntimeEvent) => void;
 
-/** A RunStore that reports every status a Run moves to. */
+/** A RunStore that reports every status a Run moves to, and what it spends. */
 export function reportingRunStore(runs: RunStore, emit: Emit): RunStore {
   return {
     ...runs,
     applyEvent: (id, event) => {
       const run = runs.applyEvent(id, event);
       emit({ runId: id, type: "status", status: run.status });
+      return run;
+    },
+    addTokensUsed: (id, tokens) => {
+      const run = runs.addTokensUsed(id, tokens);
+      emit({
+        runId: id,
+        type: "tokens",
+        used: run.tokensUsed,
+        budget: run.tokenBudget,
+      });
       return run;
     },
   };

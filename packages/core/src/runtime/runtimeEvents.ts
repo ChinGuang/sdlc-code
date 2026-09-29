@@ -25,6 +25,11 @@ export type RuntimeEvent = { runId: string } & (
       /** Null for a design Task, which belongs to no Slice. */
       sliceId: string | null;
     }
+  /**
+   * What the Run has spent of its Token Budget, after each model call: a
+   * budget bar follows it without asking.
+   */
+  | { type: "tokens"; used: number; budget: number }
   /** One model turn: which tools it called, or an answer. */
   | { type: "agentTurn"; role: AgentRole; toolCalls: string[] }
   | { type: "toolFailed"; role: AgentRole; tool: string; problem: string }

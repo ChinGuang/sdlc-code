@@ -265,7 +265,8 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
       runBranch: run.targetRepo.runBranch,
       workspacesDir: join(runDir(run.id), "workspaces"),
     });
-  const budgetFor = (run: Run) => new RunTokenBudget(runs, run.id);
+  // Spending goes through the reporting store, so every model call is an event.
+  const budgetFor = (run: Run) => new RunTokenBudget(reportedRuns, run.id);
 
   const loopFor =
     (run: Run, role: AgentRole, maxIterations: number, stepId?: string) =>

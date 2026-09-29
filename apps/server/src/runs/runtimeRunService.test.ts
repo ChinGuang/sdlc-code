@@ -10,6 +10,7 @@ import {
   SqliteEscalationStore,
   SqliteRunStore,
   SqliteSliceStore,
+  SqliteTaskStore,
   type Run,
   type RunOrchestrator,
   type RunProgress,
@@ -44,6 +45,7 @@ function setup(
   const store = { db };
   const runs = new SqliteRunStore(store);
   const escalations = new SqliteEscalationStore(store);
+  const tasks = new SqliteTaskStore(store);
   const log = new MemoryEventLog();
   const script = [...steps];
   const advanced: string[] = [];
@@ -87,6 +89,7 @@ function setup(
     runs,
     documents: new SqliteDocumentStore(store),
     slices: new SqliteSliceStore(store),
+    tasks,
     escalations,
     orchestrator,
     startRun: async (request) => {
@@ -127,6 +130,7 @@ function setup(
     lifecycle,
     settled: service.settled,
     runs,
+    tasks,
     escalations,
     log,
     advanced,
@@ -228,6 +232,46 @@ describe("RuntimeRunService: starting and advancing", () => {
       type: "problem",
       problem: "The Run stopped: Token Factory refused key [redacted].",
     });
+  });
+});
+
+describe("RuntimeRunService.getRun", () => {
+  // A Slice's lanes: each agent's Task, how often it was sent back, its Steps.
+  it("shows each agent's Task and its Steps, and never a Transcript", async () => {
+    const { api, settled, tasks } = setup([
+      () => ({ waitingFor: "designGate" }),
+    ]);
+    const run = await api.startRun(request);
+    await settled();
+    const task = tasks.createTask({
+      runId: run.id,
+      sliceId: null,
+      agentRole: "backendCoding",
+    });
+    const step = tasks.startStep(task.id);
+    tasks.appendStepEvent(step.id, "message", { secret: "transcript" });
+    tasks.completeStep(step.id, "- wrote the route");
+
+    const detail = api.getRun(run.id);
+
+    expect(detail.tasks).toEqual([
+      {
+        id: task.id,
+        sliceId: null,
+        role: "backendCoding",
+        status: "pending",
+        retries: 0,
+        steps: [
+          {
+            id: step.id,
+            status: "completed",
+            startedAt: expect.any(String),
+            endedAt: expect.any(String),
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(detail)).not.toContain("transcript");
   });
 });
 

@@ -48,6 +48,7 @@ const DETAIL: RunDetail = {
   ...SUMMARY,
   slices: [],
   documents: [],
+  tasks: [],
   waiting: { for: "nothing" },
   failure: null,
   advancing: false,
@@ -454,6 +455,21 @@ describe("GET /runs/:id/events", () => {
     const url = await start(service);
 
     const reading = read(`${url}/runs/${RUN_ID}/events`, 1, {
+      "last-event-id": "57",
+    });
+    await connected();
+    stream.next(step(58, "started"));
+    await reading;
+
+    expect(calls).toContainEqual(["events", [RUN_ID, 57]]);
+  });
+
+  // It reconnects to the URL it was opened with, whose ?after is out of date.
+  it("prefers the Last-Event-ID to the ?after it was first opened with", async () => {
+    const { service, calls, stream } = fakeService();
+    const url = await start(service);
+
+    const reading = read(`${url}/runs/${RUN_ID}/events?after=41`, 1, {
       "last-event-id": "57",
     });
     await connected();
