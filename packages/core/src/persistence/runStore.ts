@@ -26,6 +26,8 @@ import {
 export interface RunStore {
   createRun: (run: NewRun) => Run;
   getRun: (id: string) => Run | null;
+  /** Every Run, newest first, as a list of them shows it (T21). */
+  listRuns: () => Run[];
   /** Runs to resume after a restart (UML diagram 9). */
   listUnfinishedRuns: () => Run[];
   /** Moves the Run through UML diagram 3; throws IllegalTransitionError otherwise. */
@@ -108,11 +110,19 @@ export class SqliteRunStore implements RunStore {
     return row ? toRun(row as RunRow) : null;
   };
 
+  listRuns = (): Run[] =>
+    this.#ctx.db
+      // Two Runs can share a millisecond, and ids are random UUIDs: only the
+      // order they were inserted in breaks the tie.
+      .prepare("SELECT * FROM runs ORDER BY created_at DESC, rowid DESC")
+      .all()
+      .map((row) => toRun(row as RunRow));
+
   listUnfinishedRuns = (): Run[] =>
     this.#ctx.db
       .prepare(
         `SELECT * FROM runs WHERE status NOT IN (${FINISHED_RUN_STATUSES.map(() => "?").join(", ")})
-         ORDER BY created_at, id`,
+         ORDER BY created_at, rowid`,
       )
       .all(...FINISHED_RUN_STATUSES)
       .map((row) => toRun(row as RunRow));
