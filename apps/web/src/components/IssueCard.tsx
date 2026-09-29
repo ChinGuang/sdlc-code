@@ -5,8 +5,12 @@ import { openIssues } from "../run/view.js";
  * The Issue Reports from the last Test Run, if it did not pass. The Testing
  * Agent only suspects where a fault lies; the Orchestrator decides whose it is.
  */
-export function IssueCard({ events }: { events: RunEvent[] }) {
-  const testRun = openIssues(events);
+export function IssueCard({
+  testRun: last,
+}: {
+  testRun: Extract<RunEvent, { type: "testRun" }> | null;
+}) {
+  const testRun = openIssues(last);
   if (!testRun) return null;
   const broken = testRun.status === "broken";
   return (

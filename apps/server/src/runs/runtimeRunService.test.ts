@@ -13,7 +13,9 @@ import {
   SqliteTaskStore,
   type Run,
   type RunOrchestrator,
+  type RunMemoryState,
   type RunProgress,
+  type Task,
 } from "@sdlc-code/core";
 import { firstValueFrom, take, toArray } from "rxjs";
 import { describe, expect, it } from "vitest";
@@ -26,7 +28,11 @@ import {
   type RunService,
   type StreamedEvent,
 } from "./runService.js";
-import { RuntimeRunService, type ServiceRuntime } from "./runtimeRunService.js";
+import {
+  retriesSpent,
+  RuntimeRunService,
+  type ServiceRuntime,
+} from "./runtimeRunService.js";
 
 type Step = (run: Run) => RunProgress | Promise<RunProgress>;
 
@@ -260,7 +266,7 @@ describe("RuntimeRunService.getRun", () => {
         sliceId: null,
         role: "backendCoding",
         status: "pending",
-        retries: 0,
+        retriesSpent: 0,
         steps: [
           {
             id: step.id,
@@ -483,5 +489,54 @@ describe("RuntimeRunService as the server starts and stops", () => {
     await settled();
 
     expect(api.listRuns().map((run) => run.id)).toEqual([second.id, first.id]);
+  });
+});
+
+describe("retriesSpent", () => {
+  const memory = (
+    histories: Record<string, Partial<Record<"backend" | "frontend", number>>>,
+    hinted: string[] = [],
+  ): RunMemoryState => ({
+    revisions: [],
+    histories: new Map(
+      Object.entries(histories).map(([sliceId, retryBaseline]) => [
+        sliceId,
+        { earlier: { backend: [], frontend: [], design: [] }, retryBaseline },
+      ]),
+    ),
+    hints: new Map(
+      hinted.map((sliceId) => [
+        sliceId,
+        { from: "person" as const, issues: [] },
+      ]),
+    ),
+    reviewRetries: 0,
+  });
+  const task = (
+    retries: number,
+    agentRole: Task["agentRole"] = "backendCoding",
+  ) => ({
+    sliceId: "s1",
+    agentRole,
+    retries,
+  });
+
+  it("counts every retry on a Slice's first budget", () => {
+    expect(retriesSpent(task(2), null)).toBe(2);
+    expect(retriesSpent(task(2), memory({}))).toBe(2);
+  });
+
+  // The count behind "Retry 1/3": never more than the budget a hint refilled.
+  it("counts from the baseline a hint moved up, per side", () => {
+    const refilled = memory({ s1: { backend: 3, frontend: 1 } });
+
+    expect(retriesSpent(task(4), refilled)).toBe(1);
+    expect(retriesSpent(task(1, "frontendCoding"), refilled)).toBe(0);
+  });
+
+  it("counts none for a Slice whose hint is still to be taken up", () => {
+    expect(retriesSpent(task(3), memory({ s1: { backend: 0 } }, ["s1"]))).toBe(
+      0,
+    );
   });
 });

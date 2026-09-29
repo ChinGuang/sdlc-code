@@ -14,14 +14,17 @@ const SPOKEN: Record<PhaseState, string> = {
   current: "in progress",
   upcoming: "not yet",
   stopped: "stopped here",
-  skipped: "skipped in auto mode",
+  skipped: "skipped",
 };
 
 /** Design → Design Gate → Slices → Code Review → PR Gate. */
 export function PhaseStepper({
   run,
 }: {
-  run: Pick<RunDetail, "status" | "mode" | "slices">;
+  run: Pick<
+    RunDetail,
+    "status" | "mode" | "slices" | "pullRequest" | "failure"
+  >;
 }) {
   return (
     <ol className="stepper" aria-label="Phases">

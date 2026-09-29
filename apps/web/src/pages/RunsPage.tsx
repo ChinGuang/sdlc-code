@@ -40,11 +40,17 @@ export function RunsPage({
           live &&
           setLoadError(error instanceof Error ? error.message : String(error)),
       );
-    void load();
-    const timer = setInterval(() => void load(), POLL_MS);
+    // The next ask waits for this answer, so a slow server never gets two
+    // at once, nor an old answer after a new one.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = () =>
+      void load().finally(() => {
+        if (live) timer = setTimeout(poll, POLL_MS);
+      });
+    poll();
     return () => {
       live = false;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [api]);
 
@@ -155,9 +161,14 @@ function NewRunForm({ api }: { api: RunsApi }) {
   } | null>(null);
   const request = useRef<HTMLTextAreaElement>(null);
 
-  // The sidebar's "New run" link lands here.
+  // The sidebar's "New run" link lands here, whether or not the page is new.
   useEffect(() => {
-    if (window.location.hash === "#new-run") request.current?.focus();
+    const focus = () => {
+      if (window.location.hash === "#new-run") request.current?.focus();
+    };
+    focus();
+    window.addEventListener("hashchange", focus);
+    return () => window.removeEventListener("hashchange", focus);
   }, []);
 
   const start = async (event: FormEvent) => {

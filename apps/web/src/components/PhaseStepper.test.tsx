@@ -2,7 +2,7 @@
  * The phase stepper as each kind of Run shows it: done up to where it is, the
  * gates skipped in auto mode, and a stopped Run marked where it stopped.
  */
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { RunDetail, RunSlice } from "../api/types.js";
 import { PhaseStepper } from "./PhaseStepper.js";
@@ -15,6 +15,8 @@ const slice = (id: string, status: RunSlice["status"]): RunSlice => ({
   commitSha: status === "passed" ? "abc1234" : null,
 });
 
+const PR = { number: 7, url: "https://github.com/o/r/pull/7", draft: false };
+
 const FOUR = [
   slice("a", "passed"),
   slice("b", "building"),
@@ -22,8 +24,12 @@ const FOUR = [
   slice("d", "pending"),
 ];
 
-function states(run: Pick<RunDetail, "status" | "mode" | "slices">) {
-  render(<PhaseStepper run={run} />);
+type Shown = Pick<RunDetail, "status" | "mode" | "slices">;
+
+function states(
+  run: Shown & Partial<Pick<RunDetail, "pullRequest" | "failure">>,
+) {
+  render(<PhaseStepper run={{ pullRequest: PR, failure: null, ...run }} />);
   return within(screen.getByRole("list", { name: "Phases" }))
     .getAllByRole("listitem")
     .map((item) => item.getAttribute("data-state"));
@@ -79,9 +85,46 @@ describe("PhaseStepper", () => {
     ).toEqual(["done", "done", "done", "stopped", "upcoming"]);
   });
 
+  // The Slice Plan is saved while designing, before any Slice starts.
+  it("marks a design that failed after planning as stopped in Design", () => {
+    const planned = [slice("a", "pending"), slice("b", "pending")];
+    expect(states({ status: "failed", mode: "auto", slices: planned })).toEqual(
+      ["stopped", "skipped", "upcoming", "upcoming", "skipped"],
+    );
+    cleanup();
+    expect(
+      states({
+        status: "failed",
+        mode: "auto",
+        slices: planned,
+        failure: { trigger: "design", summary: "no design", slice: null },
+      })[0],
+    ).toBe("stopped");
+  });
+
+  // Nothing to deliver: no pull request was opened, so no PR Gate was held.
+  it("skips the PR Gate of a Run that finished with no pull request", () => {
+    expect(
+      states({
+        status: "done",
+        mode: "gated",
+        slices: FOUR,
+        pullRequest: null,
+      }),
+    ).toEqual(["done", "done", "done", "done", "skipped"]);
+  });
+
   it("says which phase is current to a screen reader", () => {
     render(
-      <PhaseStepper run={{ status: "designing", mode: "gated", slices: [] }} />,
+      <PhaseStepper
+        run={{
+          status: "designing",
+          mode: "gated",
+          slices: [],
+          pullRequest: null,
+          failure: null,
+        }}
+      />,
     );
 
     expect(screen.getByText("Design").closest("li")).toHaveAttribute(

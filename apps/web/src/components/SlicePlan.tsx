@@ -8,9 +8,16 @@ import { currentSlice, lanes, sliceNote } from "../run/view.js";
 export function SlicePlan({
   run,
 }: {
-  run: Pick<RunDetail, "slices" | "tasks" | "mode">;
+  run: Pick<RunDetail, "slices" | "tasks" | "mode" | "status" | "documents">;
 }) {
   const current = currentSlice(run.slices);
+  // Saved while designing, so a plan is only approved once its document is.
+  const approved =
+    run.mode === "gated" &&
+    run.documents.some(
+      (document) =>
+        document.kind === "slicePlan" && document.status === "approved",
+    );
   return (
     <section className="card" aria-label="Slice plan">
       <h2>
@@ -18,7 +25,7 @@ export function SlicePlan({
         <span className="aside">
           {run.slices.length === 0
             ? "Not planned yet"
-            : `${run.mode === "gated" ? "Approved at Design Gate · " : ""}${run.slices.length} slices`}
+            : `${approved ? "Approved at Design Gate · " : ""}${run.slices.length} slices`}
         </span>
       </h2>
       {run.slices.length === 0 ? (
@@ -52,7 +59,7 @@ export function SlicePlan({
                 {isCurrent && (
                   <>
                     <div className="lanes">
-                      {lanes(slice.id, run.tasks).map((lane) => (
+                      {lanes(slice, run.tasks, run.status).map((lane) => (
                         <div
                           key={lane.role}
                           className="lane"

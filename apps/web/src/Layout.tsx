@@ -9,12 +9,15 @@ import { RUNS_HREF } from "./router.js";
 export function Layout({
   title,
   serverUp,
+  onRuns,
   topbar,
   children,
 }: {
   title: string;
   /** null while the first check is in flight. */
   serverUp: boolean | null;
+  /** Whether this is the Runs screen, which the sidebar marks as current. */
+  onRuns: boolean;
   topbar?: ReactNode;
   children: ReactNode;
 }) {
@@ -26,7 +29,7 @@ export function Layout({
           sdlc-code
         </div>
         <nav className="nav" aria-label="Main">
-          <a href={RUNS_HREF} aria-current="page">
+          <a href={RUNS_HREF} aria-current={onRuns ? "page" : undefined}>
             Runs
           </a>
           <a href="#new-run">New run</a>

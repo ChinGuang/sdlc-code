@@ -22,7 +22,9 @@ export function RunPage({
   runId: string;
   refreshDelayMs?: number;
 }) {
-  const { detail, events, error } = useRun(api, runId, { refreshDelayMs });
+  const { detail, events, testRun, error } = useRun(api, runId, {
+    refreshDelayMs,
+  });
 
   if (!detail)
     return (
@@ -79,10 +81,9 @@ export function RunPage({
           {error}
         </div>
       )}
-      <div className="tabs" role="tablist">
-        <span role="tab" aria-selected="true">
-          Overview
-        </span>
+      {/* The Design Gate and Code Review & PR tabs join it in T23. */}
+      <div className="tabs">
+        <span className="selected">Overview</span>
       </div>
       <PhaseStepper run={detail} />
       <Waiting run={detail} />
@@ -91,7 +92,7 @@ export function RunPage({
           <SlicePlan run={detail} />
         </div>
         <div className="column">
-          <IssueCard events={events} />
+          <IssueCard testRun={testRun} />
           <BudgetCard run={detail} />
           <ActivityFeed
             events={events}

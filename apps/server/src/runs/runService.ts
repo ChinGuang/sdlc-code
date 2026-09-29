@@ -73,7 +73,7 @@ export type RunDetail = RunSummary & {
   }>;
   /**
    * Each agent's Task and its Steps: a Slice's backend and frontend lanes, and
-   * how many times each has been sent back (its Retry Budget spent).
+   * how much of its Retry Budget each has spent.
    */
   tasks: Array<{
     id: string;
@@ -81,7 +81,8 @@ export type RunDetail = RunSummary & {
     sliceId: string | null;
     role: AgentRole;
     status: TaskStatus;
-    retries: number;
+    /** Spent of its Retry Budget: counted since the last hint refilled it. */
+    retriesSpent: number;
     steps: Array<{
       id: string;
       status: StepStatus;

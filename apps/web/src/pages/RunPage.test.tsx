@@ -5,6 +5,7 @@
  */
 import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RunDetail } from "../api/types.js";
 import { DETAIL, fakeApi } from "../testing/fakeApi.js";
 import { RunPage } from "./RunPage.js";
 
@@ -160,6 +161,31 @@ describe("RunPage: live from the stream", () => {
     expect(screen.queryByRole("region", { name: "Issues" })).toBeNull();
   });
 
+  // A model call sends an agentTurn and a tokens event, neither shown.
+  it("keeps the Issues however many model calls follow them", async () => {
+    const { push } = await open();
+
+    act(() => {
+      push({
+        type: "testRun",
+        status: "failed",
+        summary: "FAILED smoke",
+        durationSeconds: 1,
+        cost: null,
+        issues: ["smoke failed"],
+      });
+      for (let i = 0; i < 300; i += 1) {
+        push({ type: "agentTurn", role: "backendCoding", toolCalls: ["edit"] });
+        push({ type: "tokens", used: 700_000 + i, budget: 2_000_000 });
+      }
+    });
+
+    expect(screen.getByText("smoke failed")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Test Run failed: FAILED smoke/),
+    ).toBeInTheDocument();
+  });
+
   it("reads the Run again once after a burst of Step events", async () => {
     const { push, calls, setDetail } = await open();
     const before = calls.getRun;
@@ -172,8 +198,15 @@ describe("RunPage: live from the stream", () => {
           sliceId: "s2",
           role: "frontendCoding",
           status: "running",
-          retries: 0,
-          steps: [],
+          retriesSpent: 0,
+          steps: [
+            {
+              id: "x0",
+              status: "running",
+              startedAt: "2026-09-29T10:00:00.000Z",
+              endedAt: null,
+            },
+          ],
         },
       ],
       lastSeq: 105,
@@ -217,6 +250,59 @@ describe("RunPage: live from the stream", () => {
 
     expect(screen.getByText("Coding · Slice 2")).toBeInTheDocument();
     expect(screen.getByText(/Run is now Designing/)).toBeInTheDocument();
+  });
+});
+
+describe("RunPage: reads and events that cross", () => {
+  /** A fake whose reads answer only when a test says so. */
+  function withHeldReads() {
+    const fake = fakeApi({ detail: DETAIL });
+    const answers: Array<(detail: RunDetail) => void> = [];
+    fake.api.getRun = () =>
+      new Promise<RunDetail>((resolve) => answers.push(resolve));
+    return { ...fake, answers };
+  }
+
+  it("keeps a tokens event that arrived before the first read", async () => {
+    const { api, answers, resend } = withHeldReads();
+    render(<RunPage api={api} runId={DETAIL.id} refreshDelayMs={50} />);
+
+    act(() =>
+      resend({
+        runId: DETAIL.id,
+        seq: 101,
+        happenedAt: "2026-09-29T10:00:00.000Z",
+        type: "tokens",
+        used: 700_000,
+        budget: 2_000_000,
+      }),
+    );
+    await act(async () => answers[0]!({ ...DETAIL, lastSeq: 100 }));
+
+    expect(screen.getByTestId("tokens")).toHaveTextContent("700k / 2.0M");
+  });
+
+  it("does not let a read that left earlier undo a later one", async () => {
+    const { api, answers, resend } = withHeldReads();
+    render(<RunPage api={api} runId={DETAIL.id} refreshDelayMs={50} />);
+    await act(async () => answers[0]!(DETAIL));
+
+    // A Step starts, so the page reads again, and a status event follows.
+    act(() =>
+      resend({
+        runId: DETAIL.id,
+        seq: 101,
+        happenedAt: "2026-09-29T10:00:00.000Z",
+        type: "status",
+        status: "reviewing",
+      }),
+    );
+    // The earlier read, sent before the status moved, answers last.
+    await act(async () => answers.at(-1)!({ ...DETAIL, lastSeq: 100 }));
+
+    expect(
+      screen.getByText("Code Review", { selector: ".badge" }),
+    ).toBeInTheDocument();
   });
 });
 

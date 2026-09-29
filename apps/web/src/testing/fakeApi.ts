@@ -113,13 +113,19 @@ export const DETAIL: RunDetail = {
       sliceId: "s2",
       role: "backendCoding",
       status: "running",
-      retries: 1,
+      retriesSpent: 1,
       steps: [
         {
           id: "st1",
           status: "completed",
           startedAt: "2026-09-29T09:50:00.000Z",
           endedAt: "2026-09-29T09:52:00.000Z",
+        },
+        {
+          id: "st2",
+          status: "running",
+          startedAt: "2026-09-29T09:52:00.000Z",
+          endedAt: null,
         },
       ],
     },

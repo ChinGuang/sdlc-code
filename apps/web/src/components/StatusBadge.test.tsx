@@ -20,6 +20,7 @@ describe("StatusBadge", () => {
     ["done", PR, "Done", "green"],
     ["done", { ...PR, draft: true }, "Draft PR", "muted"],
     ["failed", null, "Failed", "red"],
+    ["failed", { ...PR, draft: true }, "Failed · Draft PR", "red"],
     ["aborted", null, "Aborted", "muted"],
     ["aborted", { ...PR, draft: true }, "Aborted · Draft PR", "muted"],
   ])("shows %s (PR %o) as %s in %s", (status, pullRequest, label, tone) => {

@@ -7,11 +7,19 @@
 import { useEffect, useReducer } from "react";
 import type { RunsApi } from "../api/client.js";
 import type { RunDetail, RunEvent } from "../api/types.js";
+import { describe } from "./view.js";
+
+type TestRunEvent = Extract<RunEvent, { type: "testRun" }>;
+type TokensEvent = Extract<RunEvent, { type: "tokens" }>;
 
 export type RunState = {
   detail: RunDetail | null;
-  /** Oldest first, each once. */
+  /** What the Activity feed shows: oldest first, each once. */
   events: RunEvent[];
+  /** The last Test Run, kept apart so a long feed never pushes out its Issues. */
+  testRun: TestRunEvent | null;
+  /** The last spend, kept apart: there is one per model call. */
+  tokens: TokensEvent | null;
   error: string | null;
 };
 
@@ -23,26 +31,50 @@ type Action =
 export const initialRunState: RunState = {
   detail: null,
   events: [],
+  testRun: null,
+  tokens: null,
   error: null,
 };
 
-/** How many events the feed keeps; a long Run has thousands. */
+/** How many lines the feed keeps; a long Run has thousands. */
 const KEEP = 200;
 
 export function runReducer(state: RunState, action: Action): RunState {
   switch (action.type) {
-    case "loaded":
-      return { ...state, detail: action.detail, error: null };
+    case "loaded": {
+      // Reads overlap: one that left before an event arrived must not undo it.
+      if (state.detail && action.detail.lastSeq < state.detail.lastSeq)
+        return state;
+      // What arrived while it was on its way still counts.
+      const arrived = state.tokens
+        ? [...state.events, state.tokens]
+        : state.events;
+      const detail = arrived
+        .toSorted((a, b) => a.seq - b.seq)
+        .reduce<RunDetail | null>(applyToDetail, action.detail);
+      return { ...state, detail, error: null };
+    }
     case "failed":
       return { ...state, error: action.error };
     case "event": {
       const { event } = action;
+      const detail = applyToDetail(state.detail, event);
+      if (event.type === "tokens")
+        return !state.tokens || event.seq > state.tokens.seq
+          ? { ...state, detail, tokens: event }
+          : state;
       // A reconnect can send again what was already received.
       if (state.events.some((seen) => seen.seq === event.seq)) return state;
-      const events = [...state.events, event]
-        .sort((a, b) => a.seq - b.seq)
-        .slice(-KEEP);
-      return { ...state, events, detail: applyToDetail(state.detail, event) };
+      const testRun =
+        event.type === "testRun" &&
+        (!state.testRun || event.seq > state.testRun.seq)
+          ? event
+          : state.testRun;
+      const events =
+        describe(event, []) === null
+          ? state.events
+          : [...state.events, event].sort((a, b) => a.seq - b.seq).slice(-KEEP);
+      return { ...state, events, testRun, detail };
     }
   }
 }

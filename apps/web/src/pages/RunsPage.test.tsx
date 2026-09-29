@@ -2,7 +2,7 @@
  * Board 01: the runs table as the server lists Runs, and the New run form,
  * which starts a Run and opens it, or shows why the server refused.
  */
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type RunsApi } from "../api/client.js";
 import { SUMMARY, fakeApi } from "../testing/fakeApi.js";
@@ -43,6 +43,26 @@ describe("RunsPage: Recent runs", () => {
 
     expect(await screen.findByText("Blog")).toBeInTheDocument();
     expect(screen.queryByText("Todo app")).toBeNull();
+  });
+
+  it("asks again every few seconds, and stops when it closes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { api } = fakeApi({ runs: [] });
+      const listRuns = vi.spyOn(api, "listRuns");
+      const { unmount } = render(<RunsPage api={api} search="" now={NOW} />);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(listRuns).toHaveBeenCalledTimes(1);
+
+      await act(() => vi.advanceTimersByTimeAsync(5000));
+      expect(listRuns).toHaveBeenCalledTimes(2);
+
+      unmount();
+      await act(() => vi.advanceTimersByTimeAsync(20_000));
+      expect(listRuns).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says there are no Runs yet", async () => {

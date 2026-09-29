@@ -77,7 +77,8 @@ export type RunTask = {
   sliceId: string | null;
   role: AgentRole;
   status: "pending" | "running" | "done" | "failed";
-  retries: number;
+  /** Spent of its Retry Budget: counted since the last hint refilled it. */
+  retriesSpent: number;
   steps: Array<{
     id: string;
     status: "running" | "completed" | "discarded";

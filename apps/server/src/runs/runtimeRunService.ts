@@ -10,9 +10,12 @@
  */
 import {
   IllegalTransitionError,
+  memoryFromCheckpoint,
   MissingKeyError,
+  type RunMemoryState,
   type Run,
   type RunRuntime,
+  type Task,
 } from "@sdlc-code/core";
 import type { Observable } from "rxjs";
 import type { EventLog } from "./eventLog.js";
@@ -209,6 +212,9 @@ export class RuntimeRunService implements RunService, RunLifecycle {
 
   #detail(run: Run): RunDetail {
     const runtime = this.#runtime();
+    const memory = memoryFromCheckpoint(
+      runtime.runs.latestCheckpoint(run.id)?.payload,
+    );
     return {
       ...summary(run),
       slices: runtime.slices.listSlices(run.id).map((slice) => ({
@@ -226,7 +232,7 @@ export class RuntimeRunService implements RunService, RunLifecycle {
         sliceId: task.sliceId,
         role: task.agentRole,
         status: task.status,
-        retries: task.retries,
+        retriesSpent: retriesSpent(task, memory),
         // Not the Transcript: when a Step ran and how it ended is enough to
         // draw a lane, and the rest is Working Memory's to summarise.
         steps: runtime.tasks.listSteps(task.id).map((step) => ({
@@ -304,4 +310,29 @@ function summary(run: Run): RunSummary {
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
   };
+}
+
+const SIDE = { backendCoding: "backend", frontendCoding: "frontend" } as const;
+
+/**
+ * A Task's retries as its Retry Budget counts them: from the baseline the Run
+ * last saved for its Slice, which a hint (a person's, or a Code Review's) moves
+ * up to the retries already spent, refilling the budget. With no baseline the
+ * Slice is on its first budget, which starts at none spent.
+ */
+export function retriesSpent(
+  task: Pick<Task, "sliceId" | "agentRole" | "retries">,
+  memory: RunMemoryState | null,
+): number {
+  if (task.sliceId === null) return task.retries;
+  const side =
+    task.agentRole === "backendCoding" || task.agentRole === "frontendCoding"
+      ? SIDE[task.agentRole]
+      : null;
+  if (side === null) return task.retries;
+  // A hint not yet taken up: its Slice starts a fresh budget when it is.
+  if (memory?.hints.has(task.sliceId)) return 0;
+  const baseline =
+    memory?.histories.get(task.sliceId)?.retryBaseline[side] ?? 0;
+  return Math.max(0, task.retries - baseline);
 }

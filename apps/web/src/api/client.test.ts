@@ -115,4 +115,21 @@ describe("HttpRunsApi", () => {
     expect(received.map((event) => event.seq)).toEqual([42, 43]);
     expect(source!.closed).toBe(true);
   });
+
+  it("skips a message it cannot read, and keeps following", () => {
+    let source: FakeEventSource | undefined;
+    const api: RunsApi = new HttpRunsApi({
+      eventSource: (url) => {
+        source = new FakeEventSource(url);
+        return source as unknown as EventSource;
+      },
+    });
+    const received: RunEvent[] = [];
+    api.followRun("r1", 0, (event) => received.push(event));
+
+    source!.dispatchEvent(new MessageEvent("status", { data: "{not json" }));
+    source!.send("status", { type: "status", status: "done", seq: 2 });
+
+    expect(received.map((event) => event.seq)).toEqual([2]);
+  });
 });

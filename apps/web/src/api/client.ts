@@ -80,8 +80,15 @@ export class HttpRunsApi implements RunsApi {
     const source = this.#eventSource(
       `${this.#base}/runs/${encodeURIComponent(runId)}/events?after=${after}`,
     );
-    const receive = (message: MessageEvent<string>) =>
-      onEvent(JSON.parse(message.data) as RunEvent);
+    const receive = (message: MessageEvent<string>) => {
+      let event: RunEvent;
+      try {
+        event = JSON.parse(message.data) as RunEvent;
+      } catch {
+        return; // Not an event this dashboard can read; the next one may be.
+      }
+      onEvent(event);
+    };
     for (const type of EVENT_TYPES) source.addEventListener(type, receive);
     return () => source.close();
   };

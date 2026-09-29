@@ -512,7 +512,7 @@ table.runs tr.row:hover td {
   border-bottom: 2px solid transparent;
 }
 
-.tabs span[aria-selected="true"] {
+.tabs span.selected {
   color: var(--text);
   border-bottom-color: var(--green);
 }

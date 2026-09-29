@@ -22,14 +22,15 @@ export function App({ api: given }: { api?: RunsApi }) {
 
   if (route.page === "run")
     return (
-      <Layout title="Run" serverUp={serverUp}>
-        <RunPage api={api} runId={route.runId} />
+      <Layout title="Run" serverUp={serverUp} onRuns={false}>
+        <RunPage key={route.runId} api={api} runId={route.runId} />
       </Layout>
     );
   return (
     <Layout
       title="Runs"
       serverUp={serverUp}
+      onRuns
       topbar={
         <input
           className="search"

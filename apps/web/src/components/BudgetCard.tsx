@@ -32,7 +32,8 @@ export function BudgetCard({
           aria-label="Tokens spent"
           aria-valuemin={0}
           aria-valuemax={run.tokenBudget}
-          aria-valuenow={run.tokensUsed}
+          aria-valuenow={Math.min(run.tokensUsed, run.tokenBudget)}
+          aria-valuetext={`${formatTokens(run.tokensUsed)} of ${formatTokens(run.tokenBudget)}`}
         >
           <span style={{ width: `${Math.min(100, share * 100)}%` }} />
         </div>

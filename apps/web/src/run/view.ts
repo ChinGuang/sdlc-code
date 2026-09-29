@@ -42,7 +42,10 @@ export function statusBadge(
         ? { label: "Draft PR", tone: "muted" }
         : { label: "Done", tone: "green" };
     case "failed":
-      return { label: "Failed", tone: "red" };
+      // In auto mode a Run that stops still opens a Draft PR of what passed.
+      return run.pullRequest
+        ? { label: "Failed · Draft PR", tone: "red" }
+        : { label: "Failed", tone: "red" };
     case "aborted":
       return run.pullRequest
         ? { label: "Aborted · Draft PR", tone: "muted" }
@@ -73,7 +76,10 @@ const PHASE_OF: Partial<Record<RunStatus, PhaseKey>> = {
  * stopped is marked where it stopped.
  */
 export function phases(
-  run: Pick<RunDetail, "status" | "mode" | "slices">,
+  run: Pick<
+    RunDetail,
+    "status" | "mode" | "slices" | "pullRequest" | "failure"
+  >,
 ): Phase[] {
   const at = run.status === "done" ? null : whereItIs(run);
   const atIndex = at === null ? PHASES.length : PHASES.indexOf(at);
@@ -84,19 +90,30 @@ export function phases(
       index < atIndex ? "done" : index === atIndex ? "current" : "upcoming";
     if (state === "current" && stopped) state = "stopped";
     if (gate && run.mode === "auto" && state !== "stopped") state = "skipped";
+    // Finished with nothing to deliver: no pull request, so no PR Gate held.
+    if (key === "prGate" && run.status === "done" && !run.pullRequest)
+      state = "skipped";
     return { key, label: phaseLabel(key, run.slices), state };
   });
 }
 
 /**
  * Where a Run is, or where it stopped. A stopped Run does not say, so its
- * Slices do: none yet means it never got past design; all of them through
+ * Slices do: none started means it never got past design; all of them through
  * means it was being reviewed.
  */
-function whereItIs(run: Pick<RunDetail, "status" | "slices">): PhaseKey {
+function whereItIs(
+  run: Pick<RunDetail, "status" | "slices" | "failure">,
+): PhaseKey {
   const moving = PHASE_OF[run.status];
   if (moving) return moving;
-  if (run.slices.length === 0) return "design";
+  // The Slice Plan is saved during design, so Slices that exist but never
+  // started say nothing about getting past it.
+  if (
+    run.failure?.trigger === "design" ||
+    run.slices.every((slice) => slice.status === "pending")
+  )
+    return "design";
   return run.slices.every(isThrough) ? "review" : "slices";
 }
 
@@ -142,7 +159,7 @@ export function progress(run: RunSummary): { label: string; fraction: number } {
     case "escalated":
       return { label: "Needs a person", fraction: 0.5 };
     case "failed":
-      return { label: "Failed", fraction: 0 };
+      return { label: pr ? `Draft ${pr}` : "Failed", fraction: 0 };
     case "aborted":
       return { label: pr ? `Draft ${pr}` : "Aborted", fraction: 0 };
   }
@@ -179,13 +196,13 @@ export function sliceNote(slice: RunSlice, tasks: RunTask[]): Badge {
   }
 }
 
-/** The most any of this Slice's Tasks has been sent back. */
+/** The most of its Retry Budget any of this Slice's Tasks has spent. */
 export function retriesOf(sliceId: string, tasks: RunTask[]): number {
   return Math.max(
     0,
     ...tasks
       .filter((task) => task.sliceId === sliceId)
-      .map((task) => task.retries),
+      .map((task) => task.retriesSpent),
   );
 }
 
@@ -207,33 +224,52 @@ export type Lane = {
 };
 
 /** A Slice's two Coding Agents, side by side, as far as each has got. */
-export function lanes(sliceId: string, tasks: RunTask[]): Lane[] {
+export function lanes(
+  slice: RunSlice,
+  tasks: RunTask[],
+  runStatus: RunStatus,
+): Lane[] {
   return (["backendCoding", "frontendCoding"] as const).map((role) => {
-    // A retried Slice has a new Task per attempt; the last one is the live one.
-    const task = tasks
-      .filter((one) => one.sliceId === sliceId && one.role === role)
-      .at(-1);
+    // One Task per side per Slice, kept across its retries.
+    const task = tasks.find(
+      (one) => one.sliceId === slice.id && one.role === role,
+    );
     return {
       role,
       name: ROLE_NAMES[role],
-      ...laneStatus(task),
+      ...laneStatus(task, slice, runStatus),
       steps:
         task?.steps.filter((step) => step.status === "completed").length ?? 0,
     };
   });
 }
 
-function laneStatus(task: RunTask | undefined): { status: string; tone: Tone } {
+/**
+ * What a lane is doing. A Task stays running from its first Step until the
+ * Slice is settled, through Test Runs and Escalations, so only a running Step
+ * means code is being written.
+ */
+function laneStatus(
+  task: RunTask | undefined,
+  slice: RunSlice,
+  runStatus: RunStatus,
+): { status: string; tone: Tone } {
   if (!task) return { status: "Not started", tone: "muted" };
   switch (task.status) {
     case "pending":
       return { status: "Waiting", tone: "muted" };
-    case "running":
-      return { status: "Writing code", tone: "blue" };
     case "done":
       return { status: "Done", tone: "green" };
     case "failed":
       return { status: "Failed", tone: "red" };
+    case "running":
+      if (task.steps.some((step) => step.status === "running"))
+        return { status: "Writing code", tone: "blue" };
+      if (runStatus === "escalated")
+        return { status: "Waiting for a person", tone: "amber" };
+      if (slice.status === "testing")
+        return { status: "Waiting for the Test Run", tone: "muted" };
+      return { status: "Between Steps", tone: "muted" };
   }
 }
 
@@ -333,15 +369,13 @@ export function describe(event: RunEvent, slices: RunSlice[]): Activity | null {
 
 /** The last Test Run, if it found Issues: what the Issue card shows. */
 export function openIssues(
-  events: RunEvent[],
+  testRun: Extract<RunEvent, { type: "testRun" }> | null,
 ): Extract<RunEvent, { type: "testRun" }> | null {
-  const last = events.findLast((event) => event.type === "testRun");
-  return last && last.type === "testRun" && last.status !== "passed"
-    ? last
-    : null;
+  return testRun && testRun.status !== "passed" ? testRun : null;
 }
 
 const TRIGGERS: Record<string, string> = {
+  design: "no valid design came out",
   retryBudget: "the Retry Budget is spent",
   tokenBudget: "the Token Budget is spent",
   loop: "the agents are going round in a loop",
