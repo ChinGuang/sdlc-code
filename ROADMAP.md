@@ -16,7 +16,7 @@ The whole pipeline works end to end against the real world — Nemotron on Token
 | M1 Foundation | Done | PRs #4–#9 |
 | M2 Design Phase | Done | PRs #10–#12 |
 | M3 Build loop | Done (T18 in review) | PRs #13–#21, #23 |
-| M4 Review & delivery | T20 done, T19 next | PR #26 |
+| M4 Review & delivery | Done | PRs #26, #27 |
 | M5 Interfaces | Scaffolds only | PRs #4, #6 |
 | M6 Hardening & submission | Not started | — |
 
@@ -60,6 +60,8 @@ Everything here is merged into `main`, has tests, and has been exercised by a re
 
 ### M4 — Review & delivery
 
+- **T19 Linters + Code Review Agent** — ESLint and the TypeScript compiler run in the sandbox over the Slice Commits, and a Code Review Agent reads the Run's whole diff against the layered Review Standard (19 baseline Rules plus the user's `AGENTS.md`) and the Approved Documents. Every Finding cites a Rule and takes that Rule's severity. Blocking Findings build the last Slice again, spending a review Retry Budget of 3; the rest go into the pull request. A review that ran out of turns or Token Budget escalates rather than passing for clean.
+
 - **T20 PR Gate + Draft PR** — a Run that built every Slice pushes its run branch and opens a pull request, then waits at the PR Gate; approve finishes it, request changes builds the last Slice again with the comments. A Run that stopped early offers a Draft PR of only what passed a Test Run, proved against real git by reading the pushed commits. Nothing is pushed when a person declines it or when no Slice passed. The Findings in the description are empty until T19.
 
 ### Proven by running it, not only by tests
@@ -85,7 +87,6 @@ In the plan's order. Dates are from [docs/PLAN.md](docs/PLAN.md); M4 and M5 over
 
 ### M4 — Review & delivery
 
-- **T19 Linters + Code Review Agent** · Oct 9–10 — ESLint and `tsc --strict` in the sandbox as linter Findings; a Code Review Agent reviewing the diff against the layered Review Standard (the 16 baseline rules plus the user's `AGENTS.md`) and the Approved Documents. Every Finding cites a Rule ID; only blocking Findings send work back. The `codeReview` role and the `blockingFindings` event already exist and are unused, so the seams are in place.
 
 ### M5 — Interfaces
 
@@ -108,4 +109,4 @@ Playwright tests in the Stack Profile · deploying the server on Nebius AI Cloud
 
 ## What the critical path looks like
 
-A Run now goes: request → design → Design Gate → Slices built, tested and committed → pull request → PR Gate → done, with a Draft PR of what it finished when it stops early (T20). What that pull request still lacks is the review that makes it trustworthy: **T19** puts ESLint, `tsc --strict` and the Code Review Agent in front of it, and its Findings into the description, which is the next thing worth doing. **T21** is then what any interface needs underneath it.
+A Run now goes: request → design → Design Gate → Slices built, tested and committed → pull request → PR Gate → done, with a Draft PR of what it finished when it stops early (T20). The whole pipeline a Run needs is now there, reviewed and delivered. What is missing is everywhere a person would use it from: **T21**'s local API and SSE stream, then the dashboard (**T22**, **T23**) and the CLI (**T24**), and the demo, README and video of **M6**. The one thing to watch before the demo is cost: a Slice still runs to roughly 700k tokens, so a five-Slice application wants either a bigger budget or a resumed Run.

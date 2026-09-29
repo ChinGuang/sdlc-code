@@ -62,6 +62,12 @@ export type SliceHistory = {
   retryBaseline: Partial<Record<CodingSide, number>>;
 };
 
+/** Something to fix on the next attempt, and who asked for it. */
+export type SliceHint = {
+  from: "person" | "codeReview";
+  issues: readonly CodingIssue[];
+};
+
 export type SliceRunInput = {
   runId: string;
   /** The stored Slice (its id and status) … */
@@ -79,10 +85,11 @@ export type SliceRunInput = {
   /** From the previous outcome of this Slice; absent on its first run. */
   history?: SliceHistory;
   /**
-   * A person's hint after an Escalation ("retry with hint"), for every side.
-   * It refills the Retry Budget: a person chose to try again.
+   * What this attempt is told to fix first, from an Escalation, the PR Gate or
+   * the Code Review Agent, for every side. It refills the Retry Budget: a
+   * person or a review asked for another attempt.
    */
-  hint?: string;
+  hint?: SliceHint;
 };
 
 export type SliceOutcome =
@@ -532,14 +539,20 @@ export class OrchestratedSliceRunner implements SliceRunner {
   }
 }
 
-/** A person's hint, given to every side as the first thing to address. */
-function hintIssues(hint: string | undefined): CodingIssue[] {
-  return hint
-    ? [
-        {
-          summary: "A person reviewed the last failure and says:",
-          evidence: hint,
-        },
-      ]
-    : [];
+/**
+ * A hint, given to every side as the first thing to address. Who it came from is
+ * part of it: a Coding Agent reading "a person says" about a machine's Finding
+ * would be told something untrue about its own Task.
+ */
+function hintIssues(hint: SliceHint | undefined): CodingIssue[] {
+  if (!hint) return [];
+  return hint.issues.map((issue) => ({
+    summary: `${HINT_FROM[hint.from]} ${issue.summary}`,
+    evidence: issue.evidence,
+  }));
 }
+
+const HINT_FROM: Record<SliceHint["from"], string> = {
+  person: "A person reviewed the last attempt and says:",
+  codeReview: "The Code Review Agent refused this Slice:",
+};

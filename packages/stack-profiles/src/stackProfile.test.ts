@@ -145,6 +145,7 @@ describe("BASELINE_RULES", () => {
 
     expect([...families].sort()).toEqual([
       "CLEAN",
+      "LINT",
       "REUSE",
       "SEC",
       "STRUCT",
@@ -155,7 +156,15 @@ describe("BASELINE_RULES", () => {
   it("blocks on the rules that must never ship", () => {
     const blocking = BASELINE_RULES.filter(isBlocking).map((rule) => rule.id);
 
-    expect(blocking).toEqual(["STRUCT-03", "TEST-01", "SEC-01", "SEC-02"]);
+    // A linter error and code that does not compile never ship either (T19).
+    expect(blocking).toEqual([
+      "LINT-01",
+      "LINT-03",
+      "STRUCT-03",
+      "TEST-01",
+      "SEC-01",
+      "SEC-02",
+    ]);
   });
 
   it("reports duplicate, malformed and empty rules", () => {

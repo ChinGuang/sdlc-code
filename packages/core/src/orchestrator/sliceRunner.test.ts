@@ -355,13 +355,45 @@ describe("OrchestratedSliceRunner", () => {
     const outcome = await runner.runSlice(
       input({
         history: first.history,
-        hint: "The list must render before the fetch resolves.",
+        hint: {
+          from: "person",
+          issues: [
+            {
+              summary: "Make the list render before the fetch resolves.",
+              evidence: "The list must render before the fetch resolves.",
+            },
+          ],
+        },
       }),
     );
 
     expect(outcome).toMatchObject({ status: "passed" });
     expect(calls.at(-1)!.issues).toEqual([
-      "A person reviewed the last failure and says:",
+      "A person reviewed the last attempt and says: Make the list render before the fetch resolves.",
+    ]);
+  });
+
+  // A Coding Agent told "a person says" about a machine's Finding would be
+  // told something untrue about its own Task.
+  it("says when a hint came from the Code Review Agent, not a person", async () => {
+    const { runner, input, calls } = await setup({ results: [passing()] });
+
+    await runner.runSlice(
+      input({
+        hint: {
+          from: "codeReview",
+          issues: [
+            {
+              summary: "SEC-01 (blocking) in server/app.ts:3: a key in source",
+              evidence: "Read it from process.env instead.",
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(calls.at(-1)!.issues).toEqual([
+      "The Code Review Agent refused this Slice: SEC-01 (blocking) in server/app.ts:3: a key in source",
     ]);
   });
 

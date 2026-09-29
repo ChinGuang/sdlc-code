@@ -156,9 +156,11 @@ classDiagram
   class Finding {
     ruleId
     severity
-    location
+    file
+    line
+    message
     suggestion
-    source: linter | reviewAgent
+    source: linter | codeReview
   }
   class Rule {
     id
@@ -172,6 +174,8 @@ classDiagram
     name
     template
     testScript
+    lintScript
+    reviewStandard
     baseSnapshotId
   }
   class AgentConfig {
@@ -483,8 +487,10 @@ sequenceDiagram
   CR-->>O: Findings (Rule ID, severity, location, suggestion)
   alt blocking Findings
     O->>C: fix Task with blocking Findings
+    Note over O,C: the last Slice is built again with the Findings as its hint,<br/>and spends the Run's review Retry Budget (3)
     C-->>O: fixed
     O->>O: re-test Slice, re-review
+    Note over O: a review that will not pass, or one that ran out of<br/>turns or Token Budget, escalates instead of delivering
   else no blocking Findings
     O->>G: push run branch, open PR (non-blocking Findings in description)
     G-->>O: PR number

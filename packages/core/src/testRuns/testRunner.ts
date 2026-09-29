@@ -144,7 +144,7 @@ export class SandboxTestRunner implements TestRunner {
   }
 }
 
-type UploadPlan = {
+export type UploadPlan = {
   changed: TemplateFile[];
   removed: string[];
   withheld: string[];
@@ -190,15 +190,19 @@ export function testCommand(
 }
 
 /** The API no longer has something the run named. */
-function isGone(error: unknown): boolean {
+export function isGone(error: unknown): boolean {
   return (
     error instanceof SandboxApiError &&
     (error.status === 404 || error.status === 410)
   );
 }
 
-function toOutcome(result: RunResult, plan: UploadPlan): TestRunOutcome {
-  const evidence: TestRunEvidence = {
+/** What a sandbox run did, for an Issue Report, a Finding or the dashboard. */
+export function runEvidence(
+  result: RunResult,
+  plan: UploadPlan,
+): TestRunEvidence {
+  return {
     operationId: result.operationId,
     exitCode: result.exitCode,
     timedOut: result.timedOut,
@@ -209,6 +213,10 @@ function toOutcome(result: RunResult, plan: UploadPlan): TestRunOutcome {
     removedFiles: plan.removed,
     withheldFiles: plan.withheld,
   };
+}
+
+function toOutcome(result: RunResult, plan: UploadPlan): TestRunOutcome {
+  const evidence = runEvidence(result, plan);
   const parsed = parseTestScriptOutput(result.stdout);
   if ("problem" in parsed)
     return {

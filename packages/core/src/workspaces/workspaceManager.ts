@@ -121,6 +121,12 @@ export interface WorkspaceManager {
   /** The application's files at a commit, for a Test Run. Text files only. */
   readFiles: (commit: string) => Promise<TemplateFile[]>;
   /**
+   * Everything the Run has changed since it started, as a unified diff, for the
+   * Code Review Agent (T19). Cut at `maxBytes` with a line saying so, because a
+   * diff has to fit in a model's context.
+   */
+  runDiff: (maxBytes?: number) => Promise<string>;
+  /**
    * After a passing Test Run of the merged code: it becomes one Slice Commit
    * on the run branch, and the Slice's worktrees are discarded. Returns its
    * sha, for the Slice's record (SliceStore.moveSlice to "passed").
@@ -150,6 +156,8 @@ const DEFAULT_AUTHOR: GitAuthor = {
 const WORKSPACE_REFS = "refs/heads/sdlc-workspace/";
 /** Remembers where the run branch started, so Slice Commits can be told apart. */
 const START_REF = "refs/sdlc-run/start";
+/** As much diff as a review can read; Nemotron Ultra has room for far more. */
+const DEFAULT_DIFF_BYTES = 200_000;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const NO_HOOKS_DIR = ".no-hooks";
 const WORKSPACE_FOLDER = /^[A-Za-z0-9_-]{1,64}-(backend|frontend|merge)$/;
@@ -335,6 +343,23 @@ export class GitWorkspaceManager implements WorkspaceManager {
       commit: await this.#commitOf("HEAD", merge.dir),
       base,
     };
+  };
+
+  runDiff = async (maxBytes = DEFAULT_DIFF_BYTES): Promise<string> => {
+    const diff = await this.#run(this.#repoDir, [
+      "diff",
+      // Function context in the hunk headers, so a reviewer can see where it is.
+      "--unified=5",
+      "--no-color",
+      `${await this.#commitOf(START_REF)}..${await this.lastSliceCommit()}`,
+    ]);
+    const bytes = Buffer.from(diff.stdout, "utf8");
+    if (bytes.byteLength <= maxBytes) return diff.stdout;
+    // Cut the bytes, then the partial line, and any half-written character the
+    // cut left behind (toString turns those into U+FFFD).
+    const kept = bytes.subarray(0, maxBytes).toString("utf8");
+    const whole = kept.slice(0, kept.lastIndexOf("\n") + 1).replace(/�/g, "");
+    return `${whole}…(the diff is ${bytes.byteLength} bytes; cut here)\n`;
   };
 
   readFiles = async (commit: string): Promise<TemplateFile[]> => {

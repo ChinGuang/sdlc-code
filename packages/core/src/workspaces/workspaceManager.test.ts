@@ -431,6 +431,56 @@ describe("GitWorkspaceManager.commitSlice", () => {
   });
 });
 
+describe("GitWorkspaceManager.runDiff", () => {
+  it("is everything the Run changed since it started, and nothing else", async () => {
+    const { manager } = await setup();
+    const { backend, frontend } = await builtSlice(manager);
+    const merged = await manager.mergeSlice("slice-1", [backend, frontend]);
+    if (merged.status !== "merged") throw new Error("the Slice did not merge");
+    await manager.commitSlice(merged, PASSED, "Slice 1: Todos");
+
+    const diff = await manager.runDiff();
+
+    expect(diff).toContain("+++ b/server/todos.ts");
+    expect(diff).toContain("+export const todos = [];");
+    expect(diff).toContain("+++ b/src/TodoList.tsx");
+    // The scaffold is where the Run started, so it is not a change.
+    expect(diff).not.toContain("server/app.ts");
+  });
+
+  it("is empty before any Slice has been committed", async () => {
+    const { manager } = await setup();
+    await builtSlice(manager);
+
+    expect(await manager.runDiff()).toBe("");
+  });
+
+  it("cuts a diff that would not fit, on a line, saying how big it was", async () => {
+    const { manager } = await setup();
+    const backend = await manager.openWorkspace("slice-1", "backend");
+    write(
+      backend,
+      "server/long.ts",
+      `${Array.from(
+        { length: 400 },
+        (_, line) => `export const value${line} = "${line}";`,
+      ).join("\n")}\n`,
+    );
+    await manager.saveWorkspace(backend, "backend: a long file");
+    const merged = await manager.mergeSlice("slice-1", [backend]);
+    if (merged.status !== "merged") throw new Error("the Slice did not merge");
+    await manager.commitSlice(merged, PASSED, "Slice 1: long");
+
+    const cut = await manager.runDiff(2000);
+
+    expect(Buffer.byteLength(cut)).toBeLessThan(2100);
+    expect(cut).toMatch(/…\(the diff is \d+ bytes; cut here\)\n$/);
+    // Cut on a line boundary: no half line before the note.
+    const lines = cut.split("\n");
+    expect(lines.at(-3)).toMatch(/^\+export const value\d+ = "\d+";$/);
+  });
+});
+
 describe("GitWorkspaceManager discard and reset", () => {
   it("discards a Slice's Workspaces, so its next attempt starts clean", async () => {
     const { manager } = await setup();

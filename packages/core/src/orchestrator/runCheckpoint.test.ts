@@ -42,7 +42,21 @@ function memory(): RunMemoryState {
         },
       ],
     ]),
-    hints: new Map([["slice-2", "Validate the title before saving it."]]),
+    hints: new Map([
+      [
+        "slice-2",
+        {
+          from: "codeReview" as const,
+          issues: [
+            {
+              summary: "SEC-02 (blocking) in server/todos.ts: unvalidated body",
+              evidence: "Validate the title before saving it.",
+            },
+          ],
+        },
+      ],
+    ]),
+    reviewRetries: 2,
   };
 }
 
@@ -63,7 +77,10 @@ describe("checkpointPayload and memoryFromCheckpoint", () => {
     const live = memory();
     const payload = checkpointPayload(live);
 
-    live.hints.set("slice-2", "changed after the Checkpoint");
+    live.hints.set("slice-2", {
+      from: "person",
+      issues: [{ summary: "changed after", evidence: "the Checkpoint" }],
+    });
     live.revisions.push({
       agentRole: "uiDesign",
       documentKind: "uiSpec",
@@ -71,9 +88,10 @@ describe("checkpointPayload and memoryFromCheckpoint", () => {
     });
 
     expect(Object.keys(payload.hints)).toEqual(["slice-2"]);
-    expect(payload.hints["slice-2"]).toBe(
-      "Validate the title before saving it.",
-    );
+    expect(payload.hints["slice-2"]).toMatchObject({
+      from: "codeReview",
+      issues: [{ evidence: "Validate the title before saving it." }],
+    });
     expect(payload.revisions).toHaveLength(1);
   });
 
@@ -82,6 +100,7 @@ describe("checkpointPayload and memoryFromCheckpoint", () => {
       revisions: [],
       histories: new Map(),
       hints: new Map(),
+      reviewRetries: 0,
     };
 
     expect(checkpointPayload(empty)).toEqual({
@@ -89,6 +108,7 @@ describe("checkpointPayload and memoryFromCheckpoint", () => {
       revisions: [],
       histories: {},
       hints: {},
+      reviewRetries: 0,
     });
     expect(memoryFromCheckpoint(checkpointPayload(empty))).toEqual(empty);
   });
@@ -109,6 +129,29 @@ describe("checkpointPayload and memoryFromCheckpoint", () => {
       { ...checkpointPayload(memory()), hints: { "slice-2": 7 } },
     ])
       expect(memoryFromCheckpoint(payload), JSON.stringify(payload)).toBeNull();
+  });
+
+  // T18 wrote hints as bare strings and had no review counter.
+  it("reads a Checkpoint written before the review existed", () => {
+    const old = {
+      version: CHECKPOINT_VERSION,
+      revisions: [],
+      histories: {},
+      hints: { "slice-2": "Validate the title before saving it." },
+    };
+
+    const back = memoryFromCheckpoint(old);
+
+    expect(back?.reviewRetries).toBe(0);
+    expect(back?.hints.get("slice-2")).toEqual({
+      from: "person",
+      issues: [
+        {
+          summary: "Validate the title before saving it.",
+          evidence: "Validate the title before saving it.",
+        },
+      ],
+    });
   });
 
   it("keeps an Issue Report whole, because it is what a retry is told", () => {
