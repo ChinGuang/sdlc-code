@@ -69,7 +69,10 @@ export const PullRequestGateBody = z.discriminatedUnion("choice", [
   }),
 ]);
 
-/** "--no-draft-pr" in the CLI; a Draft PR of what passed unless unticked. */
+/**
+ * The abort dialog's checkbox, named as the Escalation names it ("--no-draft-pr"
+ * in the CLI): a Draft PR of what passed unless a person unticks it.
+ */
 export const AbortBody = z
-  .strictObject({ openDraftPr: z.boolean().default(true) })
-  .default({ openDraftPr: true });
+  .strictObject({ openDraftPrOnAbort: z.boolean().default(true) })
+  .default({ openDraftPrOnAbort: true });

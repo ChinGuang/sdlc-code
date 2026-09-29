@@ -8,13 +8,20 @@
  * Run is already advancing only records the decision; the running loop picks it
  * up, because `advance` reads the Run's state from the stores each time round.
  */
-import type { Run, RunRuntime } from "@sdlc-code/core";
+import {
+  IllegalTransitionError,
+  MissingKeyError,
+  type Run,
+  type RunRuntime,
+} from "@sdlc-code/core";
 import type { Observable } from "rxjs";
 import type { EventLog } from "./eventLog.js";
 import {
   RunConflictError,
   RunNotFoundError,
+  RuntimeUnavailableError,
   type RunDetail,
+  type RunLifecycle,
   type RunService,
   type RunSummary,
   type StartRunRequest,
@@ -29,20 +36,28 @@ export type ServiceRuntime = Pick<
   | "documents"
   | "slices"
   | "escalations"
-  | "gates"
   | "orchestrator"
   | "startRun"
   | "resume"
+  | "redact"
+  | "close"
 >;
 
 export type RuntimeRunServiceOptions = {
-  /** Made on first use: a server with no keys still starts and says why. */
+  /**
+   * The runtime, made on first use: a server without its keys still starts,
+   * answers /health, and says what is missing. Throws RuntimeUnavailableError
+   * until it can be made.
+   */
   runtime: () => ServiceRuntime;
+  /** Whether the runtime was ever made, so shutting down does not make one. */
+  made: () => boolean;
   log: EventLog;
 };
 
-export class RuntimeRunService implements RunService {
+export class RuntimeRunService implements RunService, RunLifecycle {
   #runtime: () => ServiceRuntime;
+  #made: () => boolean;
   #log: EventLog;
   /** Runs being advanced now, by id, with the loop doing it. */
   #advancing = new Map<string, Promise<void>>();
@@ -51,11 +66,20 @@ export class RuntimeRunService implements RunService {
 
   constructor(options: RuntimeRunServiceOptions) {
     this.#runtime = options.runtime;
+    this.#made = options.made;
     this.#log = options.log;
   }
 
   startRun = async (request: StartRunRequest): Promise<RunSummary> => {
-    const run = await this.#runtime().startRun(request);
+    let run: Run;
+    try {
+      run = await this.#runtime().startRun(request);
+    } catch (error) {
+      // A Target Repo without GITHUB_TOKEN: the server cannot do this one yet.
+      if (error instanceof MissingKeyError)
+        throw new RuntimeUnavailableError(error.message);
+      throw error;
+    }
     this.#advance(run.id);
     return summary(run);
   };
@@ -79,43 +103,64 @@ export class RuntimeRunService implements RunService {
       this.#runtime().orchestrator.decidePullRequest(runId, decision),
     );
 
+  abortRun = (runId: string, openDraftPrOnAbort: boolean): RunDetail => {
+    if (this.#waiting(this.#run(runId)).for !== "escalation")
+      throw new RunConflictError(
+        `Run ${runId} is not at an Escalation, and a Run is aborted from one.`,
+      );
+    return this.resolveEscalation(runId, {
+      choice: "abort",
+      openDraftPrOnAbort,
+    });
+  };
+
   events = (runId: string, after?: number): Observable<StreamedEvent> => {
     this.#run(runId);
     return this.#log.follow(runId, after);
   };
 
-  /**
-   * Picks up every Run the server was working on when it stopped (diagram 9):
-   * what was in flight is discarded, and each continues in the background.
-   */
-  resumeUnfinished = async (): Promise<string[]> => {
+  resumeUnfinished: RunLifecycle["resumeUnfinished"] = async () => {
     const runtime = this.#runtime();
     const resumed: string[] = [];
+    const failed: Array<{ runId: string; problem: string }> = [];
     for (const run of runtime.runs.listUnfinishedRuns()) {
-      await runtime.resume(run.id);
-      this.#advance(run.id);
-      resumed.push(run.id);
+      try {
+        await runtime.resume(run.id);
+        this.#advance(run.id);
+        resumed.push(run.id);
+      } catch (error) {
+        failed.push({ runId: run.id, problem: this.#describe(error) });
+      }
     }
-    return resumed;
+    return { resumed, failed };
   };
 
-  /** Resolves once no Run is being advanced; for tests and for shutting down. */
+  /**
+   * Closes what the runtime opened. It does not wait for Runs being advanced:
+   * a Step can take minutes, and the next start resumes it anyway.
+   */
+  shutdown = async (): Promise<void> => {
+    if (this.#made()) await this.#runtime().close();
+  };
+
+  /** Resolves once no Run is being advanced. For tests. */
   settled = async (): Promise<void> => {
     while (this.#advancing.size > 0)
       await Promise.allSettled([...this.#advancing.values()]);
   };
 
   /**
-   * A person's decision, checked by the Orchestrator itself: a decision it
-   * refuses (no open Gate, an empty hint) is a conflict the person can fix,
-   * and nothing is advanced.
+   * A person's decision, checked by the Orchestrator: a decision it refuses (no
+   * open Gate, an empty hint, a move the lifecycle does not allow) is a conflict
+   * the person can fix, and nothing is advanced. Anything else is a fault, and
+   * goes on as one.
    */
   #decide(runId: string, decide: () => unknown): RunDetail {
     this.#run(runId);
     try {
       decide();
     } catch (error) {
-      if (error instanceof Error) throw new RunConflictError(error.message);
+      if (isRefusal(error)) throw new RunConflictError(error.message);
       throw error;
     }
     this.#advance(runId);
@@ -136,17 +181,23 @@ export class RuntimeRunService implements RunService {
         } while (this.#again.has(runId));
       } catch (error) {
         // A Run that throws has not failed by the domain's rules; it stopped,
-        // and a restart resumes it. The person needs to know it stopped.
+        // and a restart resumes it. Its followers need to know it stopped.
         this.#log.publish({
           runId,
           type: "problem",
-          problem: `The Run stopped: ${error instanceof Error ? error.message : String(error)}`,
+          problem: `The Run stopped: ${this.#describe(error)}`,
         });
       } finally {
         this.#advancing.delete(runId);
       }
     })();
     this.#advancing.set(runId, loop);
+  }
+
+  /** An error as a person may read it, with the runtime's keys taken out. */
+  #describe(error: unknown): string {
+    const text = error instanceof Error ? error.message : String(error);
+    return this.#made() ? this.#runtime().redact(text) : text;
   }
 
   #run(runId: string): Run {
@@ -160,6 +211,7 @@ export class RuntimeRunService implements RunService {
     return {
       ...summary(run),
       slices: runtime.slices.listSlices(run.id).map((slice) => ({
+        id: slice.id,
         title: slice.title,
         status: slice.status,
         isWalkingSkeleton: slice.isWalkingSkeleton,
@@ -177,6 +229,7 @@ export class RuntimeRunService implements RunService {
           }
         : null,
       advancing: this.#advancing.has(run.id),
+      lastSeq: this.#log.lastSeq(run.id),
     };
   }
 
@@ -209,6 +262,18 @@ export class RuntimeRunService implements RunService {
         return { for: "nothing" };
     }
   }
+}
+
+/**
+ * The Orchestrator refuses a decision with a plain Error or an illegal move;
+ * a database or network fault is some other kind, and is not the person's to
+ * fix.
+ */
+function isRefusal(error: unknown): error is Error {
+  return (
+    error instanceof IllegalTransitionError ||
+    (error instanceof Error && error.constructor === Error)
+  );
 }
 
 function summary(run: Run): RunSummary {

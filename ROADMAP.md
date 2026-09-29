@@ -15,9 +15,9 @@ The whole pipeline works end to end against the real world — Nemotron on Token
 | M0 Spikes | Done | 3 spike documents, PRs #1–#3 |
 | M1 Foundation | Done | PRs #4–#9 |
 | M2 Design Phase | Done | PRs #10–#12 |
-| M3 Build loop | Done (T18 in review) | PRs #13–#21, #23 |
+| M3 Build loop | Done | PRs #13–#21, #23, #24 |
 | M4 Review & delivery | Done | PRs #26, #27 |
-| M5 Interfaces | Scaffolds only | PRs #4, #6 |
+| M5 Interfaces | T21 done; dashboard and CLI next | PRs #4, #6, #28 |
 | M6 Hardening & submission | Not started | — |
 
 ---
@@ -56,13 +56,19 @@ Everything here is merged into `main`, has tests, and has been exercised by a re
 - **T15 Coding Agents** — Backend and Frontend, file tools scoped to their Workspace and refused outside it, context per Model Capabilities, the application's file list up front, side-specific rules, source-only writes, and a `package.json` that cannot lose a dependency.
 - **T16 Testing Agent + Issue Reports** — Test Run results become Issue Reports with failing test, error, evidence, suspected owner and a signature for Loop detection.
 - **T17 Orchestrator** — Slice Plan execution, Owner resolution in the fixed order of diagram 7, Retry Budget of 3, Token Budget, Loop detection, Escalation with its four choices, and the auto-mode Failed path.
-- **Real runs** — `packages/core/scripts/realRun.ts` wires the real clients together and is how the product is exercised end to end. Latest result: **3 Slice Commits** of a todo app, each passing `install, unit, boot, smoke, stop` in the sandbox, in 11.7 minutes.
+- **Real runs** — `packages/core/src/runtime/runRuntime.ts` wires the real clients together, and `packages/core/scripts/realRun.ts` drives a Run with it from a terminal. Latest result: **3 Slice Commits** of a todo app, each passing `install, unit, boot, smoke, stop` in the sandbox, in 11.7 minutes.
 
 ### M4 — Review & delivery
 
 - **T19 Linters + Code Review Agent** — ESLint and the TypeScript compiler run in the sandbox over the Slice Commits, and a Code Review Agent reads the Run's whole diff against the layered Review Standard (19 baseline Rules plus the user's `AGENTS.md`) and the Approved Documents. Every Finding cites a Rule and takes that Rule's severity. Blocking Findings build the last Slice again, spending a review Retry Budget of 3; the rest go into the pull request. A review that ran out of turns or Token Budget escalates rather than passing for clean.
 
 - **T20 PR Gate + Draft PR** — a Run that built every Slice pushes its run branch and opens a pull request, then waits at the PR Gate; approve finishes it, request changes builds the last Slice again with the comments. A Run that stopped early offers a Draft PR of only what passed a Test Run, proved against real git by reading the pushed commits. Nothing is pushed when a person declines it or when no Slice passed. The Findings in the description are empty until T19.
+
+### M5 — Interfaces
+
+- **T21 Server API + SSE** — a local-only (127.0.0.1) API to start and list Runs, read one with what it is waiting for, answer the Design Gate, the Escalation and the PR Gate, and abort; and a numbered SSE stream per Run carrying every Step as it starts and ends, every status a Run moves to, each agent turn, Test Run and delivery. A request never waits for a Run: the Run advances in the background, one loop per Run. On start the server resumes every unfinished Run. The wiring of a real Run is one runtime, shared with the terminal script.
+  - **Left for T22 and T23**, because they need the core to store or expose more: the documents' contents and the Penpot page link at the Design Gate, which documents a Verdict made Stale, the Findings and Issue Reports as records (today they reach the stream as text), Tasks and Steps in a Run's detail, token usage as events, and an Escalation's Working Memory.
+  - **Decided, not built**: abort is an Escalation's choice (CONTEXT.md), so a Run that is building cannot be aborted until it asks a person. `sdlccode abort` (T24) inherits that.
 
 ### Proven by running it, not only by tests
 
@@ -74,8 +80,7 @@ Eleven failures found by real Runs are fixed, each with a test and a comment rec
 
 | Item | State | What is left |
 |---|---|---|
-| **T18 Checkpoints + resume** | Implemented with tests on `feat/checkpoints-resume`, both review axes done and their findings fixed. Not merged. | Open the PR and merge it. |
-| **Finishing a whole application in one Run** | Three Slices of five fit in a 2M Token Budget; the fourth runs out. Nothing is broken — it costs about 700k tokens per Slice. | With T18 merged, finish the demo app across resumed Runs (`--resume --budget`), or reduce per-Slice cost first. |
+| **Finishing a whole application in one Run** | Three Slices of five fit in a 2M Token Budget; the fourth runs out. Nothing is broken — it costs about 700k tokens per Slice. | Finish the demo app across resumed Runs (`--resume --budget`), or reduce per-Slice cost first. |
 | **Unowned install failures** | An Issue Report from a failed `install` step belongs to no owner, so it escalates and ends an auto-mode Run. The manifest guard removed the likeliest cause. | Route an install failure to whoever last wrote `package.json`. |
 | **Board images after a resume** | Deliberate: Penpot exports are not in a Checkpoint, so a resumed Run works from the UI Spec alone. | Decide whether to re-export from the board ids the `penpotDesign` document already keeps. |
 
@@ -90,7 +95,6 @@ In the plan's order. Dates are from [docs/PLAN.md](docs/PLAN.md); M4 and M5 over
 
 ### M5 — Interfaces
 
-- **T21 Server API + SSE** · Oct 9–10 — a local-only API for runs, gates, verdicts, escalation decisions and abort, with an SSE stream per Run. `apps/server` is a NestJS app with only a health endpoint today, and this is also where "resume unfinished Runs on startup" belongs.
 - **T22 Dashboard: Runs + Run Overview** · Oct 11–13 — boards 01 and 02. `apps/web` is a Vite scaffold today.
 - **T23 Dashboard: Design Gate, PR Gate, Escalation** · Oct 14–15 — boards 03, 04 and 05.
 - **T24 CLI `sdlccode`** · Oct 16 — `run`, `gate show`, `gate approve`, `gate request-changes`, `status --follow`, `abort`. `apps/cli` handles `--help` and `--version` today.
@@ -109,4 +113,4 @@ Playwright tests in the Stack Profile · deploying the server on Nebius AI Cloud
 
 ## What the critical path looks like
 
-A Run now goes: request → design → Design Gate → Slices built, tested and committed → pull request → PR Gate → done, with a Draft PR of what it finished when it stops early (T20). The whole pipeline a Run needs is now there, reviewed and delivered. What is missing is everywhere a person would use it from: **T21**'s local API and SSE stream, then the dashboard (**T22**, **T23**) and the CLI (**T24**), and the demo, README and video of **M6**. The one thing to watch before the demo is cost: a Slice still runs to roughly 700k tokens, so a five-Slice application wants either a bigger budget or a resumed Run.
+A Run now goes: request → design → Design Gate → Slices built, tested and committed → pull request → PR Gate → done, with a Draft PR of what it finished when it stops early (T20). The whole pipeline a Run needs is now there, reviewed and delivered. T21's local API and event stream are in place; what is missing is everywhere a person would use it from: the dashboard (**T22**, **T23**) and the CLI (**T24**), and the demo, README and video of **M6**. The API does not yet expose everything those screens need — see T21's entry above. The one thing to watch before the demo is cost: a Slice still runs to roughly 700k tokens, so a five-Slice application wants either a bigger budget or a resumed Run.

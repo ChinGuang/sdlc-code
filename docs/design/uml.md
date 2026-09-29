@@ -26,6 +26,7 @@ flowchart LR
   subgraph Local["Local machine"]
     SRV["apps/server<br/>HTTP API + SSE"]
     subgraph Core["packages/core"]
+      RT["Runtime<br/>wires a Run · reports its events"]
       ORC["Orchestrator"]
       AG["Agents<br/>System Design · UI Design<br/>Backend/Frontend Coding<br/>Testing · Code Review"]
       LOOP["Agent loop<br/>tool calling"]
@@ -55,7 +56,9 @@ flowchart LR
 
   WEB -- "REST + SSE" --> SRV
   CLI -- "REST + SSE" --> SRV
-  SRV --> ORC
+  SRV --> RT
+  RT -- "events: Steps, status, Test Runs" --> SRV
+  RT --> ORC
   ORC --> AG
   AG --> LOOP
   ORC --> ROUTE

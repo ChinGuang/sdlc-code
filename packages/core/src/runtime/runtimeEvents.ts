@@ -12,6 +12,19 @@ import type { PenpotErrorKind } from "@sdlc-code/clients";
 
 export type RuntimeEvent = { runId: string } & (
   | { type: "status"; status: RunStatus }
+  /**
+   * A Step began or ended (CONTEXT.md "Step"): the unit a person follows, and
+   * what the plan's stream is required to carry in order.
+   */
+  | {
+      type: "step";
+      phase: "started" | "completed" | "discarded";
+      stepId: string;
+      taskId: string;
+      role: AgentRole;
+      /** Null for a design Task, which belongs to no Slice. */
+      sliceId: string | null;
+    }
   /** One model turn: which tools it called, or an answer. */
   | { type: "agentTurn"; role: AgentRole; toolCalls: string[] }
   | { type: "toolFailed"; role: AgentRole; tool: string; problem: string }

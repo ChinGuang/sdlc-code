@@ -4,16 +4,19 @@
  * "how a Run is built" is written once and what happens is reported through one
  * event sink (runtimeEvents.ts).
  *
- * It owns many Runs, not one: the stores and the clients are shared, while the
- * Workspaces, the Token Budget and the Penpot page belong to a Run and are made
- * when that Run first needs them.
+ * It owns many Runs, not one: the stores and the clients are shared, while a
+ * Run's Workspaces, Token Budget and Penpot page are made from its record when
+ * it needs them. None of those hold state of their own — the repository is on
+ * disk and the budget is in the database — so nothing is cached per Run.
  *
- * Secrets are read from `env` and handed to the clients that need them. They are
- * never stored, never logged and never part of an event.
+ * The keys it reads from `env` go only to the clients that need them. Every
+ * event it reports is redacted against them first, so a client that leaks a key
+ * into an error message still cannot put it on a stream or into a log.
  */
 import {
   connectPenpotMcp,
   NebiusSandboxClient,
+  redactSecrets,
   RestGitHubClient,
   TokenFactoryChatClient,
   TokenGitPusher,
@@ -27,15 +30,15 @@ import {
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentRole } from "../agentRoles.js";
-import { ChatAgentLoop, type AgentTask } from "../agentLoop/agentLoop.js";
+import { ChatAgentLoop } from "../agentLoop/agentLoop.js";
+import { RunTokenBudget, StepTranscript } from "../agentLoop/storeAdapters.js";
 import type { AgentTool } from "../agentLoop/tools.js";
-import { StepTranscript } from "../agentLoop/storeAdapters.js";
 import { LoopCodeReviewAgent } from "../agents/codeReview/codeReviewAgent.js";
 import { LoopCodingAgent } from "../agents/coding/codingAgent.js";
 import { LoopSystemDesignAgent } from "../agents/systemDesign/systemDesignAgent.js";
 import { SandboxTestingAgent } from "../agents/testing/testingAgent.js";
-import { PenpotUiCanvas } from "../agents/uiDesign/uiCanvas.js";
 import { runPageName } from "../agents/uiDesign/penpotRender.js";
+import { PenpotUiCanvas } from "../agents/uiDesign/uiCanvas.js";
 import { LoopUiDesignAgent } from "../agents/uiDesign/uiDesignAgent.js";
 import { requestOptionsFor, type AgentConfig } from "../config/agentConfig.js";
 import { loadAgentConfig } from "../config/readConfigFile.js";
@@ -46,16 +49,24 @@ import {
 import type { Run } from "../domain/entities.js";
 import type { RunMode } from "../domain/runLifecycle.js";
 import { openDatabase } from "../persistence/database.js";
-import { SqliteDocumentStore } from "../persistence/documentStore.js";
-import { SqliteEscalationStore } from "../persistence/escalationStore.js";
-import { SqliteGateStore } from "../persistence/gateStore.js";
-import { SqliteRunStore } from "../persistence/runStore.js";
-import { SqliteSliceStore } from "../persistence/sliceStore.js";
+import {
+  SqliteDocumentStore,
+  type DocumentStore,
+} from "../persistence/documentStore.js";
+import {
+  SqliteEscalationStore,
+  type EscalationStore,
+} from "../persistence/escalationStore.js";
+import { SqliteGateStore, type GateStore } from "../persistence/gateStore.js";
+import { SqliteRunStore, type RunStore } from "../persistence/runStore.js";
+import {
+  SqliteSliceStore,
+  type SliceStore,
+} from "../persistence/sliceStore.js";
 import { SqliteSnapshotStore } from "../persistence/snapshotStore.js";
-import { SqliteTaskStore } from "../persistence/taskStore.js";
-import { RunTokenBudget } from "../agentLoop/storeAdapters.js";
-import { AgentDesignPhase } from "../orchestrator/designPhase.js";
+import { SqliteTaskStore, type TaskStore } from "../persistence/taskStore.js";
 import { DocumentDesignGate } from "../orchestrator/designGate.js";
+import { AgentDesignPhase } from "../orchestrator/designPhase.js";
 import { ModelOwnerJudge } from "../orchestrator/ownerJudge.js";
 import { RuleOwnerResolver } from "../orchestrator/ownerResolution.js";
 import { resumeRun, type ResumedRun } from "../orchestrator/resumeRun.js";
@@ -69,8 +80,8 @@ import { SandboxBaseSnapshots } from "../testRuns/baseSnapshots.js";
 import { SandboxLintRunner } from "../testRuns/lintRunner.js";
 import { SandboxTestRunner } from "../testRuns/testRunner.js";
 import { GitWorkspaceManager } from "../workspaces/workspaceManager.js";
-import type { WorkspaceManager } from "../workspaces/workspaceManager.js";
 import { LazyUiCanvas } from "./lazyCanvas.js";
+import { reportingRunStore, reportingTaskStore } from "./reportingStores.js";
 import type { RuntimeEvent, RuntimeEventSink } from "./runtimeEvents.js";
 
 /** Model turns a Step of each kind may take, from what live Runs needed. */
@@ -86,6 +97,23 @@ const PENPOT_RETRY_DELAYS_MS = [
   5_000, 10_000, 15_000, 30_000, 30_000, 60_000, 60_000,
 ];
 
+/** A Run with nowhere to push: its Slice Commits stay in the local repository. */
+export const LOCAL_OWNER = "local";
+
+/**
+ * A key the runtime needs is not set. It names the variable, never a value, so
+ * an interface can show it as it is.
+ */
+export class MissingKeyError extends Error {
+  readonly variable: string;
+
+  constructor(variable: string, why: string) {
+    super(`${variable} is not set${why ? `: ${why}` : "."}`);
+    this.name = "MissingKeyError";
+    this.variable = variable;
+  }
+}
+
 export type NewRunRequest = {
   projectRequest: string;
   mode: RunMode;
@@ -97,7 +125,11 @@ export type NewRunRequest = {
 export type RunRuntimeOptions = {
   /** Where the database and every Run's repository live. */
   dataDir: string;
-  /** Read for NEBIUS_API_KEY, NEBIUS_AI_PROJECT, PENPOT_MCP_URL, GITHUB_TOKEN. */
+  /**
+   * NEBIUS_API_KEY, NEBIUS_AI_PROJECT and PENPOT_MCP_URL are required, and
+   * checked before anything is opened; GITHUB_TOKEN is needed for a Run with a
+   * Target Repo.
+   */
   env: Record<string, string | undefined>;
   events?: RuntimeEventSink;
   profile?: StackProfile;
@@ -106,49 +138,69 @@ export type RunRuntimeOptions = {
   /** Tests pass their own config; otherwise it is loaded from `configPath`. */
   config?: AgentConfig;
   /** sdlc-code.config.json; per-role models come from it and from env. */
-  configPath?: string;
+  configPath: string;
 };
 
-/** Everything the interfaces need to own Runs. */
+/** Everything an interface needs to own Runs. */
 export interface RunRuntime {
-  runs: SqliteRunStore;
-  documents: SqliteDocumentStore;
-  slices: SqliteSliceStore;
-  tasks: SqliteTaskStore;
-  escalations: SqliteEscalationStore;
-  gates: SqliteGateStore;
+  runs: RunStore;
+  documents: DocumentStore;
+  slices: SliceStore;
+  tasks: TaskStore;
+  escalations: EscalationStore;
+  gates: GateStore;
   orchestrator: RunOrchestrator;
   /** A new Run, with its repository scaffolded from the Stack Profile. */
   startRun: (request: NewRunRequest) => Promise<Run>;
   /** Makes an interrupted Run safe to continue (T18). */
   resume: (runId: string) => Promise<ResumedRun>;
-  /** Where this Run's repository and Workspaces are. */
+  /** Where this Run's files are, and the repository its Slices commit to. */
   runDir: (runId: string) => string;
-  /** Closes the database and the Penpot connection, if one was made. */
+  repoDir: (runId: string) => string;
+  /** Any text with this runtime's keys taken out, for errors it did not make. */
+  redact: (text: string) => string;
+  /** Closes the Penpot connection, if one was made, and then the database. */
   close: () => Promise<void>;
 }
 
 export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
+  // Every required key first: a runtime that cannot run must not have opened
+  // a database it will never close.
+  const apiKey = required(options.env, "NEBIUS_API_KEY");
+  const project = required(options.env, "NEBIUS_AI_PROJECT");
+  const penpotUrl = required(options.env, "PENPOT_MCP_URL");
+  const githubToken = options.env.GITHUB_TOKEN || null;
+  // Keys only: a project id is not a secret, and a short one would mangle
+  // ordinary text if it were taken out everywhere it appears.
+  const secrets = [apiKey, penpotUrl, githubToken ?? ""].concat(
+    userToken(penpotUrl),
+  );
+  const redact = (text: string) => redactSecrets(text, secrets);
+  const emit = (event: RuntimeEvent) =>
+    options.events?.run?.(redactEvent(event, redact));
+
   const profile = options.profile ?? REACT_NODE;
   const config =
     options.config ??
-    loadAgentConfig({
-      path: options.configPath ?? "sdlc-code.config.json",
-      env: options.env,
-    });
-  const emit = (event: RuntimeEvent) => options.events?.run?.(event);
-  const apiKey = required(options.env, "NEBIUS_API_KEY");
+    loadAgentConfig({ path: options.configPath, env: options.env });
 
   mkdirSync(options.dataDir, { recursive: true });
   const db = openDatabase(join(options.dataDir, "sdlc-code.db"));
   const store = { db };
-  const runs = new SqliteRunStore(store);
-  const documents = new SqliteDocumentStore(store);
-  const slices = new SqliteSliceStore(store);
-  const tasks = new SqliteTaskStore(store);
-  const escalations = new SqliteEscalationStore(store);
-  const gates = new SqliteGateStore(store);
-  const gate = new DocumentDesignGate({ db, runs, documents, gates });
+  const runs: RunStore = new SqliteRunStore(store);
+  const documents: DocumentStore = new SqliteDocumentStore(store);
+  const slices: SliceStore = new SqliteSliceStore(store);
+  const tasks: TaskStore = new SqliteTaskStore(store);
+  const escalations: EscalationStore = new SqliteEscalationStore(store);
+  const gates: GateStore = new SqliteGateStore(store);
+  // The Orchestrator moves a Run many times per advance; each move is an event.
+  const reportedRuns = reportingRunStore(runs, emit);
+  const gate = new DocumentDesignGate({
+    db,
+    runs: reportedRuns,
+    documents,
+    gates,
+  });
 
   const client: ChatClient = new TokenFactoryChatClient({
     apiKey,
@@ -156,7 +208,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
   });
   const sandbox = new NebiusSandboxClient({
     token: apiKey,
-    project: required(options.env, "NEBIUS_AI_PROJECT"),
+    project,
     baseUrl: options.env.NEBIUS_SANDBOX_URL || undefined,
   });
   const uploaded = new Map<string, Promise<string>>();
@@ -175,7 +227,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
   const canvas = new LazyUiCanvas({
     connect: async () => {
       const connection = await connectPenpotMcp({
-        url: required(options.env, "PENPOT_MCP_URL"),
+        url: penpotUrl,
         retryDelaysMs: PENPOT_RETRY_DELAYS_MS,
         onWaiting: ({ attempt, delayMs, kind }) =>
           options.events?.penpot?.({
@@ -186,39 +238,35 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
           }),
       });
       const drawing = new PenpotUiCanvas(connection.penpot);
-      await drawing.checkConnection();
+      try {
+        await drawing.checkConnection();
+      } catch (error) {
+        // A connection that cannot draw is closed here: the canvas forgets the
+        // failure and tries again, and each attempt would otherwise leak one.
+        await connection.close().catch(() => {});
+        throw error;
+      }
       return { canvas: drawing, close: connection.close };
     },
   });
 
   const runDir = (runId: string) => join(options.dataDir, runId);
   const repoDir = (runId: string) => join(runDir(runId), "repo.git");
-
-  /** A Run's Workspaces, made once and kept: they hold worktrees on disk. */
-  const workspacesByRun = new Map<string, WorkspaceManager>();
-  const workspacesFor = (run: Run): WorkspaceManager => {
-    const existing = workspacesByRun.get(run.id);
-    if (existing) return existing;
-    const made = new GitWorkspaceManager({
+  const runOf = (runId: string): Run => {
+    const found = runs.getRun(runId);
+    if (!found) throw new Error(`No Run ${runId}.`);
+    return found;
+  };
+  const pageNameFor = (run: Run) =>
+    runPageName(`#${run.id.slice(0, 8)}`, run.projectRequest);
+  const workspacesFor = (run: Run) =>
+    new GitWorkspaceManager({
       repoDir: repoDir(run.id),
       runBranch: run.targetRepo.runBranch,
       workspacesDir: join(runDir(run.id), "workspaces"),
     });
-    workspacesByRun.set(run.id, made);
-    return made;
-  };
+  const budgetFor = (run: Run) => new RunTokenBudget(runs, run.id);
 
-  /** A Run's Token Budget, which every one of its agents spends from. */
-  const budgets = new Map<string, RunTokenBudget>();
-  const budgetFor = (run: Run) => {
-    const existing = budgets.get(run.id);
-    if (existing) return existing;
-    const made = new RunTokenBudget(runs, run.id);
-    budgets.set(run.id, made);
-    return made;
-  };
-
-  /** One agent loop: its Transcript stored under its Step, its turns reported. */
   const loopFor =
     (run: Run, role: AgentRole, maxIterations: number, stepId?: string) =>
     (tools: AgentTool[]) => {
@@ -252,7 +300,6 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
       });
     };
 
-  /** The Testing Agent, reporting what each Test Run found. */
   const testingFor = (run: Run) => {
     const agent = new SandboxTestingAgent({
       runner: new SandboxTestRunner({ sandbox, snapshots, uploaded }),
@@ -284,24 +331,20 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
   };
 
   /**
-   * With a Target Repo the Run pushes its Slice Commits and opens the pull
-   * request; without one there is nowhere to push, so the work stays in the
-   * local repository and the event says so.
+   * A Run with a Target Repo pushes its Slice Commits and opens the pull
+   * request. One without keeps them in the local repository, and says so.
+   * (A Run with a Target Repo and no GITHUB_TOKEN is refused at startRun.)
    */
   const deliveryFor = (run: Run): RunDelivery => {
-    const token = options.env.GITHUB_TOKEN;
-    if (run.targetRepo.owner === LOCAL_OWNER || !token)
+    if (run.targetRepo.owner === LOCAL_OWNER || !githubToken)
       return {
         deliver: async () => {
-          const detail =
-            run.targetRepo.owner === LOCAL_OWNER
-              ? "no Target Repo: the Slice Commits stay in the local repository"
-              : "no GITHUB_TOKEN: nothing could be pushed";
           emit({
             runId: run.id,
             type: "delivery",
             status: "keptLocal",
-            detail,
+            detail:
+              "no Target Repo: the Slice Commits stay in the local repository",
           });
           return { status: "keptLocal", reason: "noTargetRepo" };
         },
@@ -312,8 +355,8 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
       tasks,
       workspaces: workspacesFor(run),
       repoDir: repoDir(run.id),
-      pusher: new TokenGitPusher({ token }),
-      github: new RestGitHubClient({ token }),
+      pusher: new TokenGitPusher({ token: githubToken }),
+      github: new RestGitHubClient({ token: githubToken }),
     });
     return {
       deliver: async (runId, reason) => {
@@ -332,8 +375,20 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
     };
   };
 
+  const reviewFor = (run: Run) =>
+    new AgentRunReview({
+      documents,
+      workspaces: workspacesFor(run),
+      profile: () => profile,
+      linters: new SandboxLintRunner({ sandbox, snapshots, uploaded }),
+      agent: new LoopCodeReviewAgent({
+        createLoop: loopFor(run, "codeReview", TURNS.codeReview),
+      }),
+      userStandards: options.userStandards,
+    });
+
   const orchestrator: RunOrchestrator = new AgentRunOrchestrator({
-    runs,
+    runs: reportedRuns,
     documents,
     slices,
     tasks,
@@ -372,9 +427,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
       deliver: (runId, reason) =>
         deliveryFor(runOf(runId)).deliver(runId, reason),
     },
-    codeReview: {
-      reviewRun: (run) => reviewFor(run).reviewRun(run),
-    },
+    codeReview: { reviewRun: (run) => reviewFor(run).reviewRun(run) },
     onReviewProblem: (runId, problem) =>
       emit({ runId, type: "reviewProblem", problem }),
     sliceRunner: async (run, onCheckpoint) =>
@@ -388,7 +441,8 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
             budget: budgetFor(run),
           }),
         }),
-        tasks,
+        // Steps start and end in here; each is an event.
+        tasks: reportingTaskStore(tasks, run.id, emit),
         slices,
         budget: budgetFor(run),
         codingAgent: (side, stepId) =>
@@ -413,26 +467,6 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
       }),
   });
 
-  const reviewFor = (run: Run) =>
-    new AgentRunReview({
-      documents,
-      workspaces: workspacesFor(run),
-      profile: () => profile,
-      linters: new SandboxLintRunner({ sandbox, snapshots, uploaded }),
-      agent: new LoopCodeReviewAgent({
-        createLoop: loopFor(run, "codeReview", TURNS.codeReview),
-      }),
-      userStandards: options.userStandards,
-    });
-
-  const runOf = (runId: string): Run => {
-    const found = runs.getRun(runId);
-    if (!found) throw new Error(`No Run ${runId}.`);
-    return found;
-  };
-  const pageNameFor = (run: Run) =>
-    runPageName(`#${run.id.slice(0, 8)}`, run.projectRequest);
-
   return {
     runs,
     documents,
@@ -440,30 +474,15 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
     tasks,
     escalations,
     gates,
-    // Every status change is an event, so a client following a Run sees it
-    // without asking.
-    orchestrator: {
-      advance: async (runId) => {
-        const progress = await orchestrator.advance(runId);
-        emit({ runId, type: "status", status: runOf(runId).status });
-        return progress;
-      },
-      decideDesign: (runId, verdicts) => {
-        const decision = orchestrator.decideDesign(runId, verdicts);
-        emit({ runId, type: "status", status: runOf(runId).status });
-        return decision;
-      },
-      resolveEscalation: (runId, resolution) => {
-        orchestrator.resolveEscalation(runId, resolution);
-        emit({ runId, type: "status", status: runOf(runId).status });
-      },
-      decidePullRequest: (runId, decision) => {
-        orchestrator.decidePullRequest(runId, decision);
-        emit({ runId, type: "status", status: runOf(runId).status });
-      },
-    },
+    orchestrator,
     startRun: async (request) => {
       const [owner, name] = (request.targetRepo ?? "").split("/");
+      // Found out now rather than after hours of work that cannot be pushed.
+      if (owner && !githubToken)
+        throw new MissingKeyError(
+          "GITHUB_TOKEN",
+          `a Run with a Target Repo (${request.targetRepo}) needs it to push its pull request.`,
+        );
       const run = runs.createRun({
         projectRequest: request.projectRequest,
         mode: request.mode,
@@ -483,13 +502,15 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
       emit({ runId: run.id, type: "status", status: run.status });
       return run;
     },
-    resume: async (runId) =>
+    resume: (runId) =>
       resumeRun(runId, {
         runs,
         tasks,
         workspaces: workspacesFor(runOf(runId)),
       }),
     runDir,
+    repoDir,
+    redact,
     close: async () => {
       await canvas.close();
       db.close();
@@ -497,17 +518,40 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
   };
 }
 
-/** A Run with nowhere to push: its Slice Commits stay in the local repository. */
-export const LOCAL_OWNER = "local";
-
 function required(
   env: Record<string, string | undefined>,
   name: string,
 ): string {
   const value = env[name];
-  if (!value) throw new Error(`${name} is not set.`);
+  if (!value) throw new MissingKeyError(name, "");
   return value;
 }
 
-/** Re-exported so callers can build a Task without importing the loop. */
-export type { AgentTask };
+/** The token inside a Penpot MCP URL, which errors quote on their own. */
+function userToken(url: string): string[] {
+  try {
+    const token = new URL(url).searchParams.get("userToken");
+    return token ? [token] : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Every string an event carries, with the keys taken out. */
+function redactEvent(
+  event: RuntimeEvent,
+  redact: (text: string) => string,
+): RuntimeEvent {
+  return Object.fromEntries(
+    Object.entries(event).map(([key, value]) => [
+      key,
+      typeof value === "string"
+        ? redact(value)
+        : Array.isArray(value)
+          ? value.map((item) =>
+              typeof item === "string" ? redact(item) : item,
+            )
+          : value,
+    ]),
+  ) as RuntimeEvent;
+}

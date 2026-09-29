@@ -9,7 +9,9 @@
  *   POST /runs/:id/escalation     one of the four choices
  *   POST /runs/:id/pr-gate        approve, or request changes
  *   POST /runs/:id/abort          abort at an Escalation, with or without a Draft PR
- *   GET  /runs/:id/events         SSE; ?after=<seq> replays what a client missed
+ *   GET  /runs/:id/events         SSE; ?after=<seq>, or the Last-Event-ID a
+ *                                 browser sends when it reconnects, replays
+ *                                 what the client missed
  *
  * A decision answers at once with the Run as it now stands; what the Run does
  * next arrives on the stream.
@@ -18,6 +20,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Inject,
   Param,
@@ -36,7 +39,6 @@ import {
 } from "./requests.js";
 import {
   RUN_SERVICE,
-  RunConflictError,
   type RunDetail,
   type RunService,
   type RunSummary,
@@ -84,30 +86,23 @@ export class RunsController {
     return this.#runs.decidePullRequest(id, parse(PullRequestGateBody, body));
   }
 
-  /**
-   * Aborting is an Escalation's choice (CONTEXT.md): a Run that is building has
-   * nothing to abort from yet, so this answers 409 until it asks a person.
-   */
   @Post(":id/abort")
   @HttpCode(200)
   abort(@Param("id") id: string, @Body() body: unknown): RunDetail {
-    const { openDraftPr } = parse(AbortBody, body ?? {});
-    if (this.#runs.getRun(id).waiting.for !== "escalation")
-      throw new RunConflictError(
-        `Run ${id} is not at an Escalation; a Run is aborted from one.`,
-      );
-    return this.#runs.resolveEscalation(id, {
-      choice: "abort",
-      openDraftPrOnAbort: openDraftPr,
-    });
+    const { openDraftPrOnAbort } = parse(AbortBody, body ?? {});
+    return this.#runs.abortRun(id, openDraftPrOnAbort);
   }
 
   @Sse(":id/events")
   events(
     @Param("id") id: string,
     @Query("after") after?: string,
+    @Headers("last-event-id") lastEventId?: string,
   ): Observable<MessageEvent> {
-    const from = after === undefined ? undefined : Number(after);
+    // A browser's EventSource reconnects on its own, and says where it got to
+    // in this header rather than in the URL.
+    const resumeFrom = after ?? lastEventId;
+    const from = resumeFrom === undefined ? undefined : Number(resumeFrom);
     return this.#runs
       .events(id, Number.isInteger(from) ? from : undefined)
       .pipe(

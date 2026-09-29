@@ -30,6 +30,7 @@ export type LazyUiCanvasOptions = {
 export class LazyUiCanvas implements UiCanvas {
   #connect: () => Promise<Connected>;
   #connected: Promise<Connected> | null = null;
+  #closed = false;
 
   constructor(options: LazyUiCanvasOptions) {
     this.#connect = options.connect;
@@ -59,8 +60,13 @@ export class LazyUiCanvas implements UiCanvas {
   ): Promise<ScreenDescription | null> =>
     (await this.#canvas()).describeScreen(pageName, screenName);
 
-  /** Closes the connection if one was made; a no-op otherwise. */
+  /**
+   * Closes the connection if one was made. A closed canvas stays closed: a Run
+   * still going when its process shuts down must not open a new connection
+   * that nothing will close.
+   */
   close = async (): Promise<void> => {
+    this.#closed = true;
     const connected = this.#connected;
     this.#connected = null;
     if (!connected) return;
@@ -68,6 +74,7 @@ export class LazyUiCanvas implements UiCanvas {
   };
 
   async #canvas(): Promise<UiCanvas> {
+    if (this.#closed) throw new Error("The Penpot connection is closed.");
     // A failed connection is not remembered: the person opens the tab and the
     // next attempt tries again, rather than the Run being stuck for ever.
     if (!this.#connected)

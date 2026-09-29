@@ -5,3 +5,4 @@ export * from "./sandbox/sandboxClient.js";
 export * from "./tokenFactory/chatClient.js";
 export * from "./tokenFactory/lenientJson.js";
 export * from "./penpot/connectPenpot.js";
+export * from "./redactSecrets.js";

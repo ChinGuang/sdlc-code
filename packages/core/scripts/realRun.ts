@@ -17,7 +17,6 @@
  * tab open with the MCP plugin connected. It spends tokens and sandbox credit.
  */
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import {
@@ -153,7 +152,7 @@ async function resuming() {
 }
 
 const runDir = runtime.runDir(run.id);
-const repoDir = join(runDir, "repo.git");
+const repoDir = runtime.repoDir(run.id);
 console.log(
   `Run ${run.id} (${run.mode}, ${run.tokensUsed.toLocaleString()} of ${run.tokenBudget.toLocaleString()} tokens spent)\n  ${run.projectRequest}\n  Files: ${runDir}`,
 );
@@ -327,8 +326,10 @@ try {
   );
 } finally {
   ask.close();
+  // Read before closing: close() closes the database too.
+  const spent = runs.getRun(run.id)!.tokensUsed;
   await runtime.close();
   console.log(
-    `Done in ${((Date.now() - started) / 60_000).toFixed(1)} minutes, ${runs.getRun(run.id)!.tokensUsed.toLocaleString()} tokens.`,
+    `Done in ${((Date.now() - started) / 60_000).toFixed(1)} minutes, ${spent.toLocaleString()} tokens.`,
   );
 }

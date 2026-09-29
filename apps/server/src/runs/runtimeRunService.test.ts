@@ -3,10 +3,11 @@
  * once, the Run advances in the background, and what it does arrives in order.
  */
 import {
+  IllegalTransitionError,
+  MissingKeyError,
   openDatabase,
   SqliteDocumentStore,
   SqliteEscalationStore,
-  SqliteGateStore,
   SqliteRunStore,
   SqliteSliceStore,
   type Run,
@@ -19,6 +20,8 @@ import { MemoryEventLog } from "./eventLog.js";
 import {
   RunConflictError,
   RunNotFoundError,
+  RuntimeUnavailableError,
+  type RunLifecycle,
   type RunService,
   type StreamedEvent,
 } from "./runService.js";
@@ -26,14 +29,26 @@ import { RuntimeRunService, type ServiceRuntime } from "./runtimeRunService.js";
 
 type Step = (run: Run) => RunProgress | Promise<RunProgress>;
 
-function setup(steps: Step[] = []) {
+const TARGET = {
+  owner: "local",
+  name: "app",
+  baseBranch: "main",
+  runBranch: "sdlc/run",
+};
+
+function setup(
+  steps: Step[] = [],
+  options: { failResume?: ReadonlySet<string>; refuse?: Error } = {},
+) {
   const db = openDatabase(":memory:");
   const store = { db };
   const runs = new SqliteRunStore(store);
+  const escalations = new SqliteEscalationStore(store);
   const log = new MemoryEventLog();
   const script = [...steps];
   const advanced: string[] = [];
   const decisions: string[] = [];
+  let closed = 0;
 
   const orchestrator: RunOrchestrator = {
     advance: async (runId) => {
@@ -58,13 +73,13 @@ function setup(steps: Step[] = []) {
       decisions.push(`design:${runId}`);
       return { outcome: "approved", staleDocuments: [], revisions: [] };
     },
+    // As the real one: refusals are plain Errors or illegal moves.
     resolveEscalation: (runId, resolution) => {
-      if (resolution.choice === "retryWithHint" && !resolution.hint)
-        throw new Error("A retry needs a hint for the Coding Agents.");
+      if (options.refuse) throw options.refuse;
       decisions.push(`escalation:${resolution.choice}`);
     },
-    decidePullRequest: () => {
-      throw new Error("Run has no open PR Gate.");
+    decidePullRequest: (runId) => {
+      throw new Error(`Run ${runId} has no open PR Gate.`);
     },
   };
 
@@ -72,32 +87,52 @@ function setup(steps: Step[] = []) {
     runs,
     documents: new SqliteDocumentStore(store),
     slices: new SqliteSliceStore(store),
-    escalations: new SqliteEscalationStore(store),
-    gates: new SqliteGateStore(store),
+    escalations,
     orchestrator,
-    startRun: async (request) =>
-      runs.createRun({
+    startRun: async (request) => {
+      if (request.targetRepo)
+        throw new MissingKeyError("GITHUB_TOKEN", "a Target Repo needs it.");
+      return runs.createRun({
         projectRequest: request.projectRequest,
         mode: request.mode,
-        targetRepo: {
-          owner: "local",
-          name: "app",
-          baseBranch: "main",
-          runBranch: "sdlc/run",
-        },
+        targetRepo: TARGET,
         stackProfile: "react-node",
         tokenBudget: request.tokenBudget,
-      }),
-    resume: async (runId) => ({
-      run: runs.getRun(runId)!,
-      discardedSteps: 0,
-      hadCheckpoint: false,
-    }),
+      });
+    },
+    resume: async (runId) => {
+      if (options.failResume?.has(runId))
+        throw new Error("the repository is missing");
+      return {
+        run: runs.getRun(runId)!,
+        discardedSteps: 0,
+        hadCheckpoint: false,
+      };
+    },
+    redact: (text) => text.replaceAll("secret-key", "[redacted]"),
+    close: async () => {
+      closed++;
+    },
   };
-  const service = new RuntimeRunService({ runtime: () => runtime, log });
-  // Tests depend on the interface; only this factory knows the class.
+  const service = new RuntimeRunService({
+    runtime: () => runtime,
+    made: () => true,
+    log,
+  });
+  // Tests depend on the interfaces; only this factory knows the class.
   const api: RunService = service;
-  return { api, service, runs, log, advanced, decisions };
+  const lifecycle: RunLifecycle = service;
+  return {
+    api,
+    lifecycle,
+    settled: service.settled,
+    runs,
+    escalations,
+    log,
+    advanced,
+    decisions,
+    closed: () => closed,
+  };
 }
 
 const request = {
@@ -106,13 +141,13 @@ const request = {
   tokenBudget: 1_000_000,
 };
 
-describe("RuntimeRunService", () => {
+describe("RuntimeRunService: starting and advancing", () => {
   it("answers a new Run at once, and advances it in the background", async () => {
     let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    const { api, service, advanced } = setup([
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const { api, settled, advanced } = setup([
       async () => {
-        await gate;
+        await held;
         return { waitingFor: "designGate" };
       },
     ]);
@@ -124,16 +159,161 @@ describe("RuntimeRunService", () => {
     expect(api.getRun(run.id).advancing).toBe(true);
 
     release();
-    await service.settled();
+    await settled();
 
     expect(advanced).toEqual([run.id]);
     expect(api.getRun(run.id).advancing).toBe(false);
   });
 
-  it("sends a Run's events in the order they happened, numbered", async () => {
-    const { api, service } = setup();
+  // Found out at the start rather than after hours of work that cannot be pushed.
+  it("says the server cannot take a Target Repo without GITHUB_TOKEN", async () => {
+    const { api } = setup();
+
+    await expect(
+      api.startRun({ ...request, targetRepo: "ChinGuang/demo" }),
+    ).rejects.toBeInstanceOf(RuntimeUnavailableError);
+  });
+
+  it("records a decision, answers with the Run, and advances it again", async () => {
+    const { api, settled, advanced, decisions } = setup([
+      () => ({ waitingFor: "designGate" }),
+    ]);
     const run = await api.startRun(request);
-    await service.settled();
+    await settled();
+
+    api.decideDesign(run.id, [
+      { documentKind: "systemDesign", decision: "approve", comments: "" },
+    ]);
+    await settled();
+
+    expect(decisions).toEqual([`design:${run.id}`]);
+    expect(advanced).toEqual([run.id, run.id]);
+  });
+
+  // Advancing twice at once would run two Steps of one Run in parallel.
+  it("advances a Run once at a time, and again for a decision made meanwhile", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const { api, settled, advanced } = setup([
+      async () => {
+        await held;
+        return { waitingFor: "designGate" };
+      },
+    ]);
+    const run = await api.startRun(request);
+
+    api.resolveEscalation(run.id, { choice: "skipSlice" });
+    api.resolveEscalation(run.id, { choice: "skipSlice" });
+    release();
+    await settled();
+
+    // The first loop, then exactly one more for the decisions it did not see.
+    expect(advanced).toEqual([run.id, run.id]);
+  });
+
+  it("tells the Run's followers when advancing it threw, with keys taken out", async () => {
+    const { api, settled } = setup([
+      () => {
+        throw new Error("Token Factory refused key secret-key.");
+      },
+    ]);
+    const run = await api.startRun(request);
+    await settled();
+
+    const events = await firstValueFrom(
+      api.events(run.id, 0).pipe(take(2), toArray()),
+    );
+
+    expect(events[1]).toMatchObject({
+      type: "problem",
+      problem: "The Run stopped: Token Factory refused key [redacted].",
+    });
+  });
+});
+
+describe("RuntimeRunService: decisions it refuses", () => {
+  it("turns a refusal into a conflict, and advances nothing", async () => {
+    const { api, settled, advanced } = setup([
+      () => ({ waitingFor: "prGate", pullRequest: null }),
+    ]);
+    const run = await api.startRun(request);
+    await settled();
+
+    expect(() => api.decidePullRequest(run.id, { choice: "approve" })).toThrow(
+      RunConflictError,
+    );
+    expect(advanced).toEqual([run.id]);
+  });
+
+  it("counts a move the lifecycle does not allow as a refusal too", async () => {
+    const { api, settled } = setup([], {
+      refuse: new IllegalTransitionError("Run", "building", "abort"),
+    });
+    const run = await api.startRun(request);
+    await settled();
+
+    expect(() =>
+      api.resolveEscalation(run.id, { choice: "skipSlice" }),
+    ).toThrow(RunConflictError);
+  });
+
+  // A fault is not something the person can fix, so it is not a 409.
+  it("lets any other fault through as it is", async () => {
+    class DatabaseFault extends Error {}
+    const { api, settled } = setup([], {
+      refuse: new DatabaseFault("disk I/O error"),
+    });
+    const run = await api.startRun(request);
+    await settled();
+
+    expect(() =>
+      api.resolveEscalation(run.id, { choice: "skipSlice" }),
+    ).toThrow(DatabaseFault);
+  });
+
+  it("says so when there is no such Run", () => {
+    const { api } = setup();
+
+    expect(() => api.getRun("nope")).toThrow(RunNotFoundError);
+    expect(() => api.events("nope")).toThrow(RunNotFoundError);
+  });
+});
+
+describe("RuntimeRunService.abortRun", () => {
+  it("aborts at an Escalation, with the person's choice about the Draft PR", async () => {
+    const { api, settled, runs, escalations, decisions } = setup();
+    const run = await api.startRun(request);
+    await settled();
+    runs.applyEvent(run.id, { type: "documentsReady" });
+    runs.applyEvent(run.id, { type: "designApproved" });
+    runs.applyEvent(run.id, { type: "limitHit", trigger: "retryBudget" });
+    escalations.openEscalation(run.id, {
+      trigger: "retryBudget",
+      summary: "Still failing",
+    });
+
+    api.abortRun(run.id, false);
+
+    expect(decisions).toEqual(["escalation:abort"]);
+  });
+
+  // Aborting is an Escalation's choice (CONTEXT.md); a Run that is building
+  // has no way out yet but to be stopped.
+  it("refuses a Run that is not at an Escalation", async () => {
+    const { api, settled, decisions } = setup();
+    const run = await api.startRun(request);
+    await settled();
+
+    expect(() => api.abortRun(run.id, true)).toThrow(/not at an Escalation/);
+    expect(decisions).toEqual([]);
+  });
+});
+
+describe("RuntimeRunService: the event stream", () => {
+  it("sends a Run's events in the order they happened, numbered", async () => {
+    const { api, settled } = setup();
+    const run = await api.startRun(request);
+    await settled();
 
     const events = await firstValueFrom(
       api.events(run.id, 0).pipe(take(2), toArray()),
@@ -144,13 +324,13 @@ describe("RuntimeRunService", () => {
   });
 
   it("sends only this Run's events, and only from now on without `after`", async () => {
-    const { api, service, log } = setup([
+    const { api, settled, log } = setup([
       () => ({ waitingFor: "designGate" }),
       () => ({ waitingFor: "designGate" }),
     ]);
     const first = await api.startRun(request);
     const second = await api.startRun(request);
-    await service.settled();
+    await settled();
 
     const received: StreamedEvent[] = [];
     const subscription = api
@@ -165,11 +345,27 @@ describe("RuntimeRunService", () => {
     ).toEqual(["yours"]);
   });
 
-  // A client that lost its connection says the last number it saw.
-  it("replays what a reconnecting client missed, then carries on live", async () => {
-    const { api, service, log } = setup([() => ({ waitingFor: "designGate" })]);
+  // Read the Run, then follow it from its lastSeq: nothing in between is lost.
+  it("gives a Run's last event number, to follow it from without a gap", async () => {
+    const { api, settled, log } = setup([() => ({ waitingFor: "designGate" })]);
     const run = await api.startRun(request);
-    await service.settled();
+    await settled();
+    const { lastSeq } = api.getRun(run.id);
+
+    const received: StreamedEvent[] = [];
+    const subscription = api
+      .events(run.id, lastSeq)
+      .subscribe((event) => received.push(event));
+    log.publish({ runId: run.id, type: "problem", problem: "next" });
+    subscription.unsubscribe();
+
+    expect(received.map((event) => event.type)).toEqual(["problem"]);
+  });
+
+  it("replays what a reconnecting client missed, then carries on live", async () => {
+    const { api, settled, log } = setup([() => ({ waitingFor: "designGate" })]);
+    const run = await api.startRun(request);
+    await settled();
     const [first] = await firstValueFrom(
       api.events(run.id, 0).pipe(take(1), toArray()),
     );
@@ -183,108 +379,64 @@ describe("RuntimeRunService", () => {
 
     expect(received.map((event) => event.type)).toEqual(["status", "problem"]);
   });
+});
 
-  it("records a decision, answers with the Run, and advances it again", async () => {
-    const { api, service, advanced, decisions } = setup([
-      () => ({ waitingFor: "designGate" }),
-    ]);
-    const run = await api.startRun(request);
-    await service.settled();
-
-    api.decideDesign(run.id, [
-      { documentKind: "systemDesign", decision: "approve", comments: "" },
-    ]);
-    await service.settled();
-
-    expect(decisions).toEqual([`design:${run.id}`]);
-    expect(advanced).toEqual([run.id, run.id]);
-  });
-
-  // Advancing twice at once would run two Steps of one Run in parallel.
-  it("advances a Run once at a time, and again for a decision made meanwhile", async () => {
-    let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    const { api, service, advanced } = setup([
-      async () => {
-        await gate;
-        return { waitingFor: "escalation" } as RunProgress;
-      },
-    ]);
-    const run = await api.startRun(request);
-
-    api.resolveEscalation(run.id, { choice: "skipSlice" });
-    api.resolveEscalation(run.id, { choice: "skipSlice" });
-    release();
-    await service.settled();
-
-    // The first loop, then exactly one more for the decisions it did not see.
-    expect(advanced).toEqual([run.id, run.id]);
-  });
-
-  it("turns a decision the Orchestrator refuses into a conflict, advancing nothing", async () => {
-    const { api, service, advanced } = setup([
-      () => ({ waitingFor: "prGate", pullRequest: null }),
-    ]);
-    const run = await api.startRun(request);
-    await service.settled();
-
-    expect(() => api.decidePullRequest(run.id, { choice: "approve" })).toThrow(
-      RunConflictError,
-    );
-    expect(advanced).toEqual([run.id]);
-  });
-
-  it("says so when there is no such Run", () => {
-    const { api } = setup();
-
-    expect(() => api.getRun("nope")).toThrow(RunNotFoundError);
-    expect(() => api.events("nope")).toThrow(RunNotFoundError);
-  });
-
-  it("tells the Run's followers when advancing it threw", async () => {
-    const { api, service } = setup([
-      () => {
-        throw new Error("Token Factory could not be reached.");
-      },
-    ]);
-    const run = await api.startRun(request);
-    await service.settled();
-
-    const events = await firstValueFrom(
-      api.events(run.id, 0).pipe(take(2), toArray()),
-    );
-
-    expect(events[1]).toMatchObject({
-      type: "problem",
-      problem: expect.stringContaining("Token Factory could not be reached."),
-    });
-  });
-
+describe("RuntimeRunService as the server starts and stops", () => {
   it("resumes every unfinished Run on start, and advances each", async () => {
-    const { service, runs, advanced } = setup();
-    const waiting = runs.createRun({
+    const { lifecycle, settled, runs, advanced } = setup();
+    const unfinished = runs.createRun({
       ...request,
-      targetRepo: {
-        owner: "local",
-        name: "app",
-        baseBranch: "main",
-        runBranch: "sdlc/run",
-      },
+      targetRepo: TARGET,
       stackProfile: "react-node",
     });
 
-    const resumed = await service.resumeUnfinished();
-    await service.settled();
+    const { resumed, failed } = await lifecycle.resumeUnfinished();
+    await settled();
 
-    expect(resumed).toEqual([waiting.id]);
-    expect(advanced).toEqual([waiting.id]);
+    expect(resumed).toEqual([unfinished.id]);
+    expect(failed).toEqual([]);
+    expect(advanced).toEqual([unfinished.id]);
+  });
+
+  it("resumes the others when one cannot be, and says which", async () => {
+    // Filled in once the Run exists: its id is what the fake refuses.
+    const failing = new Set<string>();
+    const { lifecycle, settled, runs, advanced } = setup([], {
+      failResume: failing,
+    });
+    const unfinished = () =>
+      runs.createRun({
+        ...request,
+        targetRepo: TARGET,
+        stackProfile: "react-node",
+      });
+    const broken = unfinished();
+    const fine = unfinished();
+    failing.add(broken.id);
+
+    const { resumed, failed } = await lifecycle.resumeUnfinished();
+    await settled();
+
+    expect(resumed).toEqual([fine.id]);
+    expect(failed).toEqual([
+      { runId: broken.id, problem: "the repository is missing" },
+    ]);
+    expect(advanced).toEqual([fine.id]);
+  });
+
+  it("closes the runtime when the server stops", async () => {
+    const { lifecycle, closed } = setup();
+
+    await lifecycle.shutdown();
+
+    expect(closed()).toBe(1);
   });
 
   it("lists every Run, newest first", async () => {
-    const { api, service } = setup();
+    const { api, settled } = setup();
     const first = await api.startRun(request);
     const second = await api.startRun(request);
-    await service.settled();
+    await settled();
 
     expect(api.listRuns().map((run) => run.id)).toEqual([second.id, first.id]);
   });
