@@ -1,4 +1,7 @@
 export * from "./agentRoles.js";
+export * from "./runtime/lazyCanvas.js";
+export * from "./runtime/runtimeEvents.js";
+export * from "./runtime/runRuntime.js";
 export * from "./agents/codeReview/reviewStandard.js";
 export * from "./agents/codeReview/linterFindings.js";
 export * from "./agents/codeReview/findings.js";

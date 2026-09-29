@@ -111,10 +111,14 @@ export type RunOrchestratorOptions = {
    */
   codeReview?: RunReview;
   /** Told when a review could not be trusted, e.g. an invented Rule ID. */
-  onReviewProblem?: (problem: string) => void;
+  onReviewProblem?: (runId: string, problem: string) => void;
   /** How often blocking Findings may send the code back. Defaults to 3. */
   reviewRetryBudget?: number;
-  designPhase: DesignPhase;
+  /**
+   * The Design Phase for a Run: its agents spend that Run's Token Budget, as
+   * the Slice runner's do.
+   */
+  designPhase: (run: Run) => DesignPhase;
   /**
    * The Slice runner for a Run: its Workspaces, agents and budget. It reports
    * each Checkpoint of diagram 6 to `onCheckpoint`, which writes it down.
@@ -297,7 +301,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     const { runs, gates, delivery, codeReview } = this.#options;
     const reviewed = codeReview ? await codeReview.reviewRun(run) : null;
     for (const problem of reviewed?.problems ?? [])
-      this.#options.onReviewProblem?.(problem);
+      this.#options.onReviewProblem?.(run.id, problem);
     const blocking = blockingFindings(reviewed?.findings ?? []);
     if (blocking.length > 0) {
       this.#sendBack(run, blocking);
@@ -430,7 +434,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     const memory = this.#memoryOf(run.id);
     let result;
     try {
-      result = await this.#options.designPhase.run(run, memory.revisions);
+      result = await this.#options.designPhase(run).run(run, memory.revisions);
     } catch (error) {
       if (!(error instanceof DesignPhaseError)) throw error;
       // With a person, the Run waits in designing, its revisions kept, and
