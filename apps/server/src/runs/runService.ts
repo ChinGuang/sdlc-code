@@ -1,0 +1,155 @@
+/**
+ * What the HTTP API can do with Runs (T21). Controllers depend on this, never
+ * on the runtime, so every route can be tested without a model, a sandbox or a
+ * browser tab.
+ */
+import type {
+  DesignVerdict,
+  DocumentKind,
+  DocumentStatus,
+  EscalationResolution,
+  PullRequestDecision,
+  RunMode,
+  RunStatus,
+  RuntimeEvent,
+  SliceStatus,
+} from "@sdlc-code/core";
+import type { Observable } from "rxjs";
+
+export type StartRunRequest = {
+  projectRequest: string;
+  mode: RunMode;
+  tokenBudget: number;
+  /** "owner/name"; without one the Run keeps its Slice Commits local. */
+  targetRepo?: string | null;
+};
+
+/** A Run as a list shows it. */
+export type RunSummary = {
+  id: string;
+  projectRequest: string;
+  mode: RunMode;
+  status: RunStatus;
+  tokensUsed: number;
+  tokenBudget: number;
+  pullRequest: { number: number; url: string; draft: boolean } | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** What a person is being asked, if anything. */
+export type Waiting =
+  | { for: "nothing" }
+  | {
+      for: "designGate";
+      documents: Array<{ kind: DocumentKind; version: number }>;
+    }
+  | {
+      for: "escalation";
+      trigger: string;
+      summary: string;
+      /** The abort dialog's checkbox, ticked unless a person unticks it. */
+      openDraftPrOnAbort: boolean;
+    }
+  | { for: "prGate"; pullRequest: RunSummary["pullRequest"] };
+
+/** A Run as its own page shows it. */
+export type RunDetail = RunSummary & {
+  /** In Slice Plan order; `id` is what checkpoint and Step events name. */
+  slices: Array<{
+    id: string;
+    title: string;
+    status: SliceStatus;
+    isWalkingSkeleton: boolean;
+    commitSha: string | null;
+  }>;
+  documents: Array<{
+    kind: DocumentKind;
+    version: number;
+    status: DocumentStatus;
+  }>;
+  waiting: Waiting;
+  failure: { trigger: string; summary: string; slice: string | null } | null;
+  /** True while the server is advancing this Run in the background. */
+  advancing: boolean;
+  /**
+   * The number of this Run's last event, so a client that reads the Run and
+   * then follows it with ?after=lastSeq misses nothing in between.
+   */
+  lastSeq: number;
+};
+
+/**
+ * An event as the stream sends it: numbered, so a client sees the order, and
+ * stamped with when it happened. (Not "at": a checkpoint event has one.)
+ */
+export type StreamedEvent = RuntimeEvent & { seq: number; happenedAt: string };
+
+export interface RunService {
+  startRun: (request: StartRunRequest) => Promise<RunSummary>;
+  listRuns: () => RunSummary[];
+  getRun: (runId: string) => RunDetail;
+  decideDesign: (runId: string, verdicts: DesignVerdict[]) => RunDetail;
+  resolveEscalation: (
+    runId: string,
+    resolution: EscalationResolution,
+  ) => RunDetail;
+  decidePullRequest: (
+    runId: string,
+    decision: PullRequestDecision,
+  ) => RunDetail;
+  /**
+   * Aborts a Run at its Escalation, the only place the domain lets a Run be
+   * aborted (CONTEXT.md). A Draft PR of what passed unless a person unticks it.
+   */
+  abortRun: (runId: string, openDraftPrOnAbort: boolean) => RunDetail;
+  /**
+   * The Run's events from now on. With `after`, the ones this server has kept
+   * since then come first, so a client that reconnects misses nothing it could
+   * still be told.
+   */
+  events: (runId: string, after?: number) => Observable<StreamedEvent>;
+}
+
+/** Nest injection token for RunService (interfaces vanish at runtime). */
+export const RUN_SERVICE = Symbol("RunService");
+
+/**
+ * What the server does with Runs as it starts and stops, apart from requests:
+ * pick up the unfinished ones (diagram 9), and close what it opened.
+ */
+export interface RunLifecycle {
+  /** Resumes each unfinished Run; one that cannot be does not stop the rest. */
+  resumeUnfinished: () => Promise<{
+    resumed: string[];
+    failed: Array<{ runId: string; problem: string }>;
+  }>;
+  shutdown: () => Promise<void>;
+}
+
+/** Nest injection token for RunLifecycle. */
+export const RUN_LIFECYCLE = Symbol("RunLifecycle");
+
+/** No Run with that id. */
+export class RunNotFoundError extends Error {
+  constructor(runId: string) {
+    super(`No Run ${runId}.`);
+    this.name = "RunNotFoundError";
+  }
+}
+
+/** The Run exists, but is not where this request needs it to be. */
+export class RunConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunConflictError";
+  }
+}
+
+/** The server cannot do this yet, e.g. a key it needs is not set. */
+export class RuntimeUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeUnavailableError";
+  }
+}

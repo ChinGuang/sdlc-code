@@ -1,8 +1,7 @@
 /**
- * One real Run, end to end, from a terminal: the design agents on Token
- * Factory, the Design Gate answered by you, then each Slice coded by the
- * Coding Agents and tested in a Nebius Sandbox, committed as Slice Commits in
- * a local git repository.
+ * One real Run, end to end, from a terminal. The wiring lives in the runtime
+ * (src/runtime/runRuntime.ts), which the local server uses too; this script is
+ * the arguments, the printing and your answers at the Gates.
  *
  *   pnpm --filter @sdlc-code/core run:real "Build a todo app" [--auto] [--budget 2000000]
  *
@@ -17,62 +16,15 @@
  * Needs NEBIUS_API_KEY, NEBIUS_AI_PROJECT and PENPOT_MCP_URL, and the Penpot
  * tab open with the MCP plugin connected. It spends tokens and sandbox credit.
  */
-import {
-  connectPenpotMcp,
-  NebiusSandboxClient,
-  RestGitHubClient,
-  TokenFactoryChatClient,
-  TokenGitPusher,
-  type ChatClient,
-} from "@sdlc-code/clients";
-import { REACT_NODE, templateFiles } from "@sdlc-code/stack-profiles";
-import { mkdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  AgentDesignPhase,
-  AgentRunOrchestrator,
-  AgentRunReview,
-  ChatAgentLoop,
-  DocumentDesignGate,
-  GitHubRunDelivery,
-  GitWorkspaceManager,
-  LoopCodeReviewAgent,
-  LoopCodingAgent,
-  LoopSystemDesignAgent,
-  LoopUiDesignAgent,
-  ModelOwnerJudge,
-  openDatabase,
-  OrchestratedSliceRunner,
-  PenpotUiCanvas,
+  createRunRuntime,
   penpotPageUrl,
-  requestOptionsFor,
-  resumeRun,
-  RuleOwnerResolver,
-  RunTokenBudget,
-  runPageName,
-  SandboxBaseSnapshots,
-  SandboxLintRunner,
-  SandboxTestingAgent,
-  SandboxTestRunner,
-  SqliteDocumentStore,
-  SqliteEscalationStore,
-  SqliteGateStore,
-  SqliteRunStore,
-  SqliteSliceStore,
-  SqliteSnapshotStore,
-  SqliteTaskStore,
-  StepTranscript,
-  loadAgentConfig,
-  type AgentRole,
-  type AgentTool,
   type DocumentKind,
-  type RunDelivery,
-  type SliceCheckpoint,
-  type TranscriptEvent,
+  type RuntimeEvent,
 } from "../src/index.js";
-import { requireEnv } from "../../clients/scripts/requireEnv.js";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(`--${name}`);
@@ -88,11 +40,6 @@ const projectRequest =
   ) ??
   "Build a todo app where a user can add todos, mark them done and delete them.";
 const mode = flag("auto") ? "auto" : "gated";
-/**
- * Where the pull request goes, as "owner/name". Without it the Run keeps its
- * Slice Commits in the local repository and opens nothing, so a Run costs no
- * GitHub access (T20).
- */
 const targetRepo = value("repo");
 if (targetRepo && !/^[\w.-]+\/[\w.-]+$/.test(targetRepo)) {
   console.error(`--repo must be "owner/name", not "${targetRepo}".`);
@@ -102,52 +49,86 @@ const tokenBudget = Number(value("budget") ?? 2_000_000);
 const dataDir =
   value("data") ??
   fileURLToPath(new URL("../../../.sdlc-runs", import.meta.url));
+const userStandardsFile = value("agents-md");
 
-const githubToken = targetRepo ? requireEnv("GITHUB_TOKEN") : null;
-const apiKey = requireEnv("NEBIUS_API_KEY");
-const project = requireEnv("NEBIUS_AI_PROJECT");
-const penpotUrl = requireEnv("PENPOT_MCP_URL");
-const config = loadAgentConfig({
-  path: fileURLToPath(
+/** What is happening, one line each, as the runtime reports it. */
+function print(event: RuntimeEvent): void {
+  switch (event.type) {
+    case "agentTurn":
+      console.log(`  ${event.role}: ${event.toolCalls.join(", ") || "answer"}`);
+      return;
+    case "toolFailed":
+      console.log(
+        `    ${event.tool} failed: ${event.problem.slice(0, 160).replaceAll("\n", " | ")}`,
+      );
+      return;
+    case "checkpoint":
+      console.log(`  checkpoint: ${event.at}`);
+      return;
+    case "testRun":
+      console.log(
+        `  Test Run ${event.status} in ${event.durationSeconds ?? "?"}s (${event.cost ?? 0}): ${event.summary}`,
+      );
+      for (const issue of event.issues) console.log(`    ${issue}`);
+      return;
+    case "exportFailed":
+      console.log(
+        `  no PNG of "${event.screen}": ${event.reason} (the design is drawn; only this image is missing)`,
+      );
+      return;
+    case "reviewProblem":
+      console.log(`  review: ${event.problem}`);
+      return;
+    case "delivery":
+      console.log(`  delivery: ${event.detail}`);
+      return;
+    case "problem":
+      console.log(`  ${event.problem}`);
+      return;
+    case "status":
+      return;
+  }
+}
+
+const runtime = createRunRuntime({
+  dataDir,
+  env: process.env,
+  configPath: fileURLToPath(
     new URL("../../../sdlc-code.config.json", import.meta.url),
   ),
-  env: process.env,
+  userStandards: async () =>
+    userStandardsFile ? readFileSync(userStandardsFile, "utf8") : null,
+  events: {
+    run: print,
+    penpot: ({ kind, attempt, delayMs }) => {
+      const waiting = `(waiting ${delayMs / 1000}s, attempt ${attempt})`;
+      console.log(
+        `  ${
+          {
+            suspended: `Penpot tab is asleep: click it to wake it ${waiting}`,
+            disconnected: `Penpot plugin is not connected: open the file and start the plugin ${waiting}`,
+            unavailable: `Penpot did not answer in time ${waiting}`,
+            execution: `Penpot could not do that ${waiting}`,
+          }[kind]
+        }`,
+      );
+    },
+  },
 });
-
-mkdirSync(dataDir, { recursive: true });
-const db = openDatabase(join(dataDir, "sdlc-code.db"));
-const store = { db };
-const runs = new SqliteRunStore(store);
-const documents = new SqliteDocumentStore(store);
-const slices = new SqliteSliceStore(store);
-const tasks = new SqliteTaskStore(store);
-const escalations = new SqliteEscalationStore(store);
-const gates = new SqliteGateStore(store);
-const gate = new DocumentDesignGate({ db, runs, documents, gates });
+const { runs, documents, slices, orchestrator } = runtime;
 
 /**
- * A new Run, or the one --resume names (the newest unfinished one when it names
+ * A new Run, or the one --resume names (the newest unfinished Run when it names
  * none). A resumed Run keeps its design, its Slice Commits and what its Slices
  * already failed on; --budget gives it a new total to spend.
  */
-const run = flag("resume") ? runToResume() : createRun();
+const run = flag("resume") ? await resuming() : await starting();
 
-function createRun() {
-  return runs.createRun({
-    projectRequest,
-    mode,
-    targetRepo: {
-      owner: targetRepo?.split("/")[0] ?? "local",
-      name: targetRepo?.split("/")[1] ?? "app",
-      baseBranch: "main",
-      runBranch: "sdlc/run",
-    },
-    stackProfile: REACT_NODE.id,
-    tokenBudget,
-  });
+async function starting() {
+  return runtime.startRun({ projectRequest, mode, tokenBudget, targetRepo });
 }
 
-function runToResume() {
+async function resuming() {
   const id = value("resume");
   const unfinished = runs.listUnfinishedRuns();
   const found = id ? runs.getRun(id) : unfinished.at(-1);
@@ -159,249 +140,22 @@ function runToResume() {
     );
     process.exit(1);
   }
-  return value("budget") ? runs.setTokenBudget(found.id, tokenBudget) : found;
-}
-const runDir = join(dataDir, run.id);
-/** The one repository the Slices are built in, tested from and pushed from. */
-const repoDir = join(runDir, "repo.git");
-console.log(
-  `Run ${run.id} (${run.mode}, ${run.tokensUsed.toLocaleString()} of ${run.tokenBudget.toLocaleString()} tokens spent)
-  ${run.projectRequest}
-  Files: ${runDir}`,
-);
-
-const client: ChatClient = new TokenFactoryChatClient({
-  apiKey,
-  baseUrl: process.env.NEBIUS_BASE_URL || undefined,
-});
-const sandbox = new NebiusSandboxClient({
-  token: apiKey,
-  project,
-  baseUrl: process.env.NEBIUS_SANDBOX_URL || undefined,
-});
-const budget = new RunTokenBudget(runs, run.id);
-
-/** One agent loop, with its Transcript printed and stored when it has a Step. */
-const loopFor =
-  (role: AgentRole, maxIterations: number, stepId?: string) =>
-  (tools: AgentTool[]) => {
-    const transcript = stepId ? new StepTranscript(tasks, stepId) : null;
-    return new ChatAgentLoop({
-      client,
-      request: requestOptionsFor(config.roles[role]),
-      tools,
-      maxIterations,
-      budget,
-      transcript: {
-        record: (event: TranscriptEvent) => {
-          transcript?.record(event);
-          if (event.type === "assistant")
-            console.log(
-              `  ${role}: ${event.toolCalls.map((call) => call.name).join(", ") || "answer"}`,
-            );
-          if (event.type === "toolResult" && event.problem)
-            console.log(
-              `    ${event.name} failed: ${event.content.slice(0, 160).replaceAll("\n", " | ")}`,
-            );
-        },
-      },
-    });
-  };
-
-console.log("Connecting to Penpot…");
-const penpot = await connectPenpotMcp({
-  url: penpotUrl,
-  // A background tab sleeps until someone clicks it, so a Run waits minutes
-  // for that rather than throwing away the design it has already paid for.
-  retryDelaysMs: [5_000, 10_000, 15_000, 30_000, 30_000, 60_000, 60_000],
-  onWaiting: ({ attempt, delayMs, kind }) => {
-    const waiting = `(waiting ${delayMs / 1000}s, attempt ${attempt})`;
-    const what = {
-      suspended: `Penpot tab is asleep: click it to wake it ${waiting}`,
-      disconnected: `Penpot plugin is not connected: open the file and start the plugin ${waiting}`,
-      unavailable: `Penpot did not answer in time ${waiting}`,
-    };
-    console.log(`  ${what[kind]}`);
-  },
-});
-const canvas = new PenpotUiCanvas(penpot.penpot);
-const file = await canvas.checkConnection();
-console.log(`  Penpot file "${file.file}"`);
-const pageName = runPageName(`#${run.id.slice(0, 8)}`, projectRequest);
-
-const workspaces = new GitWorkspaceManager({
-  repoDir,
-  runBranch: run.targetRepo.runBranch,
-  workspacesDir: join(runDir, "workspaces"),
-});
-if (flag("resume")) {
+  const ready = value("budget")
+    ? runs.setTokenBudget(found.id, tokenBudget)
+    : found;
   // Whatever was in flight when the Run stopped is thrown away, not guessed at.
-  const { discardedSteps, hadCheckpoint } = await resumeRun(run.id, {
-    runs,
-    tasks,
-    workspaces,
-  });
+  const { discardedSteps, hadCheckpoint } = await runtime.resume(ready.id);
   console.log(
     `Resuming: ${discardedSteps} unfinished Step${discardedSteps === 1 ? "" : "s"} discarded, ${hadCheckpoint ? "continuing from its Checkpoint" : "no Checkpoint to continue from"}.`,
   );
-} else {
-  await workspaces.startRun({
-    scaffold: templateFiles(REACT_NODE),
-    message: `Scaffold: ${REACT_NODE.name}`,
-  });
+  return ready;
 }
 
-const uploaded = new Map<string, Promise<string>>();
-/**
- * One Base Snapshot per Stack Profile, shared by the Test Runs and the Lint
- * Runs: two of these would build the same snapshot twice and each keep a cache
- * the other's discard cannot clear.
- */
-const snapshots = new SandboxBaseSnapshots({
-  sandbox,
-  store: new SqliteSnapshotStore(store),
-  uploaded,
-});
-const sandboxTesting = new SandboxTestingAgent({
-  runner: new SandboxTestRunner({ sandbox, snapshots, uploaded }),
-});
-
-/** The same Testing Agent, saying on the terminal what each Test Run found. */
-const testing = {
-  testSlice: async (input: Parameters<typeof sandboxTesting.testSlice>[0]) => {
-    console.log(`  Test Run: ${input.files.length} files…`);
-    const result = await sandboxTesting.testSlice(input);
-    const run = result.testRun;
-    const steps =
-      run.status === "broken"
-        ? run.problem
-        : run.result.steps
-            .map((step) => `${step.ok ? "ok" : "FAILED"} ${step.name}`)
-            .join(", ");
-    console.log(
-      `  Test Run ${run.status} in ${run.evidence.durationSeconds ?? "?"}s (${run.evidence.cost ?? 0}): ${steps}`,
-    );
-    for (const report of result.issueReports)
-      console.log(
-        `    ${report.suspectedOwner ?? "unowned"}: ${report.failingTest ?? report.step} — ${report.error.slice(0, 160)}`,
-      );
-    return result;
-  },
-};
-
-/** A Slice runner that reports its Checkpoints to the Orchestrator and to you. */
-const sliceRunnerFor = (onCheckpoint: (checkpoint: SliceCheckpoint) => void) =>
-  new OrchestratedSliceRunner({
-    workspaces,
-    testing,
-    owners: new RuleOwnerResolver({
-      judge: new ModelOwnerJudge({
-        client,
-        request: requestOptionsFor(config.roles.orchestrator),
-        budget,
-      }),
-    }),
-    tasks,
-    slices,
-    budget,
-    codingAgent: (side, stepId) =>
-      new LoopCodingAgent({
-        createLoop: loopFor(
-          side === "backend" ? "backendCoding" : "frontendCoding",
-          // Seen live: a frontend Step wrote the tests, ran out of turns before
-          // the screen they test, and every retry started that work again.
-          45,
-          stepId,
-        ),
-        canvas,
-      }),
-    checkpoint: (checkpoint) => {
-      console.log(`  checkpoint: ${checkpoint.at}`);
-      onCheckpoint(checkpoint);
-    },
-  });
-
-/**
- * With a --repo, the Run pushes its Slice Commits there and opens the pull
- * request; without one there is nowhere to push, so it says so and the work
- * stays in the local repository this script prints at the end.
- */
-const delivery: RunDelivery = githubToken
-  ? new GitHubRunDelivery({
-      runs,
-      slices,
-      tasks,
-      workspaces,
-      repoDir,
-      pusher: new TokenGitPusher({ token: githubToken }),
-      github: new RestGitHubClient({ token: githubToken }),
-    })
-  : {
-      deliver: async (_runId, reason) => {
-        console.log(
-          reason.ended === "complete"
-            ? "  no --repo: the Slice Commits stay in the local repository"
-            : `  no --repo: nothing pushed (${reason.ended})`,
-        );
-        return { status: "keptLocal", reason: "noTargetRepo" };
-      },
-    };
-
-/**
- * The review that runs before the pull request (T19): the linters in a sandbox,
- * then the Code Review Agent over the diff. --agents-md points at a file of the
- * user's own Rules, as a Target Repo's AGENTS.md would.
- */
-const userStandardsFile = value("agents-md");
-const codeReview = new AgentRunReview({
-  documents,
-  workspaces,
-  profile: () => REACT_NODE,
-  linters: new SandboxLintRunner({ sandbox, snapshots, uploaded }),
-  agent: new LoopCodeReviewAgent({
-    createLoop: loopFor("codeReview", 12),
-  }),
-  userStandards: async () =>
-    userStandardsFile ? readFileSync(userStandardsFile, "utf8") : null,
-});
-
-const orchestrator = new AgentRunOrchestrator({
-  runs,
-  documents,
-  slices,
-  tasks,
-  escalations,
-  gates,
-  gate,
-  delivery,
-  codeReview,
-  onReviewProblem: (problem) => console.log(`  review: ${problem}`),
-  designPhase: new AgentDesignPhase({
-    documents,
-    slices,
-    gate,
-    systemDesign: new LoopSystemDesignAgent({
-      createLoop: loopFor("systemDesign", 12),
-    }),
-    uiDesign: new LoopUiDesignAgent({
-      canvas,
-      createLoop: loopFor("uiDesign", 10),
-      onExportFailed: ({ screen, reason }) =>
-        console.log(
-          `  no PNG of "${screen}": ${reason.slice(0, 120)} (the design is drawn; only this image is missing)`,
-        ),
-    }),
-    profile: () => REACT_NODE,
-    pageName: () => pageName,
-  }),
-  sliceRunner: async (_run, onCheckpoint) => sliceRunnerFor(onCheckpoint),
-  profile: () => REACT_NODE,
-  capabilities: {
-    backend: config.roles.backendCoding.capabilities,
-    frontend: config.roles.frontendCoding.capabilities,
-  },
-  penpotPage: () => pageName,
-});
+const runDir = runtime.runDir(run.id);
+const repoDir = runtime.repoDir(run.id);
+console.log(
+  `Run ${run.id} (${run.mode}, ${run.tokensUsed.toLocaleString()} of ${run.tokenBudget.toLocaleString()} tokens spent)\n  ${run.projectRequest}\n  Files: ${runDir}`,
+);
 
 /**
  * Your answers: typed at a terminal, or piped in (one per line) for an
@@ -442,7 +196,7 @@ function report(): void {
     .map((slice) => `${slice.title} (${slice.status})`)
     .join(", ");
   console.log(
-    `\n[${current.status}] ${current.tokensUsed.toLocaleString()}/${tokenBudget.toLocaleString()} tokens · ${built}`,
+    `\n[${current.status}] ${current.tokensUsed.toLocaleString()}/${current.tokenBudget.toLocaleString()} tokens · ${built}`,
   );
 }
 
@@ -519,8 +273,7 @@ async function decidePullRequest(
   pullRequest: { number: number; url: string } | null,
 ): Promise<void> {
   console.log(
-    `
-PR Gate: ${pullRequest ? `#${pullRequest.number} ${pullRequest.url}` : "no pull request"}`,
+    `\nPR Gate: ${pullRequest ? `#${pullRequest.number} ${pullRequest.url}` : "no pull request"}`,
   );
   if (mode === "auto") {
     orchestrator.decidePullRequest(run.id, { choice: "approve" });
@@ -559,7 +312,9 @@ try {
     }
     await decidePullRequest(progress.pullRequest);
   }
-  const commits = await workspaces.sliceCommits();
+  const commits = slices
+    .listSlices(run.id)
+    .filter((slice) => slice.commitSha !== null);
   console.log(
     `\n${commits.length} Slice Commit${commits.length === 1 ? "" : "s"} in ${repoDir} on ${run.targetRepo.runBranch}`,
   );
@@ -571,8 +326,10 @@ try {
   );
 } finally {
   ask.close();
-  await penpot.close();
+  // Read before closing: close() closes the database too.
+  const spent = runs.getRun(run.id)!.tokensUsed;
+  await runtime.close();
   console.log(
-    `Done in ${((Date.now() - started) / 60_000).toFixed(1)} minutes, ${runs.getRun(run.id)!.tokensUsed.toLocaleString()} tokens.`,
+    `Done in ${((Date.now() - started) / 60_000).toFixed(1)} minutes, ${spent.toLocaleString()} tokens.`,
   );
 }

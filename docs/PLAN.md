@@ -143,6 +143,7 @@ M4 and M5 overlap: the server API (T21) is started as soon as M3's domain events
 
 **T24 CLI `sdlccode`** · Oct 16
 - `run`, `gate show`, `gate approve`, `gate request-changes`, `status --follow`, `abort [--no-draft-pr]` (board 06).
+- `abort` works at an Escalation, where the domain puts it (CONTEXT.md); the server answers 409 for a Run that is still building (T21).
 - Tests: argument parsing and API calls against a mock server.
 
 ### M6 — Hardening & submission

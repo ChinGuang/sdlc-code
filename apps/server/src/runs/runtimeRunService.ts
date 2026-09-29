@@ -1,0 +1,291 @@
+/**
+ * RunService over the core runtime (T21). A request never waits for a Run to
+ * make progress: a decision is recorded, the answer goes back at once, and the
+ * Run is advanced in the background until it needs a person again or finishes.
+ * What it does meanwhile arrives on the event stream.
+ *
+ * One Run is advanced by one loop at a time. A decision that arrives while its
+ * Run is already advancing only records the decision; the running loop picks it
+ * up, because `advance` reads the Run's state from the stores each time round.
+ */
+import {
+  IllegalTransitionError,
+  MissingKeyError,
+  type Run,
+  type RunRuntime,
+} from "@sdlc-code/core";
+import type { Observable } from "rxjs";
+import type { EventLog } from "./eventLog.js";
+import {
+  RunConflictError,
+  RunNotFoundError,
+  RuntimeUnavailableError,
+  type RunDetail,
+  type RunLifecycle,
+  type RunService,
+  type RunSummary,
+  type StartRunRequest,
+  type StreamedEvent,
+  type Waiting,
+} from "./runService.js";
+
+/** The parts of the runtime this service uses. */
+export type ServiceRuntime = Pick<
+  RunRuntime,
+  | "runs"
+  | "documents"
+  | "slices"
+  | "escalations"
+  | "orchestrator"
+  | "startRun"
+  | "resume"
+  | "redact"
+  | "close"
+>;
+
+export type RuntimeRunServiceOptions = {
+  /**
+   * The runtime, made on first use: a server without its keys still starts,
+   * answers /health, and says what is missing. Throws RuntimeUnavailableError
+   * until it can be made.
+   */
+  runtime: () => ServiceRuntime;
+  /** Whether the runtime was ever made, so shutting down does not make one. */
+  made: () => boolean;
+  log: EventLog;
+};
+
+export class RuntimeRunService implements RunService, RunLifecycle {
+  #runtime: () => ServiceRuntime;
+  #made: () => boolean;
+  #log: EventLog;
+  /** Runs being advanced now, by id, with the loop doing it. */
+  #advancing = new Map<string, Promise<void>>();
+  /** Runs whose state changed while their loop was running. */
+  #again = new Set<string>();
+
+  constructor(options: RuntimeRunServiceOptions) {
+    this.#runtime = options.runtime;
+    this.#made = options.made;
+    this.#log = options.log;
+  }
+
+  startRun = async (request: StartRunRequest): Promise<RunSummary> => {
+    let run: Run;
+    try {
+      run = await this.#runtime().startRun(request);
+    } catch (error) {
+      // A Target Repo without GITHUB_TOKEN: the server cannot do this one yet.
+      if (error instanceof MissingKeyError)
+        throw new RuntimeUnavailableError(error.message);
+      throw error;
+    }
+    this.#advance(run.id);
+    return summary(run);
+  };
+
+  listRuns = (): RunSummary[] => this.#runtime().runs.listRuns().map(summary);
+
+  getRun = (runId: string): RunDetail => this.#detail(this.#run(runId));
+
+  decideDesign: RunService["decideDesign"] = (runId, verdicts) =>
+    this.#decide(runId, () =>
+      this.#runtime().orchestrator.decideDesign(runId, verdicts),
+    );
+
+  resolveEscalation: RunService["resolveEscalation"] = (runId, resolution) =>
+    this.#decide(runId, () =>
+      this.#runtime().orchestrator.resolveEscalation(runId, resolution),
+    );
+
+  decidePullRequest: RunService["decidePullRequest"] = (runId, decision) =>
+    this.#decide(runId, () =>
+      this.#runtime().orchestrator.decidePullRequest(runId, decision),
+    );
+
+  abortRun = (runId: string, openDraftPrOnAbort: boolean): RunDetail => {
+    if (this.#waiting(this.#run(runId)).for !== "escalation")
+      throw new RunConflictError(
+        `Run ${runId} is not at an Escalation, and a Run is aborted from one.`,
+      );
+    return this.resolveEscalation(runId, {
+      choice: "abort",
+      openDraftPrOnAbort,
+    });
+  };
+
+  events = (runId: string, after?: number): Observable<StreamedEvent> => {
+    this.#run(runId);
+    return this.#log.follow(runId, after);
+  };
+
+  resumeUnfinished: RunLifecycle["resumeUnfinished"] = async () => {
+    const runtime = this.#runtime();
+    const resumed: string[] = [];
+    const failed: Array<{ runId: string; problem: string }> = [];
+    for (const run of runtime.runs.listUnfinishedRuns()) {
+      try {
+        await runtime.resume(run.id);
+        this.#advance(run.id);
+        resumed.push(run.id);
+      } catch (error) {
+        failed.push({ runId: run.id, problem: this.#describe(error) });
+      }
+    }
+    return { resumed, failed };
+  };
+
+  /**
+   * Closes what the runtime opened. It does not wait for Runs being advanced:
+   * a Step can take minutes, and the next start resumes it anyway.
+   */
+  shutdown = async (): Promise<void> => {
+    if (this.#made()) await this.#runtime().close();
+  };
+
+  /** Resolves once no Run is being advanced. For tests. */
+  settled = async (): Promise<void> => {
+    while (this.#advancing.size > 0)
+      await Promise.allSettled([...this.#advancing.values()]);
+  };
+
+  /**
+   * A person's decision, checked by the Orchestrator: a decision it refuses (no
+   * open Gate, an empty hint, a move the lifecycle does not allow) is a conflict
+   * the person can fix, and nothing is advanced. Anything else is a fault, and
+   * goes on as one.
+   */
+  #decide(runId: string, decide: () => unknown): RunDetail {
+    this.#run(runId);
+    try {
+      decide();
+    } catch (error) {
+      if (isRefusal(error)) throw new RunConflictError(error.message);
+      throw error;
+    }
+    this.#advance(runId);
+    return this.#detail(this.#run(runId));
+  }
+
+  /** Advances the Run in the background until it waits for a person. */
+  #advance(runId: string): void {
+    if (this.#advancing.has(runId)) {
+      this.#again.add(runId);
+      return;
+    }
+    const loop = (async () => {
+      try {
+        do {
+          this.#again.delete(runId);
+          await this.#runtime().orchestrator.advance(runId);
+        } while (this.#again.has(runId));
+      } catch (error) {
+        // A Run that throws has not failed by the domain's rules; it stopped,
+        // and a restart resumes it. Its followers need to know it stopped.
+        this.#log.publish({
+          runId,
+          type: "problem",
+          problem: `The Run stopped: ${this.#describe(error)}`,
+        });
+      } finally {
+        this.#advancing.delete(runId);
+      }
+    })();
+    this.#advancing.set(runId, loop);
+  }
+
+  /** An error as a person may read it, with the runtime's keys taken out. */
+  #describe(error: unknown): string {
+    const text = error instanceof Error ? error.message : String(error);
+    return this.#made() ? this.#runtime().redact(text) : text;
+  }
+
+  #run(runId: string): Run {
+    const run = this.#runtime().runs.getRun(runId);
+    if (!run) throw new RunNotFoundError(runId);
+    return run;
+  }
+
+  #detail(run: Run): RunDetail {
+    const runtime = this.#runtime();
+    return {
+      ...summary(run),
+      slices: runtime.slices.listSlices(run.id).map((slice) => ({
+        id: slice.id,
+        title: slice.title,
+        status: slice.status,
+        isWalkingSkeleton: slice.isWalkingSkeleton,
+        commitSha: slice.commitSha,
+      })),
+      documents: runtime.documents
+        .listLatest(run.id)
+        .map(({ kind, version, status }) => ({ kind, version, status })),
+      waiting: this.#waiting(run),
+      failure: run.failure
+        ? {
+            trigger: run.failure.trigger,
+            summary: run.failure.summary,
+            slice: run.failure.slice,
+          }
+        : null,
+      advancing: this.#advancing.has(run.id),
+      lastSeq: this.#log.lastSeq(run.id),
+    };
+  }
+
+  /** What a person is being asked, read from the Run's own state. */
+  #waiting(run: Run): Waiting {
+    const runtime = this.#runtime();
+    switch (run.status) {
+      case "awaitingDesignGate":
+        return {
+          for: "designGate",
+          documents: runtime.documents
+            .listLatest(run.id)
+            .filter((document) => document.status === "inReview")
+            .map(({ kind, version }) => ({ kind, version })),
+        };
+      case "escalated": {
+        const escalation = runtime.escalations.getOpenEscalation(run.id);
+        return escalation
+          ? {
+              for: "escalation",
+              trigger: escalation.trigger,
+              summary: escalation.summary,
+              openDraftPrOnAbort: escalation.openDraftPrOnAbort,
+            }
+          : { for: "nothing" };
+      }
+      case "awaitingPrGate":
+        return { for: "prGate", pullRequest: run.pullRequest };
+      default:
+        return { for: "nothing" };
+    }
+  }
+}
+
+/**
+ * The Orchestrator refuses a decision with a plain Error or an illegal move;
+ * a database or network fault is some other kind, and is not the person's to
+ * fix.
+ */
+function isRefusal(error: unknown): error is Error {
+  return (
+    error instanceof IllegalTransitionError ||
+    (error instanceof Error && error.constructor === Error)
+  );
+}
+
+function summary(run: Run): RunSummary {
+  return {
+    id: run.id,
+    projectRequest: run.projectRequest,
+    mode: run.mode,
+    status: run.status,
+    tokensUsed: run.tokensUsed,
+    tokenBudget: run.tokenBudget,
+    pullRequest: run.pullRequest,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+  };
+}

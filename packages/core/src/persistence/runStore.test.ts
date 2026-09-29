@@ -91,6 +91,17 @@ describe("SqliteRunStore runs", () => {
     expect(store.listUnfinishedRuns().map((run) => run.id)).toEqual([gated.id]);
   });
 
+  it("lists every Run, newest first", () => {
+    const store = makeStore();
+    const first = store.createRun(newRun);
+    const second = store.createRun(newRun);
+
+    expect(store.listRuns().map((run) => run.id)).toEqual([
+      second.id,
+      first.id,
+    ]);
+  });
+
   it("adds token usage and rejects negative or fractional amounts", () => {
     const store = makeStore();
     const { id } = store.createRun(newRun);

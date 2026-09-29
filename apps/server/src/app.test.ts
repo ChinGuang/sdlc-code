@@ -7,6 +7,7 @@ import {
   HEALTH_REPORTER,
   type HealthReporter,
 } from "./health/health.service.js";
+import { RUN_LIFECYCLE, RUN_SERVICE } from "./runs/runService.js";
 
 // Each test boots a Nest application: ~5s alone on Windows, and longer when
 // every Vitest project runs at once, so this file gets a longer timeout.
@@ -15,7 +16,16 @@ vi.setConfig({ testTimeout: 60_000 });
 const apps: INestApplication[] = [];
 
 async function start(reporter?: HealthReporter): Promise<string> {
-  let builder = Test.createTestingModule({ imports: [AppModule] });
+  // Never the real Runs: on a machine with keys set, booting it would pick up
+  // and advance every unfinished Run in the data folder.
+  let builder = Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(RUN_SERVICE)
+    .useValue({})
+    .overrideProvider(RUN_LIFECYCLE)
+    .useValue({
+      resumeUnfinished: async () => ({ resumed: [], failed: [] }),
+      shutdown: async () => {},
+    });
   if (reporter)
     builder = builder.overrideProvider(HEALTH_REPORTER).useValue(reporter);
   const app = (await builder.compile()).createNestApplication({

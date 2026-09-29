@@ -210,7 +210,7 @@ function setup(options: {
       };
     },
   };
-  const reviewProblems: string[] = [];
+  const reviewProblems: Array<[string, string]> = [];
 
   const runnerCalls: SliceRunInput[] = [];
   const sliceCheckpoints: Array<(checkpoint: SliceCheckpoint) => void> = [];
@@ -228,17 +228,19 @@ function setup(options: {
       gate,
       delivery,
       codeReview,
-      onReviewProblem: (problem) => reviewProblems.push(problem),
+      onReviewProblem: (runId, problem) =>
+        reviewProblems.push([runId, problem]),
       reviewRetryBudget: options.reviewRetryBudget,
-      designPhase: new AgentDesignPhase({
-        documents,
-        slices,
-        gate,
-        systemDesign,
-        uiDesign,
-        profile: () => REACT_NODE,
-        pageName: () => "#1 Todo",
-      }),
+      designPhase: () =>
+        new AgentDesignPhase({
+          documents,
+          slices,
+          gate,
+          systemDesign,
+          uiDesign,
+          profile: () => REACT_NODE,
+          pageName: () => "#1 Todo",
+        }),
       sliceRunner: async (_run, onCheckpoint) => ({
         runSlice: async (input) => {
           runnerCalls.push(input);
@@ -531,7 +533,7 @@ describe("AgentRunOrchestrator: the review before the pull request (T19)", () =>
     await context.orchestrator.advance(context.runId);
 
     expect(context.reviewProblems).toEqual([
-      expect.stringContaining("VIBES-01"),
+      [context.runId, expect.stringContaining("VIBES-01")],
     ]);
     expect(context.status()).toBe("awaitingPrGate");
   });
