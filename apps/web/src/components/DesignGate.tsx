@@ -17,6 +17,7 @@ import {
   type Draft,
   type DraftVerdict,
 } from "../run/gates.js";
+import { DocumentBody } from "../documents/DocumentBody.js";
 import { ROLE_NAMES } from "../run/view.js";
 
 /**
@@ -123,7 +124,15 @@ export function DesignGate({
           onSelect={setSelected}
         />
         {document && (
-          <DocumentContent api={api} runId={run.id} document={document} />
+          <DocumentContent
+            api={api}
+            runId={run.id}
+            document={document}
+            slicePlanVersion={
+              run.documents.find((one) => one.kind === "slicePlan")?.version ??
+              null
+            }
+          />
         )}
         {document && (
           <VerdictPanel
@@ -202,34 +211,50 @@ function DocumentContent({
   api,
   runId,
   document,
+  slicePlanVersion,
 }: {
   api: RunsApi;
   runId: string;
   document: RunDocument;
+  /** The API Contract's endpoints are placed in Slices by the Slice Plan. */
+  slicePlanVersion: number | null;
 }) {
   const [read, setRead] = useState<{
     key: string;
     view: DocumentView | null;
+    slicePlan: string | null;
     error: string | null;
   } | null>(null);
-  const key = `${document.kind}@${document.version}`;
+  const withPlan = document.kind === "apiContract" && slicePlanVersion !== null;
+  const key = `${document.kind}@${document.version}${withPlan ? `+${slicePlanVersion}` : ""}`;
 
   useEffect(() => {
     let live = true;
-    api.getDocument(runId, document.kind).then(
-      (view) => live && setRead({ key, view, error: null }),
+    Promise.all([
+      api.getDocument(runId, document.kind),
+      // Without it the table only loses its Slice column.
+      withPlan
+        ? api.getDocument(runId, "slicePlan").then(
+            (plan) => plan.content,
+            () => null,
+          )
+        : null,
+    ]).then(
+      ([view, slicePlan]) =>
+        live && setRead({ key, view, slicePlan, error: null }),
       (error: unknown) =>
         live &&
         setRead({
           key,
           view: null,
+          slicePlan: null,
           error: error instanceof Error ? error.message : String(error),
         }),
     );
     return () => {
       live = false;
     };
-  }, [api, runId, document.kind, key]);
+  }, [api, runId, document.kind, key, withPlan]);
 
   const current = read?.key === key ? read : null;
   return (
@@ -246,7 +271,12 @@ function DocumentContent({
       ) : current.error ? (
         <div className="error">{current.error}</div>
       ) : (
-        <pre className="document-body">{current.view!.content}</pre>
+        <DocumentBody
+          key={key}
+          kind={document.kind}
+          content={current.view!.content}
+          slicePlan={current.slicePlan}
+        />
       )}
     </section>
   );

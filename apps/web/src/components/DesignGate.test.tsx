@@ -45,7 +45,7 @@ describe("DesignGate", () => {
     expect(documents().getAllByRole("button")).toHaveLength(4);
     expect(documents().getAllByText("In review")).toHaveLength(4);
     expect(
-      await screen.findByText(/# systemDesign/, { selector: "pre" }),
+      await screen.findByRole("heading", { name: "systemDesign" }),
     ).toBeInTheDocument();
 
     fireEvent.click(documents().getByRole("button", { name: /API Contract/ }));
