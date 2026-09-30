@@ -150,6 +150,7 @@ export const DETAIL: RunDetail = {
   documents: [],
   reviews: [],
   screenshots: [],
+  screenshotsVersion: null,
   tasks: [
     {
       id: "t1",

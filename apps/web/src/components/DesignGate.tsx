@@ -136,6 +136,7 @@ export function DesignGate({
               screen: shot.screen,
               url: api.screenshotUrl(run.id, shot.version, shot.order),
             }))}
+            screenshotsKept={run.screenshotsVersion !== null}
           />
         )}
         {document && (
@@ -217,6 +218,7 @@ function DocumentContent({
   document,
   slicePlanVersion,
   screenshots,
+  screenshotsKept,
 }: {
   api: RunsApi;
   runId: string;
@@ -225,6 +227,8 @@ function DocumentContent({
   slicePlanVersion: number | null;
   /** The screens as drawn, for the UI design and the UI Spec. */
   screenshots: ScreenShot[];
+  /** Whether any were kept for this design, even if every export failed. */
+  screenshotsKept: boolean;
 }) {
   const [read, setRead] = useState<{
     key: string;
@@ -284,6 +288,7 @@ function DocumentContent({
           content={current.view!.content}
           slicePlan={current.slicePlan}
           screenshots={screenshots}
+          screenshotsKept={screenshotsKept}
         />
       )}
     </section>

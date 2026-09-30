@@ -20,6 +20,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Headers,
   HttpCode,
   Inject,
@@ -72,8 +73,15 @@ export class RunsController {
     return this.#runs.getRun(id);
   }
 
-  /** An image a browser shows as it is: a PNG, never JSON. */
+  /**
+   * An image a browser shows as it is: a PNG or JPEG, never JSON. It opens in
+   * a tab on this origin, so nothing in it may run: no sniffing, no scripts.
+   * A version can be drawn again, so it is kept for minutes, not for ever.
+   */
   @Get(":id/screenshots/:version/:order")
+  @Header("X-Content-Type-Options", "nosniff")
+  @Header("Content-Security-Policy", "default-src 'none'")
+  @Header("Cache-Control", "private, max-age=300")
   screenshot(
     @Param("id") id: string,
     @Param("version") version: string,

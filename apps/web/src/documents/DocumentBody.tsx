@@ -27,6 +27,7 @@ export function DocumentBody({
   content,
   slicePlan = null,
   screenshots = [],
+  screenshotsKept = false,
 }: {
   kind: DocumentKind;
   content: string;
@@ -34,9 +35,17 @@ export function DocumentBody({
   slicePlan?: string | null;
   /** The screens as drawn, for the UI design and the UI Spec. */
   screenshots?: ScreenShot[];
+  /** Whether any were kept for this design, even if every export failed. */
+  screenshotsKept?: boolean;
 }) {
   const [showRaw, setShowRaw] = useState(false);
-  const readable = readableView(kind, content, slicePlan, screenshots);
+  const readable = readableView(
+    kind,
+    content,
+    slicePlan,
+    screenshots,
+    screenshotsKept,
+  );
   return (
     <div className="document-view">
       <div className="segmented view-switch" role="group" aria-label="View">
@@ -79,6 +88,7 @@ function readableView(
   content: string,
   slicePlan: string | null,
   screenshots: ScreenShot[],
+  screenshotsKept: boolean,
 ) {
   switch (kind) {
     case "systemDesign":
@@ -118,6 +128,7 @@ function readableView(
             page={design.page}
             screens={design.screens}
             screenshots={screenshots}
+            kept={screenshotsKept}
           />
         )
       );
@@ -133,32 +144,46 @@ function UiDesignView({
   page,
   screens,
   screenshots,
+  kept,
 }: {
   page: string;
   screens: string[];
   screenshots: ScreenShot[];
+  /** Whether any were kept for this design, even if every export failed. */
+  kept: boolean;
 }) {
+  const shots = new Map(screenshots.map((shot) => [shot.screen, shot]));
+  const missing = screens.filter((screen) => !shots.has(screen)).length;
   return (
     <div className="ui-design">
-      {screenshots.length > 0 ? (
-        <div className="gallery">
-          {screenshots.map((shot, index) => (
-            <Screenshot key={`${index}-${shot.screen}`} shot={shot} />
-          ))}
-        </div>
+      {!kept ? (
+        <p className="warning small" role="status">
+          No screenshots were kept for this Run: it was designed before they
+          were. The UI Spec shows each screen's layout.
+        </p>
       ) : (
-        <>
+        missing > 0 && (
           <p className="warning small" role="status">
-            No screenshots were kept for this Run: it was designed before they
-            were. The UI Spec shows each screen's layout.
+            {missing === screens.length
+              ? "No screen could be exported"
+              : `${missing} of ${screens.length} screens could not be exported`}
+            ; the UI Spec shows their layouts.
           </p>
-          <ul>
-            {screens.map((screen, index) => (
-              <li key={`${index}-${screen}`}>{screen}</li>
-            ))}
-          </ul>
-        </>
+        )
       )}
+      <div className="gallery">
+        {screens.map((screen, index) => {
+          const shot = shots.get(screen);
+          return shot ? (
+            <Screenshot key={`${index}-${screen}`} shot={shot} />
+          ) : (
+            <figure key={`${index}-${screen}`} className="screenshot missing">
+              <div className="no-shot faint small">No screenshot</div>
+              <figcaption>{screen}</figcaption>
+            </figure>
+          );
+        })}
+      </div>
       <p className="faint small">
         Drawn in Penpot{page ? `, on the page "${page}"` : ""}.
       </p>
@@ -407,8 +432,10 @@ function UiSpecView({
   tokens: Array<{ name: string; value: string }>;
   screenshots: ScreenShot[];
 }) {
-  const shotOf = (name: string) =>
-    screenshots.find((shot) => shot.screen === name);
+  // The first screenshot of each name, looked up once.
+  const shots = new Map<string, ScreenShot>();
+  for (const shot of screenshots)
+    if (!shots.has(shot.screen)) shots.set(shot.screen, shot);
   return (
     <div className="ui-spec">
       {tokens.length > 0 && (
@@ -453,8 +480,8 @@ function UiSpecView({
             )}
           </div>
           {/* As drawn when it was kept; otherwise its layout, scaled down. */}
-          {shotOf(screen.name) ? (
-            <Screenshot shot={shotOf(screen.name)!} />
+          {shots.has(screen.name) ? (
+            <Screenshot shot={shots.get(screen.name)!} />
           ) : (
             <div
               className="wireframe"

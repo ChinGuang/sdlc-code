@@ -152,6 +152,8 @@ export type RunDetail = RunSummary & {
   reviews: Review[];
   /** The screens as drawn, for the latest UI design; none for an old Run. */
   screenshots: Array<{ screen: string; version: number; order: number }>;
+  /** The UI Spec version they were kept for; null for a Run from before. */
+  screenshotsVersion: number | null;
   tasks: RunTask[];
   waiting: Waiting;
   failure: { trigger: string; summary: string; slice: string | null } | null;

@@ -202,9 +202,11 @@ describe("DocumentBody: the UI Spec and the UI design", () => {
           { screen: "Sign in", url: "/shots/1" },
           { screen: "Calendar", url: "/shots/2" },
         ]}
+        screenshotsKept
       />,
     );
 
+    expect(screen.queryByRole("status")).toBeNull();
     const images = screen.getAllByRole("img");
     expect(images.map((image) => image.getAttribute("alt"))).toEqual([
       "Sign in, as drawn",
@@ -218,15 +220,47 @@ describe("DocumentBody: the UI Spec and the UI design", () => {
   });
 
   // Runs from before T24e kept none.
-  it("says so when a Run kept no screenshots, and lists its screens", () => {
+  it("says so when a Run kept no screenshots, and names its screens", () => {
     render(<DocumentBody kind="penpotDesign" content={PENPOT_DESIGN} />);
 
     expect(screen.getByRole("status")).toHaveTextContent(
-      /No screenshots were kept for this Run/,
+      /it was designed before they were/,
     );
-    expect(
-      screen.getAllByRole("listitem").map((item) => item.textContent),
-    ).toEqual(["Screen: Sign in", "Screen: Calendar"]);
+    expect(screen.getAllByText("No screenshot")).toHaveLength(2);
+    expect(screen.getByText("Calendar")).toBeInTheDocument();
+  });
+
+  // A screen whose export failed keeps its place, and says it has none.
+  it("shows which screens could not be exported", () => {
+    render(
+      <DocumentBody
+        kind="penpotDesign"
+        content={PENPOT_DESIGN}
+        screenshots={[{ screen: "Calendar", url: "/shots/2" }]}
+        screenshotsKept
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "1 of 2 screens could not be exported",
+    );
+    const figures = document.querySelectorAll("figure");
+    expect(figures[0]).toHaveTextContent("No screenshotSign in");
+    expect(figures[1]!.querySelector("img")).toHaveAttribute("src", "/shots/2");
+  });
+
+  it("says no screen could be exported, rather than calling the Run old", () => {
+    render(
+      <DocumentBody
+        kind="penpotDesign"
+        content={PENPOT_DESIGN}
+        screenshotsKept
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "No screen could be exported",
+    );
   });
 
   it("shows each UI Spec screen as drawn, and its layout only without one", () => {

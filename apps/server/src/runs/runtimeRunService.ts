@@ -264,6 +264,7 @@ export class RuntimeRunService implements RunService, RunLifecycle {
       screenshots: runtime.screenshots
         .list(run.id)
         .map(({ screen, version, order }) => ({ screen, version, order })),
+      screenshotsVersion: runtime.screenshots.latestVersion(run.id),
       reviews: runtime.reviews.listReviews(run.id).map((review) => ({
         findings: review.findings.map((finding) => ({
           ruleId: finding.ruleId,

@@ -158,8 +158,8 @@ export const PENPOT_DESIGN = JSON.stringify({
     removedBoards: [],
   },
   screens: [
-    { name: "Screen: Sign in", boardId: "b1" },
-    { name: "Screen: Calendar", boardId: "b2" },
+    { name: "Sign in", boardId: "b1" },
+    { name: "Calendar", boardId: "b2" },
   ],
 });
 

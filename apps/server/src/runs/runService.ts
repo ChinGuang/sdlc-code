@@ -139,6 +139,11 @@ export type RunDetail = RunSummary & {
    */
   screenshots: Array<{ screen: string; version: number; order: number }>;
   /**
+   * The UI Spec version the screenshots were kept for, even when every export
+   * failed; null for a Run from before they were kept.
+   */
+  screenshotsVersion: number | null;
+  /**
    * Each agent's Task and its Steps: a Slice's backend and frontend lanes, and
    * how much of its Retry Budget each has spent.
    */

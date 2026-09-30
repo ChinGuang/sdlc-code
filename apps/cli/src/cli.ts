@@ -312,6 +312,13 @@ async function gateShow(parsed: Parsed, io: CliIo, deps: CliDeps) {
       io.out(
         `  ${argOf(one.kind).padEnd(15)}${judged.has(one.kind) ? paint.blue("in review".padEnd(18)) : paint.muted(one.status.padEnd(18))}${paint.muted(roleName(one.ownerAgent))}`,
       );
+    if (run.screenshots.length > 0) {
+      io.out("  Screens as drawn:");
+      for (const shot of run.screenshots)
+        io.out(
+          `    ${shot.screen.padEnd(20)}${paint.blue(api.screenshotUrl(run.id, shot.version, shot.order))}`,
+        );
+    }
     io.out(
       paint.muted(`  Read one:        sdlccode gate show ${id} <document>`),
     );

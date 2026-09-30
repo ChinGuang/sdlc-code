@@ -3,11 +3,11 @@
  * Design Phase, with scripted design agents and a scripted Slice runner:
  * Design Gate verdicts, Slices, and each Escalation choice.
  */
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { REACT_NODE } from "@sdlc-code/stack-profiles";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AgentLoopResult } from "../agentLoop/agentLoop.js";
 import type { Design } from "../agents/systemDesign/design.js";
 import { goodDesign } from "../agents/systemDesign/fixtures/goodDesign.js";
@@ -85,6 +85,12 @@ const approveAll = (kinds: readonly DocumentKind[] = DOCUMENT_KINDS) =>
     comments: "",
   }));
 
+const folders: string[] = [];
+afterEach(() => {
+  for (const folder of folders.splice(0))
+    rmSync(folder, { recursive: true, force: true });
+});
+
 function setup(options: {
   mode?: RunMode;
   /** What the Slice runner returns, call by call; passes when it runs out. */
@@ -105,6 +111,8 @@ function setup(options: {
   };
   /** Called per review: true once the Findings are meant to be gone. */
   reviewsClean?: () => boolean;
+  /** Where the screens as drawn are kept; a temporary folder unless given. */
+  screenshots?: ScreenshotStore;
   /** How often blocking Findings may send the code back. */
   reviewRetryBudget?: number;
   /**
@@ -122,9 +130,11 @@ function setup(options: {
   const escalations = new SqliteEscalationStore(store);
   const gates = new SqliteGateStore(store);
   const reviewRecords: ReviewStore = new SqliteReviewStore(store);
-  const screenshots: ScreenshotStore = new FileScreenshotStore({
-    dataDir: mkdtempSync(join(tmpdir(), "sdlc-screens-")),
-  });
+  const screenshotsDir = mkdtempSync(join(tmpdir(), "sdlc-screens-"));
+  folders.push(screenshotsDir);
+  const screenshots: ScreenshotStore =
+    options.screenshots ?? new FileScreenshotStore({ dataDir: screenshotsDir });
+  const notKept: string[] = [];
   const gate = new DocumentDesignGate({ db, runs, documents, gates });
   const run = runs.createRun({
     projectRequest: "Build a todo app",
@@ -258,6 +268,7 @@ function setup(options: {
           profile: () => REACT_NODE,
           pageName: () => "#1 Todo",
           screenshots,
+          onScreenshotsNotKept: (reason) => notKept.push(reason),
         }),
       sliceRunner: async (_run, onCheckpoint) => ({
         runSlice: async (input) => {
@@ -311,6 +322,7 @@ function setup(options: {
     reviews,
     reviewRecords,
     screenshots,
+    notKept,
     reviewProblems,
     /** Reports a Checkpoint from inside a Slice, as the real runner does. */
     sliceCheckpoint: (checkpoint: SliceCheckpoint) =>
@@ -956,6 +968,49 @@ describe("AgentRunOrchestrator: the screens as drawn (T24e)", () => {
     expect(screenshots.read(runId, version, 2)?.bytes.toString()).toBe(
       "Todo list",
     );
+  });
+
+  // What a person approved stays as they saw it: a redraw from a changed UI
+  // Spec is kept beside it, not over it.
+  it("keeps the approved screens when the UI is redrawn from a new UI Spec", async () => {
+    const { orchestrator, runId, screenshots, documents } = setup({});
+    await orchestrator.advance(runId);
+
+    orchestrator.decideDesign(runId, [
+      ...approveAll([
+        "systemDesign",
+        "slicePlan",
+        "apiContract",
+        "penpotDesign",
+      ]),
+      { documentKind: "uiSpec", decision: "requestChanges", comments: "Red." },
+    ]);
+    await orchestrator.advance(runId);
+
+    expect(documents.getLatest(runId, "uiSpec")!.version).toBe(2);
+    expect(screenshots.list(runId, 1)).toHaveLength(2);
+    expect(screenshots.latestVersion(runId)).toBe(2);
+  });
+
+  // A full disk or a locked file loses the pictures, never the Run.
+  it("opens the Design Gate even when the screenshots cannot be kept", async () => {
+    const failing: ScreenshotStore = {
+      save: () => {
+        throw new Error("ENOSPC: no space left on device");
+      },
+      list: () => [],
+      latestVersion: () => null,
+      read: () => null,
+      images: () => new Map(),
+    };
+    const { orchestrator, runId, status, notKept } = setup({
+      screenshots: failing,
+    });
+
+    await orchestrator.advance(runId);
+
+    expect(status()).toBe("awaitingDesignGate");
+    expect(notKept).toEqual(["ENOSPC: no space left on device"]);
   });
 
   // A restart used to lose them: they lived only in memory.

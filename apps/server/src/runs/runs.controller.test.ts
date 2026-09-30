@@ -52,6 +52,7 @@ const DETAIL: RunDetail = {
   documents: [],
   reviews: [],
   screenshots: [],
+  screenshotsVersion: null,
   tasks: [],
   waiting: { for: "nothing" },
   failure: null,

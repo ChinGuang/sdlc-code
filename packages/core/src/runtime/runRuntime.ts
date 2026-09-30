@@ -426,6 +426,12 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
         profile: () => profile,
         pageName: () => pageNameFor(run),
         screenshots,
+        onScreenshotsNotKept: (reason) =>
+          emit({
+            runId: run.id,
+            type: "problem",
+            problem: `The screenshots could not be kept: ${reason.slice(0, 200)}`,
+          }),
         systemDesign: new LoopSystemDesignAgent({
           createLoop: loopFor(run, "systemDesign", TURNS.systemDesign),
         }),

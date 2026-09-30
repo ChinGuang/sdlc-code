@@ -485,7 +485,9 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       return;
     }
     memory.revisions = [];
-    if (result.screenImages.size > 0) memory.screenImages = result.screenImages;
+    // A redraw replaces the images, even with none: the old ones show screens
+    // that no longer exist.
+    if (result.redrawn) memory.screenImages = result.screenImages;
     this.#checkpoint(run.id);
   }
 

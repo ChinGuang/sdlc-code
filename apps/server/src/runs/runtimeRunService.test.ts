@@ -2,7 +2,7 @@
  * The service over real stores and a scripted Orchestrator: a request answers at
  * once, the Run advances in the background, and what it does arrives in order.
  */
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -23,7 +23,7 @@ import {
   type Task,
 } from "@sdlc-code/core";
 import { firstValueFrom, take, toArray } from "rxjs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { MemoryEventLog } from "./eventLog.js";
 import {
   DocumentNotFoundError,
@@ -51,6 +51,12 @@ const TARGET = {
   runBranch: "sdlc/run",
 };
 
+const folders: string[] = [];
+afterEach(() => {
+  for (const folder of folders.splice(0))
+    rmSync(folder, { recursive: true, force: true });
+});
+
 function setup(
   steps: Step[] = [],
   options: { failResume?: ReadonlySet<string>; refuse?: Error } = {},
@@ -63,9 +69,9 @@ function setup(
   const documents = new SqliteDocumentStore(store);
   const slices = new SqliteSliceStore(store);
   const reviews = new SqliteReviewStore(store);
-  const screenshots = new FileScreenshotStore({
-    dataDir: mkdtempSync(join(tmpdir(), "sdlc-screens-")),
-  });
+  const screenshotsDir = mkdtempSync(join(tmpdir(), "sdlc-screens-"));
+  folders.push(screenshotsDir);
+  const screenshots = new FileScreenshotStore({ dataDir: screenshotsDir });
   const log = new MemoryEventLog();
   const script = [...steps];
   const advanced: string[] = [];
@@ -505,16 +511,19 @@ describe("RuntimeRunService: the screens as drawn", () => {
     screenshots.save(run.id, 1, [
       {
         name: "Home",
+        order: 1,
         image: { bytes: Buffer.from("old"), mimeType: "image/png" },
       },
     ]);
     screenshots.save(run.id, 2, [
       {
         name: "Home",
+        order: 1,
         image: { bytes: Buffer.from("new"), mimeType: "image/png" },
       },
       {
         name: "Add",
+        order: 2,
         image: { bytes: Buffer.from("add"), mimeType: "image/png" },
       },
     ]);
@@ -523,6 +532,7 @@ describe("RuntimeRunService: the screens as drawn", () => {
       { screen: "Home", version: 2, order: 1 },
       { screen: "Add", version: 2, order: 2 },
     ]);
+    expect(api.getRun(run.id).screenshotsVersion).toBe(2);
     expect(api.getScreenshot(run.id, 1, 1).bytes.toString()).toBe("old");
     expect(() => api.getScreenshot(run.id, 2, 3)).toThrow(
       ScreenshotNotFoundError,
@@ -536,6 +546,7 @@ describe("RuntimeRunService: the screens as drawn", () => {
     await settled();
 
     expect(api.getRun(run.id).screenshots).toEqual([]);
+    expect(api.getRun(run.id).screenshotsVersion).toBeNull();
   });
 });
 

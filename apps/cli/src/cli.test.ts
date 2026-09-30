@@ -80,6 +80,7 @@ const DETAIL: RunDetail = {
     },
   ],
   reviews: [],
+  screenshots: [],
   tasks: [
     {
       id: "t1",
@@ -99,6 +100,7 @@ const DETAIL: RunDetail = {
 const AT_DESIGN_GATE: RunDetail = {
   ...DETAIL,
   status: "awaitingDesignGate",
+  screenshots: [{ screen: "Sign in", version: 1, order: 1 }],
   slices: [],
   tasks: [],
   waiting: {
@@ -548,6 +550,8 @@ describe("sdlccode gate", () => {
     const printed = out.join("\n");
     expect(printed).toMatch(/api-contract +in review +System Design Agent/);
     expect(printed).toMatch(/sdlccode gate approve 27f388 --all/);
+    expect(printed).toMatch(/Sign in +http:\/\/127\.0\.0\.1:\d+\//);
+    expect(printed).toContain(`/runs/${ID}/screenshots/1/1`);
     expect(printed).toContain('{\n  "openapi": "3.1.0"\n}');
   });
 

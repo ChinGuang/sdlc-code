@@ -103,11 +103,9 @@ export type RunMemoryState = {
 
 /**
  * The payload to save. The board PNGs a model with vision was given are left
- * out on purpose: they are bytes, they are design material rather than a
- * decision, and the UI Spec they were drawn from is an Approved Document. A
- * resumed Run builds its screens from the UI Spec alone. A design that is not
- * revised is never redrawn, so a vision-capable agent works without those
- * images for the rest of that Run.
+ * out on purpose: they are bytes, and design material rather than a decision.
+ * The ScreenshotStore keeps them beside the Checkpoint (T24e), and a resumed
+ * Run reads them back from there.
  *
  * The run branch is not recorded either: it only ever moves forward by a Slice
  * Commit, so its head is already the last Slice that passed.
