@@ -82,13 +82,13 @@ const STATUS: Record<RunDetail["status"], [string, keyof Paint]> = {
 };
 
 export function statusText(status: RunDetail["status"], paint: Paint): string {
-  const [label, tone] = STATUS[status];
+  const [label, tone] = STATUS[status] ?? [status, "muted"];
   return paint[tone](label);
 }
 
 /** One line per Run: `27f388  escalated  1.3M / 2.0M  A calendar app…`. */
 export function runLine(run: RunSummary, paint: Paint): string {
-  const [label, tone] = STATUS[run.status];
+  const [label, tone] = STATUS[run.status] ?? [run.status, "muted"];
   return [
     paint.bold(shortId(run.id)),
     paint[tone](label.padEnd(20)),

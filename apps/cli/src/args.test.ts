@@ -53,9 +53,13 @@ describe("parseTokens", () => {
     expect(parseTokens(text)).toBe(tokens);
   });
 
-  it.each(["", "lots", "-5", "0", "2MB"])("refuses %j", (text) => {
-    expect(() => parseTokens(text)).toThrow(UsageError);
-  });
+  // "1,5M" is 1.5M in a decimal-comma locale, not 15M.
+  it.each(["", "lots", "-5", "0", "2MB", "1,5M", "20,00,000"])(
+    "refuses %j",
+    (text) => {
+      expect(() => parseTokens(text)).toThrow(UsageError);
+    },
+  );
 });
 
 describe("createSseParser", () => {
@@ -71,5 +75,16 @@ describe("createSseParser", () => {
       { event: "status", id: "41", data: '{"a":1}' },
       { event: "tokens", id: "41", data: "2\n3" },
     ]);
+  });
+
+  it("reads a CRLF cut between its CR and its LF as one line end", () => {
+    const messages: SseMessage[] = [];
+    const feed = createSseParser((message) => messages.push(message));
+
+    feed("event: status\r");
+    feed("\ndata: a\r");
+    feed("\ndata: b\r\n\r\n");
+
+    expect(messages).toEqual([{ event: "status", id: null, data: "a\nb" }]);
   });
 });

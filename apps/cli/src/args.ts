@@ -34,7 +34,7 @@ export function parseArgs(
       words.push(...argv.slice(index + 1));
       break;
     }
-    if (!arg.startsWith("--") || arg === "--") {
+    if (!arg.startsWith("--")) {
       words.push(arg);
       continue;
     }
@@ -66,7 +66,10 @@ export function onlyFlags(parsed: Parsed, known: readonly string[]): void {
 
 /** "3M", "1.5M", "500k", "2,000,000" or "2000000", as tokens. */
 export function parseTokens(text: string): number {
-  const match = /^([\d.,_]+)\s*([kKmM]?)$/.exec(text.trim());
+  // Commas only between groups of three: "1,5M" is not a way to write 1.5M.
+  const match = /^(\d{1,3}(?:,\d{3})+|[\d_]+(?:\.\d+)?)\s*([kKmM]?)$/.exec(
+    text.trim(),
+  );
   const number = match ? Number(match[1]!.replace(/[,_]/g, "")) : Number.NaN;
   const scale =
     match?.[2]?.toLowerCase() === "m"

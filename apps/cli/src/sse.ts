@@ -29,10 +29,14 @@ export function createSseParser(
     else if (field === "id") id = value;
   };
 
+  // A CR ending one chunk may be the first half of a CRLF the next finishes.
+  let endedOnCr = false;
   return (chunk) => {
-    buffer += chunk;
+    const text = endedOnCr && chunk.startsWith("\n") ? chunk.slice(1) : chunk;
+    endedOnCr = text.endsWith("\r");
+    buffer += text;
     const lines = buffer.split(/\r\n|\r|\n/);
     buffer = lines.pop() ?? "";
-    for (const text of lines) line(text);
+    for (const one of lines) line(one);
   };
 }

@@ -17,8 +17,12 @@ export type Route = (request: {
   path: string;
   body: unknown;
 }) =>
-  | { status?: number; json: unknown }
-  | { events: Array<{ type: string; [field: string]: unknown }> }
+  | { status?: number; json: unknown; raw?: string }
+  | {
+      events: Array<{ type: string; [field: string]: unknown }>;
+      /** Close the stream after them, as a server that stopped would. */
+      end?: boolean;
+    }
   | undefined;
 
 export async function mockServer(route: Route) {
@@ -50,12 +54,13 @@ export async function mockServer(route: Route) {
           res.write(message.slice(10));
         }
         // Held open, as the server's stream is: the client must stop by itself.
+        if (answer.end) res.end();
         return;
       }
       res.writeHead(answer.status ?? 200, {
         "content-type": "application/json",
       });
-      res.end(JSON.stringify(answer.json));
+      res.end(answer.raw ?? JSON.stringify(answer.json));
     },
   );
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

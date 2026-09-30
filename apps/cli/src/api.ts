@@ -193,12 +193,13 @@ export interface ServerApi {
   abortRun: (runId: string, openDraftPrOnAbort: boolean) => Promise<RunDetail>;
   /**
    * Calls `onEvent` for each of the Run's events after `after`, until
-   * `onEvent` returns "stop" or the stream ends.
+   * `onEvent` returns "stop", `until` is aborted, or the stream ends.
    */
   follow: (
     runId: string,
     after: number,
     onEvent: (event: RunEvent) => "stop" | void,
+    until?: AbortSignal,
   ) => Promise<void>;
 }
 
@@ -253,15 +254,20 @@ export class HttpServerApi implements ServerApi {
     runId: string,
     after: number,
     onEvent: (event: RunEvent) => "stop" | void,
+    until?: AbortSignal,
   ): Promise<void> => {
     const stop = new AbortController();
+    let stopped = until?.aborted ?? false;
+    until?.addEventListener("abort", () => {
+      stopped = true;
+      stop.abort();
+    });
     const response = await this.#send(
       `${runPath(runId)}/events?after=${after}`,
       { headers: { accept: "text/event-stream" }, signal: stop.signal },
     );
     if (!response.ok) throw await refusal(response);
     if (!response.body) return;
-    let stopped = false;
     const parser = createSseParser((message) => {
       if (stopped) return;
       let event: RunEvent;
@@ -276,7 +282,14 @@ export class HttpServerApi implements ServerApi {
     const reader = response.body.getReader();
     try {
       while (!stopped) {
-        const { done, value } = await reader.read();
+        const { done, value } = await reader.read().catch(() => {
+          // Stopped on purpose, the read that was waiting ends with it.
+          if (stopped) return { done: true, value: undefined };
+          throw new ApiError(
+            0,
+            `Lost the connection to ${this.#base} while following the Run.`,
+          );
+        });
         if (done) break;
         parser(decoder.decode(value, { stream: true }));
       }
@@ -293,7 +306,15 @@ export class HttpServerApi implements ServerApi {
     });
     if (!response.ok) throw await refusal(response);
     const text = await response.text();
-    return (text ? JSON.parse(text) : null) as T;
+    try {
+      return (text ? JSON.parse(text) : null) as T;
+    } catch {
+      // e.g. SDLC_API_URL pointing at the dashboard, which answers with HTML.
+      throw new ApiError(
+        response.status,
+        `${this.#base} did not answer as an sdlc-code server does; check SDLC_API_URL.`,
+      );
+    }
   }
 
   /** A request, or the one error that says the server is not there. */

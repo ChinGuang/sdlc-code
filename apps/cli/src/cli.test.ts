@@ -181,6 +181,46 @@ async function cli(detail: RunDetail, route: Route = () => undefined) {
 }
 
 describe("sdlccode: help and mistakes", () => {
+  it("prints its help from anywhere on the line", async () => {
+    const { run, out } = await cli(DETAIL);
+
+    expect(await run("status", "27f388", "--help")).toBe(0);
+
+    expect(out[0]).toMatch(/^Usage: sdlccode/);
+  });
+
+  it("names the right usage for a retry or an edit said wrong", async () => {
+    const { run, err, posted } = await cli(ESCALATED);
+
+    expect(await run("escalation", "retry", "27f388")).toBe(2);
+    expect(await run("escalation", "retry", "27f388", "two", "hints")).toBe(2);
+    expect(await run("escalation", "edit", "27f388", "api-contract")).toBe(2);
+
+    expect(err.join("\n")).toMatch(
+      /escalation retry needs one hint, in quotes/,
+    );
+    expect(err.join("\n")).toMatch(
+      /escalation edit needs a document and comments/,
+    );
+    expect(posted()).toEqual([]);
+  });
+
+  // e.g. SDLC_API_URL pointing at the dashboard, which answers with HTML.
+  it("says so in one line when what answers is not the server", async () => {
+    const { run, err } = await cli(DETAIL, (request) =>
+      request.path === "/runs"
+        ? { json: undefined, raw: "<!doctype html>" }
+        : undefined,
+    );
+
+    expect(await run("list")).toBe(1);
+
+    expect(err).toHaveLength(1);
+    expect(err[0]).toMatch(
+      /did not answer as an sdlc-code server does; check SDLC_API_URL/,
+    );
+  });
+
   it("prints its version and its commands", async () => {
     const { run, out } = await cli(DETAIL);
 
@@ -304,6 +344,37 @@ describe("sdlccode run", () => {
     expect(printed).toContain(`http://localhost:5173/#/runs/${ID}/design-gate`);
   });
 
+  // The server stopped, or restarted, before the Run needed anyone.
+  it("says so when the stream ends before the Run rests", async () => {
+    const { run, out } = await cli(DETAIL, (request) =>
+      request.path.startsWith(`/runs/${ID}/events`)
+        ? {
+            events: [
+              {
+                type: "step",
+                phase: "started",
+                role: "backendCoding",
+                sliceId: "s2",
+                stepId: "a",
+                taskId: "t",
+              },
+            ],
+            end: true,
+          }
+        : undefined,
+    );
+
+    expect(await run("status", "27f388", "--follow")).toBe(0);
+
+    const printed = out.join("\n");
+    expect(printed).toMatch(
+      /Backend Coding Agent {2}started a Step on Slice 2/,
+    );
+    expect(printed).toMatch(
+      /The server stopped sending; follow again with: sdlccode status 27f388 --follow/,
+    );
+  });
+
   it("starts an auto Run and leaves it be with --detach", async () => {
     const { run, out, posted } = await cli(DETAIL, (request) =>
       request.method === "POST" && request.path === "/runs"
@@ -340,6 +411,91 @@ describe("sdlccode run", () => {
       "The request does not fit.",
       '  targetRepo: a Target Repo is "owner/name"',
     ]);
+  });
+});
+
+describe("sdlccode: following a Run to its end", () => {
+  // Its loop stopped (a restart resumes it): the stream would never speak.
+  it("does not follow a Run that nothing is moving", async () => {
+    const { run, out, requests } = await cli({ ...DETAIL, advancing: false });
+
+    expect(await run("status", "27f388", "--follow")).toBe(0);
+
+    expect(requests.some((request) => request.path.includes("/events"))).toBe(
+      false,
+    );
+    expect(out.join("\n")).toMatch(
+      /#27f388 is not moving: the server is not advancing it/,
+    );
+  });
+
+  // An auto Run that fails delivers its Draft PR just after it stops.
+  it("waits past a failure for the Draft PR it delivers", async () => {
+    const failed: RunDetail = {
+      ...DETAIL,
+      status: "failed",
+      advancing: false,
+      failure: {
+        trigger: "retryBudget",
+        summary: "Still failing",
+        slice: "Auth",
+      },
+      pullRequest: {
+        number: 9,
+        url: "https://github.com/o/r/pull/9",
+        draft: true,
+      },
+    };
+    let read = 0;
+    const { run, out } = await cli(DETAIL, (request) => {
+      if (request.path.startsWith(`/runs/${ID}/events`))
+        return {
+          events: [
+            { type: "status", status: "failed" },
+            {
+              type: "delivery",
+              status: "opened",
+              detail: "https://github.com/o/r/pull/9",
+            },
+            { type: "problem", problem: "never printed: the CLI stopped" },
+          ],
+        };
+      if (request.path === `/runs/${ID}`)
+        return { json: (read += 1) === 1 ? DETAIL : failed };
+      return undefined;
+    });
+
+    expect(await run("status", "27f388", "--follow")).toBe(0);
+
+    const printed = out.join("\n");
+    expect(printed).toMatch(/Run is now failed/);
+    expect(printed).toMatch(/opened https:\/\/github.com\/o\/r\/pull\/9/);
+    expect(printed).not.toMatch(/never printed/);
+  });
+
+  // The server publishes "The Run stopped: …" and the status stays where it was.
+  it("stops following once a problem leaves the Run with nothing moving it", async () => {
+    let read = 0;
+    const { run, out } = await cli(DETAIL, (request) => {
+      if (request.path.startsWith(`/runs/${ID}/events`))
+        return {
+          events: [
+            {
+              type: "problem",
+              problem: "The Run stopped: the sandbox is gone",
+            },
+          ],
+        };
+      if (request.path === `/runs/${ID}`)
+        return {
+          json: (read += 1) === 1 ? DETAIL : { ...DETAIL, advancing: false },
+        };
+      return undefined;
+    });
+
+    expect(await run("status", "27f388", "--follow")).toBe(0);
+
+    expect(out.join("\n")).toMatch(/The Run stopped: the sandbox is gone/);
   });
 });
 
@@ -398,6 +554,7 @@ describe("sdlccode gate", () => {
   it("approves every document in review at once", async () => {
     const { run, posted } = await cli(AT_DESIGN_GATE);
 
+    expect(await run("gate", "approve", "27f388")).toBe(2);
     expect(await run("gate", "approve", "27f388", "--all")).toBe(0);
 
     expect(posted()).toEqual([
@@ -449,6 +606,25 @@ describe("sdlccode gate", () => {
     expect(out.join("\n")).toMatch(
       /! ui-spec, penpot marked stale: redone before the Gate re-opens/,
     );
+  });
+
+  it("refuses a document that is not in review at this Gate", async () => {
+    const { run, err, posted } = await cli({
+      ...AT_DESIGN_GATE,
+      waiting: {
+        for: "designGate",
+        documents: [{ kind: "uiSpec", version: 2 }],
+      },
+    });
+
+    expect(
+      await run("gate", "request-changes", "27f388", "api-contract", "x"),
+    ).toBe(2);
+
+    expect(err[0]).toMatch(
+      /api-contract is not in review at this Gate; these are: ui-spec/,
+    );
+    expect(posted()).toEqual([]);
   });
 
   it("refuses a document that does not exist, or comments with no document", async () => {
@@ -520,7 +696,7 @@ describe("sdlccode escalation and abort", () => {
       /Backend Coding Agent\n +Aligned \/health with the API Contract\./,
     );
     expect(printed).toMatch(
-      /sdlccode escalation retry 27f388 "<hint>" --budget 3\.0M/,
+      /sdlccode escalation retry 27f388 "<hint>" --budget 3\.1M/,
     );
     expect(printed).toMatch(/The Token Budget is spent/);
   });
@@ -603,6 +779,41 @@ describe("sdlccode escalation and abort", () => {
 
     expect(err[0]).toBe(
       "The Token Budget is spent: raise it to go on, or abort the Run.",
+    );
+  });
+
+  // Whether the Draft PR opened, or why not, is said once it is known.
+  it("says what the abort delivered", async () => {
+    const aborting: RunDetail = {
+      ...ESCALATED,
+      status: "aborted",
+      waiting: { for: "nothing" },
+    };
+    let read = 0;
+    const { run, out } = await cli(ESCALATED, (request) => {
+      if (request.path === `/runs/${ID}/abort`) return { json: aborting };
+      if (request.path.startsWith(`/runs/${ID}/events`))
+        return {
+          events: [
+            {
+              type: "delivery",
+              status: "keptLocal",
+              detail: "no Slice passed a Test Run",
+            },
+          ],
+        };
+      if (request.path === `/runs/${ID}`)
+        return {
+          json:
+            (read += 1) === 1 ? aborting : { ...aborting, advancing: false },
+        };
+      return undefined;
+    });
+
+    expect(await run("abort", "27f388")).toBe(0);
+
+    expect(out.join("\n")).toMatch(
+      /kept the commits local: no Slice passed a Test Run/,
     );
   });
 

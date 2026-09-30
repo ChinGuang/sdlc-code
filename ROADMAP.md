@@ -77,6 +77,7 @@ Everything here is merged into `main`, has tests, and has been exercised by a re
   - **Left out**: the Penpot file link (a Run's Penpot document names its page and boards, not the file), and the API Contract as an endpoint table: documents are shown as the agents wrote them.
 
 - **T24 CLI `sdlccode`** (in review) — board 06 in `apps/cli`, a thin client of the local server: `list`; `run "<request>"` (`--repo`, `--auto`, `--budget`, `--detach`), which follows the Run until it needs a person; `status <run> [--follow]`; `gate show <run> [<document>]`, `gate approve <run> [--all]` and `gate request-changes`, which send every Verdict at once (the documents named go back with their comments, the rest are approved, and what goes Stale is said) or answer the PR Gate; `escalation show|retry|edit|skip` with `--budget` for a spent Token Budget; `abort <run> [--no-draft-pr]`. A Run is named by its first characters (`27f388`). Exit codes: 0 done, 1 refused, 2 mistyped.
+  - **Left out**: board 06's Issue line in `status`: a Run's detail carries no Issue Report outside an Escalation, so the CLI shows a failed Test Run's Issues as they happen while following, and an Escalation's in `escalation show`.
 
 ### Proven by running it, not only by tests
 

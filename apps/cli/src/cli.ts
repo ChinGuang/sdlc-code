@@ -39,12 +39,15 @@ export type CliIo = {
 
 export type CliDeps = {
   api: ServerApi;
+  /** For what goes to `out`. */
   paint: Paint;
+  /** For what goes to `err`, which may be a terminal when `out` is not. */
+  errPaint?: Paint;
   /** Where the dashboard is, for links to a Run's page. */
   dashboardUrl: string;
 };
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.0"; // As apps/cli/package.json says.
 
 const HELP = `Usage: sdlccode <command> [options]
 
@@ -54,7 +57,8 @@ Commands:
                                             Start a Run and follow it until it needs you
   status <run> [--follow]                   Where a Run is; --follow prints what it does
   gate show <run> [<document>]              What the Run's Gate asks; a document in full
-  gate approve <run> [--all]                Approve every document, or the pull request
+  gate approve <run> --all                  At the Design Gate: approve every document
+  gate approve <run>                        At the PR Gate: approve the pull request
   gate request-changes <run> <document> "<comments>" [<document> "<comments>" ...]
                                             Send documents back; the rest are approved
   gate request-changes <run> "<comments>"   At the PR Gate: build the last Slice again
@@ -96,6 +100,10 @@ export async function runCli(
   }
   try {
     const parsed = parseArgs(argv, VALUED);
+    if (parsed.flags.has("help")) {
+      io.out(HELP);
+      return 0;
+    }
     await command(parsed, io, deps);
     return 0;
   } catch (error) {
@@ -103,12 +111,15 @@ export async function runCli(
       io.err(`${error.message}\n\nRun sdlccode --help for the commands.`);
       return 2;
     }
+    const paint = deps.errPaint ?? deps.paint;
     if (error instanceof ApiError) {
-      io.err(deps.paint.red(error.message));
+      io.err(paint.red(error.message));
       for (const problem of error.problems) io.err(`  ${problem}`);
       return 1;
     }
-    throw error;
+    // Not the person's to fix, but still one line rather than a stack trace.
+    io.err(paint.red(error instanceof Error ? error.message : String(error)));
+    return 1;
   }
 }
 
@@ -192,32 +203,75 @@ async function status(parsed: Parsed, io: CliIo, deps: CliDeps) {
 async function follow(runId: string, io: CliIo, deps: CliDeps) {
   const { api, paint } = deps;
   let detail = await api.getRun(runId);
-  if (!RESTING.has(detail.status)) {
+  if (!settled(detail) && !detail.advancing) {
+    // Nothing is moving it: its loop stopped, and a restart resumes it.
+    io.out(
+      paint.amber(
+        `#${shortId(runId)} is not moving: the server is not advancing it. Restarting the server resumes it.`,
+      ),
+    );
+  } else if (!settled(detail)) {
     io.out(
       paint.muted(
         `Following #${shortId(runId)}; Ctrl+C stops following, not the Run.`,
       ),
     );
-    await api.follow(runId, detail.lastSeq, (event) => {
-      const line = eventLine(event, detail, paint);
-      if (line) io.out(line);
-      if (
-        event.type === "status" &&
-        RESTING.has(event.status as RunDetail["status"])
-      )
-        return "stop";
-      // A new Slice Plan's Slices are named in later lines.
-      if (event.type === "checkpoint" || event.type === "status")
-        void api.getRun(runId).then(
-          (next) => (detail = next),
-          () => {},
-        );
-    });
+    const until = new AbortController();
+    /** Reads the Run again; stops following once nothing moves it. */
+    const reread = () =>
+      void api.getRun(runId).then(
+        (next) => {
+          // A read that left earlier and answers later must not undo a newer one.
+          if (next.lastSeq >= detail.lastSeq) detail = next;
+          if (!next.advancing) until.abort();
+        },
+        () => {},
+      );
+    await api.follow(
+      runId,
+      detail.lastSeq,
+      (event) => {
+        const line = eventLine(event, detail, paint);
+        if (line) io.out(line);
+        // What a failed or aborted Run delivers comes just after its status.
+        if (event.type === "delivery") return "stop";
+        if (event.type === "status") {
+          const status = event.status as RunDetail["status"];
+          if (RESTING.has(status) && !OWES_DELIVERY.has(status)) return "stop";
+        }
+        // Slices named in later lines; a Run whose loop stopped is let go.
+        if (
+          event.type === "checkpoint" ||
+          event.type === "status" ||
+          event.type === "problem"
+        )
+          reread();
+      },
+      until.signal,
+    );
     detail = await api.getRun(runId);
+    // The stream ended without the Run resting: the server went away.
+    if (!RESTING.has(detail.status))
+      io.out(
+        paint.amber(
+          `The server stopped sending; follow again with: sdlccode status ${shortId(runId)} --follow`,
+        ),
+      );
   }
   for (const line of statusLines(detail, paint)) io.out(line);
   const link = linkFor(detail, deps.dashboardUrl);
   if (link) io.out(paint.muted(`  or in the dashboard: ${link}`));
+}
+
+/** A failed or aborted Run delivers its Draft PR just after it stops. */
+const OWES_DELIVERY = new Set<RunDetail["status"]>(["failed", "aborted"]);
+
+/** Nothing more will happen without a person, not even a delivery. */
+function settled(run: RunDetail): boolean {
+  return (
+    RESTING.has(run.status) &&
+    !(OWES_DELIVERY.has(run.status) && !run.pullRequest && run.advancing)
+  );
 }
 
 function linkFor(run: RunDetail, dashboardUrl: string): string | null {
@@ -321,6 +375,11 @@ async function gateApprove(parsed: Parsed, io: CliIo, deps: CliDeps) {
   const runId = await findRun(api, parsed.words[2]);
   const run = await api.getRun(runId);
   if (run.waiting.for === "designGate") {
+    // Approving every document at once is said, not assumed.
+    if (!parsed.flags.has("all"))
+      throw new UsageError(
+        `At the Design Gate, approve every document with --all, or send some back with gate request-changes.`,
+      );
     const next = await api.decideDesign(
       runId,
       run.waiting.documents.map(({ kind }) => ({
@@ -446,9 +505,7 @@ async function escalationShow(parsed: Parsed, io: CliIo, deps: CliDeps) {
     for (const line of note.note.split("\n")) io.out(`      ${line}`);
   }
   const spent = run.tokensUsed >= run.tokenBudget;
-  const budget = spent
-    ? ` --budget ${formatTokens(run.tokenBudget + 1_000_000)}`
-    : "";
+  const budget = spent ? ` --budget ${suggestedBudget(run)}` : "";
   io.out("  Ways on:");
   io.out(paint.muted(`    sdlccode escalation retry ${id} "<hint>"${budget}`));
   io.out(
@@ -524,11 +581,12 @@ async function abort(parsed: Parsed, io: CliIo, deps: CliDeps) {
   const { api, paint } = deps;
   const runId = await findRun(api, parsed.words[1]);
   const draft = !parsed.flags.has("no-draft-pr");
-  const next = await api.abortRun(runId, draft);
+  await api.abortRun(runId, draft);
   io.out(
-    `${paint.red("■")} Aborted #${shortId(runId)}${draft ? "; a Draft PR of the Slices that passed is opened when there is a Target Repo." : ", with no Draft PR."}`,
+    `${paint.red("■")} Aborted #${shortId(runId)}${draft ? "; a Draft PR is offered of the Slices that passed." : ", with no Draft PR."}`,
   );
-  for (const line of waitingLines(next, paint)) io.out(line);
+  // Whether a Draft PR opened, or why not, is known only once it is delivered.
+  await follow(runId, io, deps);
 }
 
 /** After a decision: where the Run went, and how to follow it. */
@@ -588,4 +646,18 @@ async function findRun(
   throw new UsageError(
     `"${prefix}" starts ${matches.length} Runs: ${matches.map((one) => shortId(one.id)).join(", ")}. Type more of it.`,
   );
+}
+
+/**
+ * A million more than was spent or allowed, whichever is more, rounded up to
+ * the 0.1M it is printed with: never a budget that is already spent.
+ */
+export function suggestedBudget(
+  run: Pick<RunDetail, "tokensUsed" | "tokenBudget">,
+): string {
+  const tokens =
+    Math.ceil(
+      (Math.max(run.tokensUsed, run.tokenBudget) + 1_000_000) / 100_000,
+    ) * 100_000;
+  return formatTokens(tokens);
 }
