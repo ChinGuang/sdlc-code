@@ -102,6 +102,7 @@ In the plan's order. Dates are from [docs/PLAN.md](docs/PLAN.md); M4 and M5 over
 ### M5 — Interfaces
 
 - **T24 CLI `sdlccode`** · Oct 16 — `run`, `gate show`, `gate approve`, `gate request-changes`, `status --follow`, `abort`. `apps/cli` handles `--help` and `--version` today.
+- **T24b Dashboard: readable design documents** · Oct 17 — the Design Gate shows each document as it is read, not as the JSON the agents wrote: the API Contract as an endpoint table with each endpoint's request and responses (board 03), the Slice Plan as a numbered list with the Walking Skeleton marked, the System Design as headings and text, the UI Spec as its screens and parts, the Penpot design as its page and screens. A Raw tab keeps the JSON. Only `apps/web` changes: the documents stay JSON, which the agents write and the core checks.
 
 ### M6 — Hardening & submission
 
