@@ -168,12 +168,25 @@ const TRIGGER_WHY: Record<string, string> = {
     "The Orchestrator could not tell which agent an Issue belongs to.",
 };
 
-/** "Loop detected in Slice 3", and why it stopped, in words. */
+const REVIEW_TITLES: Record<string, string> = {
+  retryBudget: "The review keeps refusing the code",
+  tokenBudget: "Token Budget spent in review",
+};
+
+const REVIEW_WHY =
+  "The Code Review Agent did not pass the code within its attempts, or did not finish reading it, so nothing was delivered.";
+
+/**
+ * "Loop detected in Slice 3", and why it stopped, in words. With no Slice it
+ * stopped in review, where the review's own attempts ran out.
+ */
 export function escalationTitle(
   trigger: string,
   slice: string | null,
   slices: RunSlice[],
 ): { title: string; why: string } {
+  if (slice === null && REVIEW_TITLES[trigger])
+    return { title: REVIEW_TITLES[trigger]!, why: REVIEW_WHY };
   const index = slices.findIndex((one) => one.title === slice);
   const where =
     index >= 0 ? ` in Slice ${index + 1}` : slice ? ` in ${slice}` : "";

@@ -76,8 +76,7 @@ describe("DesignGate", () => {
 
     choose("API Contract", "Request changes");
     expect(submit()).toBeDisabled();
-    expect(submit()).toHaveAttribute(
-      "title",
+    expect(submit()).toHaveAccessibleDescription(
       "Say what should change in the API Contract.",
     );
 
@@ -100,6 +99,24 @@ describe("DesignGate", () => {
     );
     expect(
       screen.getByText("0 approved · 1 changes requested · 2 stale"),
+    ).toBeInTheDocument();
+  });
+
+  // A document whose own changes are asked for is redone, not made Stale.
+  it("warns only of what goes Stale, and agrees with the header", () => {
+    open();
+
+    choose("UI Spec", "Request changes", "Bigger buttons.");
+    choose("API Contract", "Request changes", "Add rate limiting.");
+
+    expect(verdict().getByRole("status")).toHaveTextContent(
+      "1 document will go stale",
+    );
+    expect(verdict().getByRole("status")).toHaveTextContent(
+      /^⚠ 1 document will go stale\s*Penpot design will be redone/,
+    );
+    expect(
+      screen.getByText("0 approved · 2 changes requested · 1 stale"),
     ).toBeInTheDocument();
   });
 

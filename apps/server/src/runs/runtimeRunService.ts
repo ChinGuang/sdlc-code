@@ -11,6 +11,7 @@
 import {
   documentsMadeStale,
   IllegalTransitionError,
+  isAgentRole,
   memoryFromCheckpoint,
   MissingKeyError,
   type RunMemoryState,
@@ -436,7 +437,9 @@ export function issueSummary(stored: unknown): IssueSummary {
     file: text(report.file),
     endpoint: text(report.endpoint),
     error: text(report.error) ?? "(no error recorded)",
-    suspectedOwner: text(report.suspectedOwner) as AgentRole | null,
+    suspectedOwner: isAgentRole(text(report.suspectedOwner) ?? "")
+      ? (report.suspectedOwner as AgentRole)
+      : null,
     occurrences:
       typeof report.occurrences === "number" ? report.occurrences : 1,
   };

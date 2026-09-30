@@ -92,6 +92,37 @@ describe("ReviewPanel", () => {
     ]);
   });
 
+  // A review whose attempts ran out escalated; nothing reached a pull request.
+  it("says a blocking Finding escalated when the review stopped the Run", () => {
+    open({
+      ...AT_PR_GATE,
+      status: "escalated",
+      pullRequest: null,
+      reviews: [
+        {
+          ...AT_PR_GATE.reviews[0]!,
+          findings: [
+            ...AT_PR_GATE.reviews[0]!.findings,
+            AT_PR_GATE.reviews[1]!.findings[0]!,
+          ],
+        },
+      ],
+      waiting: {
+        for: "escalation",
+        trigger: "retryBudget",
+        summary: "The review still refuses the code after 3 attempts.",
+        slice: null,
+        reports: [],
+        workingMemory: [],
+        openDraftPrOnAbort: true,
+      },
+    });
+
+    const items = findings().getAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("Escalated");
+    expect(items[1]).toHaveTextContent("Not delivered yet");
+  });
+
   it("offers no decision to a Run that is not at the PR Gate", () => {
     open({
       ...AT_PR_GATE,

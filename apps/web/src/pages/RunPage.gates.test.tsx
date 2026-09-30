@@ -2,7 +2,7 @@
  * The Run page's decisions: a tab for each Gate, the Escalation dialog that
  * opens by itself, and the Run as a decision left it.
  */
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RunDetail } from "../api/types.js";
 import type { RunTab } from "../router.js";
@@ -83,6 +83,38 @@ describe("RunPage: an Escalation", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Decide…" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  // Cancel put aside that Escalation, not every one to come.
+  it("opens again by itself for the next Escalation", async () => {
+    const fake = await open(ESCALATED);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // The Run is escalated again, for another reason; the page hears of it.
+    fake.setDetail({
+      ...ESCALATED,
+      waiting: {
+        ...ESCALATED.waiting,
+        trigger: "tokenBudget",
+        summary: "The Token Budget is spent.",
+      } as RunDetail["waiting"],
+      lastSeq: 200,
+    });
+    act(() => void fake.push({ type: "status", status: "escalated" }));
+
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName(
+      /Token Budget spent/,
+    );
+  });
+
+  it("offers Decide… on every tab while it waits", async () => {
+    await open(ESCALATED, "review");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decide…" }));
+
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 

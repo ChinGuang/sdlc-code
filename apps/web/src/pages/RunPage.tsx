@@ -22,12 +22,22 @@ const TABS: Array<{ tab: RunTab; label: string }> = [
   { tab: "review", label: "Code Review & PR" },
 ];
 
-/** Where a tab's dot says a person is needed, or that it is behind them. */
+/** A tab's dot: a person is needed there, it is behind them, or not yet. */
 function tabTone(tab: RunTab, run: RunDetail): string {
-  if (tab === "designGate" && run.waiting.for === "designGate") return "amber";
-  if (tab === "review" && run.waiting.for === "prGate") return "purple";
-  if (tab === "overview" && run.waiting.for === "escalation") return "red";
-  return "green";
+  switch (tab) {
+    case "overview":
+      return run.waiting.for === "escalation" ? "red" : "green";
+    case "designGate":
+      if (run.waiting.for === "designGate") return "amber";
+      return run.mode === "gated" &&
+        run.documents.length > 0 &&
+        run.documents.every((document) => document.status === "approved")
+        ? "green"
+        : "";
+    case "review":
+      if (run.waiting.for === "prGate") return "purple";
+      return run.status === "done" ? "green" : "";
+  }
 }
 
 /** Boards 02 to 05: one Run, live, and the decisions it waits for. */
@@ -45,8 +55,8 @@ export function RunPage({
   const { detail, events, testRun, error, accept } = useRun(api, runId, {
     refreshDelayMs,
   });
-  // Opens by itself while the Run is escalated; Cancel only puts it aside.
-  const [dialogClosed, setDialogClosed] = useState(false);
+  // Opens by itself for each Escalation; Cancel puts only that one aside.
+  const [setAside, setSetAside] = useState<string | null>(null);
 
   if (!detail)
     return (
@@ -64,6 +74,7 @@ export function RunPage({
 
   const slice = currentSlice(detail.slices);
   const sliceIndex = slice ? detail.slices.indexOf(slice) : -1;
+  const escalation = escalationKey(detail);
   return (
     <>
       <Breadcrumbs runId={runId} title={detail.projectRequest} />
@@ -96,6 +107,15 @@ export function RunPage({
                 : null
             }
           />
+          {escalation && (
+            <button
+              type="button"
+              className="button small-button"
+              onClick={() => setSetAside(null)}
+            >
+              Decide…
+            </button>
+          )}
         </div>
       </div>
       {error && (
@@ -127,7 +147,7 @@ export function RunPage({
       ) : (
         <>
           <PhaseStepper run={detail} />
-          <Waiting run={detail} onDecide={() => setDialogClosed(false)} />
+          <Waiting run={detail} />
           <div className="overview">
             <div className="column">
               <SlicePlan run={detail} />
@@ -144,12 +164,12 @@ export function RunPage({
           </div>
         </>
       )}
-      {detail.waiting.for === "escalation" && !dialogClosed && (
+      {escalation && escalation !== setAside && (
         <EscalationDialog
           run={detail}
           api={api}
           onDecided={accept}
-          onClose={() => setDialogClosed(true)}
+          onClose={() => setSetAside(escalation)}
         />
       )}
     </>
@@ -171,8 +191,19 @@ function Breadcrumbs({
   );
 }
 
+/**
+ * Which Escalation the Run waits at, if any: a later one is a new question,
+ * so a dialog put aside for an earlier one opens again.
+ */
+function escalationKey(run: RunDetail): string | null {
+  const { waiting } = run;
+  return waiting.for === "escalation"
+    ? JSON.stringify([waiting.trigger, waiting.summary, waiting.slice])
+    : null;
+}
+
 /** What a person is being asked, with the way to answer it, or why the Run stopped. */
-function Waiting({ run, onDecide }: { run: RunDetail; onDecide: () => void }) {
+function Waiting({ run }: { run: RunDetail }) {
   const { waiting, failure } = run;
   if (waiting.for === "designGate")
     return (
@@ -195,14 +226,7 @@ function Waiting({ run, onDecide }: { run: RunDetail; onDecide: () => void }) {
     return (
       <section className="card waiting" aria-label="Waiting">
         <strong>Escalated: {triggerText(waiting.trigger)}.</strong>{" "}
-        <span className="muted">{waiting.summary}</span>{" "}
-        <button
-          type="button"
-          className="button small-button"
-          onClick={onDecide}
-        >
-          Decide…
-        </button>
+        <span className="muted">{waiting.summary}</span>
       </section>
     );
   if (failure)

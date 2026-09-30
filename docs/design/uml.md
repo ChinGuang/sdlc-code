@@ -204,6 +204,12 @@ classDiagram
     trigger: retryBudget | tokenBudget | loop | undecidableOwner
     choice: retryWithHint | editDocuments | skipSlice | abort
     openDraftPrOnAbort: boolean = true
+    slice: the Slice it stopped in, or none in review
+    reports: the Issue Reports behind it
+  }
+  class Review {
+    stopReason
+    problems
   }
   class PullRequest {
     number
@@ -218,6 +224,8 @@ classDiagram
   Run "1" *-- "0..*" Checkpoint
   Run "1" --> "0..1" PullRequest
   Run "1" *-- "0..*" Escalation
+  Run "1" *-- "0..*" Review
+  Review "1" *-- "0..*" Finding
   Gate "1" *-- "0..*" Verdict
   Verdict "0..*" --> "1" Document
   Document <|-- SystemDesign

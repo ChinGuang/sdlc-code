@@ -1133,37 +1133,58 @@ table.runs tr.row:hover td {
   margin-bottom: 14px;
 }
 
-.choices button {
-  text-align: left;
+.choices {
+  border: 0;
+  padding: 0;
+}
+
+.choice {
+  position: relative;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 10px;
-  color: var(--text);
   padding: 12px 14px;
-  font: inherit;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.choices button[aria-checked="true"] {
+/* The card is the control; the radio itself stays for keyboards and readers. */
+.choice input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.choice:has(input:checked) {
   border-color: var(--blue);
   background: var(--raised);
 }
 
-.choices button.danger strong {
+.choice:has(input:focus-visible) {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+.choice.danger strong {
   color: var(--red);
 }
 
-.choices button.danger[aria-checked="true"] {
+.choice.danger:has(input:checked) {
   border-color: var(--red);
   background: var(--red-bg);
 }
 
-.choices button:disabled {
+.choice:has(input:disabled) {
   opacity: 0.5;
   cursor: default;
+}
+
+.dialog:focus {
+  outline: none;
 }
 
 .check {

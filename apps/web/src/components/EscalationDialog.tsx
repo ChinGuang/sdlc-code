@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { RunsApi } from "../api/client.js";
 import type {
   DocumentKind,
@@ -67,6 +67,16 @@ export function EscalationDialog({
   const [draftPr, setDraftPr] = useState(waiting?.openDraftPrOnAbort ?? true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+
+  // A modal dialog takes the focus while it is open and gives it back after,
+  // so a keyboard never ends up behind it.
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    dialog.current?.focus();
+    return () => before?.focus();
+  }, []);
+
   if (!waiting) return null;
 
   const { title, why } = escalationTitle(
@@ -74,11 +84,20 @@ export function EscalationDialog({
     waiting.slice,
     run.slices,
   );
+  const unused = run.documents.some(
+    (document) =>
+      document.kind === "penpotDesign" && document.status === "approved",
+  );
   const slice = run.slices.find((one) => one.title === waiting.slice);
   const retries = slice ? retriesOf(slice.id, run.tasks) : null;
+  // The Penpot design is redrawn from the UI Spec, so that is what a person edits.
   const approved = run.documents.filter(
-    (document) => document.status === "approved",
+    (document) =>
+      document.status === "approved" && document.kind !== "penpotDesign",
   );
+  // Stopped in review, not in a Slice: there is no Slice to skip, and a retry
+  // runs the review again with its attempts back.
+  const inReview = waiting.slice === null;
 
   const resolution = ((): EscalationResolution | null => {
     switch (choice) {
@@ -118,10 +137,13 @@ export function EscalationDialog({
   return (
     <div className="overlay">
       <div
+        ref={dialog}
         className="dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="escalation-title"
+        tabIndex={-1}
+        onKeyDown={(event) => keepFocus(event, onClose)}
       >
         <h2 id="escalation-title">
           {title}
@@ -191,32 +213,42 @@ export function EscalationDialog({
         )}
 
         <h3 className="eyebrow">Choose what happens next</h3>
-        <div
-          className="choices"
-          role="radiogroup"
-          aria-label="What happens next"
-        >
-          {CHOICES.map((option) => (
-            <button
-              key={option.choice}
-              type="button"
-              role="radio"
-              aria-checked={choice === option.choice}
-              className={option.choice === "abort" ? "danger" : ""}
-              disabled={
-                option.choice === "editDocuments" && approved.length === 0
-              }
-              onClick={() => setChoice(option.choice)}
-            >
-              <strong>{option.label}</strong>
-              <span className="small muted">{option.note}</span>
-            </button>
-          ))}
-        </div>
+        <fieldset className="choices">
+          <legend className="sr-only">What happens next</legend>
+          {CHOICES.map((option) => {
+            const unavailable =
+              (option.choice === "editDocuments" && approved.length === 0) ||
+              (option.choice === "skipSlice" && inReview);
+            const note = unavailable
+              ? option.choice === "skipSlice"
+                ? "No Slice is being built"
+                : "No approved documents to edit"
+              : option.choice === "retryWithHint" && inReview
+                ? "Run the review again with its attempts back"
+                : option.note;
+            return (
+              <label
+                key={option.choice}
+                className={`choice${option.choice === "abort" ? " danger" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="escalation-choice"
+                  value={option.choice}
+                  checked={choice === option.choice}
+                  disabled={unavailable}
+                  onChange={() => setChoice(option.choice)}
+                />
+                <strong>{option.label}</strong>
+                <span className="small muted">{note}</span>
+              </label>
+            );
+          })}
+        </fieldset>
 
         {choice === "retryWithHint" && (
           <label className="field">
-            Hint for the agents
+            {inReview ? "Why you are trying again" : "Hint for the agents"}
             <textarea
               value={hint}
               onChange={(event) => setHint(event.target.value)}
@@ -226,7 +258,10 @@ export function EscalationDialog({
         )}
         {choice === "editDocuments" && (
           <fieldset className="edits">
-            <legend className="small muted">Documents to change</legend>
+            <legend className="small muted">
+              Documents to change
+              {unused && " (edit the UI Spec to change the Penpot design)"}
+            </legend>
             {approved.map((document) => (
               <label key={document.kind} className="check">
                 <input
@@ -290,4 +325,32 @@ export function EscalationDialog({
       </div>
     </div>
   );
+}
+
+/**
+ * Escape puts the dialog aside; Tab and Shift+Tab go round inside it rather
+ * than on to the page it covers.
+ */
+function keepFocus(event: KeyboardEvent<HTMLDivElement>, onClose: () => void) {
+  if (event.key === "Escape") {
+    event.stopPropagation();
+    onClose();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [
+    ...event.currentTarget.querySelectorAll<HTMLElement>(
+      "button:not(:disabled), input:not(:disabled), textarea:not(:disabled)",
+    ),
+  ];
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (!first || !last) return;
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }

@@ -340,8 +340,8 @@ describe("RuntimeRunService: decisions it refuses", () => {
 });
 
 describe("RuntimeRunService: what a person decides on", () => {
-  /** A Run at the Design Gate with some of its documents written. */
-  async function atDesignGate() {
+  /** A Run with some of its design documents written and in review. */
+  async function withDesignDocuments() {
     const context = setup();
     const run = await context.api.startRun(request);
     await context.settled();
@@ -357,7 +357,7 @@ describe("RuntimeRunService: what a person decides on", () => {
   }
 
   it("reads a document in full, and says when it is not there", async () => {
-    const { api, run } = await atDesignGate();
+    const { api, run } = await withDesignDocuments();
 
     expect(api.getDocument(run.id, "apiContract")).toEqual({
       kind: "apiContract",
@@ -373,7 +373,7 @@ describe("RuntimeRunService: what a person decides on", () => {
 
   // The warning before a person asks for changes to a System Design document.
   it("says which documents a change to each would make Stale", async () => {
-    const { api, run } = await atDesignGate();
+    const { api, run } = await withDesignDocuments();
 
     const documents = api.getRun(run.id).documents;
 
@@ -498,6 +498,9 @@ describe("issueSummary", () => {
       occurrences: 1,
     });
     expect(issueSummary(null).error).toBe("(no error recorded)");
+    expect(issueSummary({ suspectedOwner: "someoneElse" }).suspectedOwner).toBe(
+      null,
+    );
   });
 });
 

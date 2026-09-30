@@ -34,9 +34,10 @@ export function DesignGate({
   onDecided: (detail: RunDetail) => void;
 }) {
   const kinds = awaiting(run);
-  const [selected, setSelected] = useState<DocumentKind | null>(
-    kinds[0] ?? run.documents[0]?.kind ?? null,
-  );
+  // Only what the person chose is kept: until then, the first to judge, so
+  // documents that arrive after the tab opened are shown as they come.
+  const [chosen, setSelected] = useState<DocumentKind | null>(null);
+  const selected = chosen ?? kinds[0] ?? run.documents[0]?.kind ?? null;
   const [draft, setDraft] = useState<Draft>({});
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,11 +99,14 @@ export function DesignGate({
               type="button"
               className="button primary"
               disabled={sending || problems.length > 0}
-              title={problems[0]}
+              aria-describedby="verdicts-missing"
               onClick={submit}
             >
               {sending ? "Sending…" : "Submit verdicts"}
             </button>
+            <span id="verdicts-missing" className="small faint">
+              {problems[0] ?? ""}
+            </span>
           </div>
         )}
       </div>
@@ -126,6 +130,9 @@ export function DesignGate({
             document={document}
             judged={atGate && kinds.includes(document.kind)}
             verdict={draft[document.kind]}
+            redoneAnyway={kinds.filter(
+              (kind) => draft[kind]?.decision === "requestChanges",
+            )}
             onChange={(next) => change(document.kind, next)}
           />
         )}
@@ -249,12 +256,15 @@ function VerdictPanel({
   document,
   judged,
   verdict,
+  redoneAnyway,
   onChange,
 }: {
   document: RunDocument;
   /** Whether this document is one the person judges now. */
   judged: boolean;
   verdict: DraftVerdict | undefined;
+  /** Documents whose own changes are asked for: redone, not made Stale. */
+  redoneAnyway: DocumentKind[];
   onChange: (next: Partial<DraftVerdict>) => void;
 }) {
   const name = DOCUMENT_NAMES[document.kind];
@@ -270,7 +280,9 @@ function VerdictPanel({
     );
   // What this document's changes would cause; the header counts the Gate's.
   const stale =
-    verdict?.decision === "requestChanges" ? document.wouldMakeStale : [];
+    verdict?.decision === "requestChanges"
+      ? document.wouldMakeStale.filter((kind) => !redoneAnyway.includes(kind))
+      : [];
   return (
     <section className="card verdict" aria-label="Your verdict">
       <h2>Your verdict</h2>

@@ -1,6 +1,7 @@
 import type { Finding } from "../agents/codeReview/findings.js";
 import type { AgentLoopResult } from "../agentLoop/agentLoop.js";
 import {
+  NotFoundError,
   storeContext,
   type StoreContext,
   type StoreOptions,
@@ -63,7 +64,7 @@ export class SqliteReviewStore implements ReviewStore {
         JSON.stringify(review.problems),
         this.#ctx.now(),
       );
-    return this.listReviews(runId).find((one) => one.id === id)!;
+    return this.#require(id);
   };
 
   listReviews = (runId: string): RunReviewRecord[] =>
@@ -71,6 +72,14 @@ export class SqliteReviewStore implements ReviewStore {
       .prepare("SELECT * FROM reviews WHERE run_id = ? ORDER BY rowid")
       .all(runId)
       .map((row) => toReview(row as ReviewRow));
+
+  #require(id: string): RunReviewRecord {
+    const row = this.#ctx.db
+      .prepare("SELECT * FROM reviews WHERE id = ?")
+      .get(id);
+    if (!row) throw new NotFoundError("Review", id);
+    return toReview(row as ReviewRow);
+  }
 }
 
 function toReview(row: ReviewRow): RunReviewRecord {

@@ -66,6 +66,11 @@ export function ReviewPanel({
         <Stat
           label="Slices"
           value={`${through.length} / ${run.slices.length}`}
+          tone={
+            run.slices.length > 0 && passed.length === run.slices.length
+              ? "green"
+              : null
+          }
           note={
             run.slices.length > 0 && passed.length === run.slices.length
               ? "all passed"
@@ -89,6 +94,7 @@ export function ReviewPanel({
             latest ? SEVERITIES.map((one) => counts[one]).join(" · ") : "—"
           }
           note="blocking · major · minor"
+          tone={counts.blocking > 0 ? "red" : counts.major > 0 ? "amber" : null}
         />
       </div>
       <div className="overview">
@@ -148,15 +154,13 @@ function Stat({
   label: string;
   value: string;
   note: string;
-  tone?: "green" | "red" | null;
+  tone?: "green" | "amber" | "red" | null;
 }) {
   return (
     <section className="card stat" aria-label={`${label} summary`}>
       <span className="muted small">{label}</span>
       <strong className="stat-value mono">{value}</strong>
-      <span className={`small ${tone ? `text-${tone}` : "text-green"}`}>
-        {note}
-      </span>
+      <span className={`small ${tone ? `text-${tone}` : "muted"}`}>{note}</span>
     </section>
   );
 }
@@ -218,9 +222,7 @@ function FindingsList({ run }: { run: RunDetail }) {
                   </span>
                   <strong>{finding.message}</strong>
                   <span className="aside faint small">
-                    {finding.severity === "blocking"
-                      ? "Sent back"
-                      : "In PR description"}
+                    {routeOf(finding.severity, run)}
                   </span>
                 </div>
                 <div className="mono muted small">{locationOf(finding)}</div>
@@ -375,4 +377,15 @@ function PrDecision({
       )}
     </div>
   );
+}
+
+/**
+ * Where a Finding of the last review went: a blocking one was sent back, or
+ * escalated once the review's attempts ran out; the rest reach the pull
+ * request's description, once there is one.
+ */
+function routeOf(severity: Severity, run: RunDetail): string {
+  if (severity === "blocking")
+    return run.waiting.for === "escalation" ? "Escalated" : "Sent back";
+  return run.pullRequest ? "In PR description" : "Not delivered yet";
 }

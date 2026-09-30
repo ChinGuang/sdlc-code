@@ -9,11 +9,11 @@ import { fakeApi } from "../testing/fakeApi.js";
 import { ESCALATED } from "../testing/gateFixtures.js";
 import { EscalationDialog } from "./EscalationDialog.js";
 
-function open(run: RunDetail = ESCALATED) {
+function openKeeping(run: RunDetail = ESCALATED) {
   const fake = fakeApi({ detail: run });
   const onDecided = vi.fn<(detail: RunDetail) => void>();
   const onClose = vi.fn();
-  render(
+  const view = render(
     <EscalationDialog
       run={run}
       api={fake.api}
@@ -21,8 +21,10 @@ function open(run: RunDetail = ESCALATED) {
       onClose={onClose}
     />,
   );
-  return { ...fake, onDecided, onClose };
+  return { ...fake, ...view, onDecided, onClose };
 }
+
+const open = openKeeping;
 
 const pick = (name: RegExp) =>
   fireEvent.click(screen.getByRole("radio", { name }));
@@ -131,6 +133,86 @@ describe("EscalationDialog", () => {
 
     await vi.waitFor(() => expect(calls.decisions).toHaveLength(1));
     expect(calls.decisions).toEqual([{ escalation: { choice: "skipSlice" } }]);
+  });
+
+  it("takes the focus, gives it back, and puts itself aside on Escape", () => {
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+    const { onClose, unmount } = openKeeping();
+
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+
+    unmount();
+    expect(outside).toHaveFocus();
+    outside.remove();
+  });
+
+  // The core redraws the Penpot design from the UI Spec, and refuses it.
+  it("never offers the Penpot design to edit", () => {
+    open({
+      ...ESCALATED,
+      documents: [
+        ...ESCALATED.documents,
+        {
+          kind: "penpotDesign",
+          version: 1,
+          status: "approved",
+          ownerAgent: "uiDesign",
+          wouldMakeStale: [],
+        },
+      ],
+    });
+
+    fireEvent.click(
+      screen.getByRole("radio", { name: /Edit approved documents/ }),
+    );
+
+    expect(
+      screen.queryByRole("checkbox", { name: "Penpot design" }),
+    ).toBeNull();
+    expect(
+      screen.getByText(/edit the UI Spec to change the Penpot design/),
+    ).toBeTruthy();
+  });
+
+  // No Slice was being built: the review ran out of attempts.
+  it("names a review that stopped, and offers no Slice to skip", () => {
+    open({
+      ...ESCALATED,
+      waiting: {
+        ...ESCALATED.waiting,
+        trigger: "retryBudget",
+        slice: null,
+        reports: [],
+        workingMemory: [],
+      } as RunDetail["waiting"],
+    });
+
+    expect(
+      screen.getByRole("dialog", {
+        name: /The review keeps refusing the code/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /Skip this slice/ }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("Run the review again with its attempts back"),
+    ).toBeInTheDocument();
+  });
+
+  it("says why an option is not there", () => {
+    open({ ...ESCALATED, documents: [] });
+
+    expect(
+      screen.getByRole("radio", { name: /Edit approved documents/ }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("No approved documents to edit"),
+    ).toBeInTheDocument();
   });
 
   it("decides nothing until a way on is chosen, and Cancel only closes it", () => {
