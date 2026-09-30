@@ -331,6 +331,7 @@ export class RuntimeRunService implements RunService, RunLifecycle {
         return escalation
           ? {
               for: "escalation",
+              id: escalation.id,
               trigger: escalation.trigger,
               summary: escalation.summary,
               slice: escalation.slice,

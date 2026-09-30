@@ -75,14 +75,20 @@ export type RunProgress =
 export type PullRequestDecision =
   { choice: "approve" } | { choice: "requestChanges"; comments: string };
 
+/**
+ * Every way on but abort spends tokens, so a Run whose Token Budget is spent
+ * goes on only with a higher one.
+ */
+type GoingOn = { tokenBudget?: number };
+
 export type EscalationResolution =
-  | { choice: "retryWithHint"; hint: string }
-  | {
+  | ({ choice: "retryWithHint"; hint: string } & GoingOn)
+  | ({
       choice: "editDocuments";
       /** What to change in each document; its owning agent revises it. */
       edits: Array<{ documentKind: DocumentKind; comments: string }>;
-    }
-  | { choice: "skipSlice" }
+    } & GoingOn)
+  | ({ choice: "skipSlice" } & GoingOn)
   | { choice: "abort"; openDraftPrOnAbort?: boolean };
 
 export interface RunOrchestrator {
@@ -213,6 +219,22 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     // Check everything before changing anything.
     if (resolution.choice === "retryWithHint" && !resolution.hint.trim())
       throw new Error("A retry needs a hint for the Coding Agents.");
+    const raised =
+      resolution.choice === "abort" ? undefined : resolution.tokenBudget;
+    const run = runs.getRun(runId)!;
+    if (raised !== undefined && raised <= run.tokensUsed)
+      throw new Error(
+        `A Token Budget of ${raised} is not more than the ${run.tokensUsed} tokens already spent.`,
+      );
+    // Going on with nothing left to spend would stop again at once, at the
+    // same Escalation.
+    if (
+      resolution.choice !== "abort" &&
+      (raised ?? run.tokenBudget) <= run.tokensUsed
+    )
+      throw new Error(
+        "The Token Budget is spent: raise it to go on, or abort the Run.",
+      );
     const edits =
       resolution.choice === "editDocuments"
         ? this.#editsToMake(runId, resolution.edits)
@@ -227,6 +249,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
           ? (resolution.openDraftPrOnAbort ?? true)
           : undefined,
     });
+    if (raised !== undefined) runs.setTokenBudget(runId, raised);
     runs.applyEvent(runId, {
       type: "escalationResolved",
       choice: resolution.choice,

@@ -33,6 +33,17 @@ export function reportingRunStore(runs: RunStore, emit: Emit): RunStore {
       });
       return run;
     },
+    // A person raised the budget at an Escalation; the bar moves with it.
+    setTokenBudget: (id, tokens) => {
+      const run = runs.setTokenBudget(id, tokens);
+      emit({
+        runId: id,
+        type: "tokens",
+        used: run.tokensUsed,
+        budget: run.tokenBudget,
+      });
+      return run;
+    },
   };
 }
 

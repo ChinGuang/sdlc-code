@@ -109,6 +109,7 @@ describe("ReviewPanel", () => {
       ],
       waiting: {
         for: "escalation",
+        id: "escalation-2",
         trigger: "retryBudget",
         summary: "The review still refuses the code after 3 attempts.",
         slice: null,

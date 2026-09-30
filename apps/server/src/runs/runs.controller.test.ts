@@ -346,6 +346,30 @@ describe("the Gates and the Escalation", () => {
     ]);
   });
 
+  // A Token Budget Escalation goes on only with more to spend.
+  it("passes a raised Token Budget on with the choice", async () => {
+    const { service, calls } = fakeService();
+    const url = await start(service);
+
+    const response = await post(`${url}/runs/${RUN_ID}/escalation`, {
+      choice: "skipSlice",
+      tokenBudget: 3_000_000,
+    });
+    const refused = await post(`${url}/runs/${RUN_ID}/escalation`, {
+      choice: "skipSlice",
+      tokenBudget: -1,
+    });
+
+    expect(response.status).toBe(200);
+    expect(refused.status).toBe(400);
+    expect(calls).toEqual([
+      [
+        "resolveEscalation",
+        [RUN_ID, { choice: "skipSlice", tokenBudget: 3_000_000 }],
+      ],
+    ]);
+  });
+
   it("answers 409 when the Run is not where the decision needs it", async () => {
     const { service } = fakeService({
       decidePullRequest: () => {

@@ -97,6 +97,7 @@ describe("RunPage: an Escalation", () => {
       ...ESCALATED,
       waiting: {
         ...ESCALATED.waiting,
+        id: "escalation-2",
         trigger: "tokenBudget",
         summary: "The Token Budget is spent.",
       } as RunDetail["waiting"],
@@ -107,6 +108,33 @@ describe("RunPage: an Escalation", () => {
     expect(await screen.findByRole("dialog")).toHaveAccessibleName(
       /Token Budget spent/,
     );
+  });
+
+  // The loop a person found: the retry went through, the Run stopped again
+  // at once at an Escalation that read the same, and the dialog sat still.
+  it("says so when the Run stops again right after a decision", async () => {
+    const fake = await open(ESCALATED);
+    fake.setDetail({
+      ...ESCALATED,
+      waiting: {
+        ...ESCALATED.waiting,
+        id: "escalation-2",
+      } as RunDetail["waiting"],
+    });
+
+    fireEvent.click(screen.getByRole("radio", { name: /Skip this slice/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip slice" }));
+
+    expect(
+      await screen.findByText(
+        "Your decision went through, but the Run stopped again.",
+      ),
+    ).toBeInTheDocument();
+    // A fresh dialog: nothing chosen, nothing waiting on a reply.
+    expect(
+      screen.getByRole("radio", { name: /Skip this slice/ }),
+    ).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Choose one" })).toBeDisabled();
   });
 
   it("offers Decide… on every tab while it waits", async () => {

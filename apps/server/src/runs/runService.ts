@@ -98,6 +98,8 @@ export type Waiting =
     }
   | {
       for: "escalation";
+      /** Which Escalation: a later one is a new question, even if it reads the same. */
+      id: string;
       trigger: string;
       summary: string;
       /** The Slice it stopped in, by title; null outside the build. */

@@ -925,6 +925,77 @@ describe("AgentRunOrchestrator: design", () => {
   });
 });
 
+describe("AgentRunOrchestrator: a Token Budget Escalation", () => {
+  /** A Run stopped at a Token Budget Escalation, its budget spent. */
+  async function spent() {
+    const context = await approved({
+      outcomes: [
+        { status: "passed", commit: "c1", attempts: 1 },
+        escalatedWith(),
+      ],
+    });
+    await context.orchestrator.advance(context.runId);
+    const run = context.runs.getRun(context.runId)!;
+    context.runs.addTokensUsed(
+      context.runId,
+      run.tokenBudget - run.tokensUsed + 5,
+    );
+    return context;
+  }
+
+  // Going on would stop again at once: the loop a person found in T23.
+  it("refuses to go on without a higher Token Budget, and changes nothing", async () => {
+    const { orchestrator, runId, status, escalations } = await spent();
+
+    for (const resolution of [
+      { choice: "retryWithHint", hint: "Try again." },
+      { choice: "skipSlice" },
+    ] as const)
+      expect(() => orchestrator.resolveEscalation(runId, resolution)).toThrow(
+        "The Token Budget is spent: raise it to go on, or abort the Run.",
+      );
+    expect(status()).toBe("escalated");
+    expect(escalations.getOpenEscalation(runId)).not.toBeNull();
+  });
+
+  it("refuses a budget that is not more than what was spent", async () => {
+    const { orchestrator, runId, runs } = await spent();
+    const { tokensUsed } = runs.getRun(runId)!;
+
+    expect(() =>
+      orchestrator.resolveEscalation(runId, {
+        choice: "skipSlice",
+        tokenBudget: tokensUsed,
+      }),
+    ).toThrow(/is not more than the .* tokens already spent/);
+  });
+
+  it("goes on with the higher budget a person gives it", async () => {
+    const { orchestrator, runId, runs, status } = await spent();
+    const { tokensUsed } = runs.getRun(runId)!;
+
+    orchestrator.resolveEscalation(runId, {
+      choice: "retryWithHint",
+      hint: "Render the empty state first.",
+      tokenBudget: tokensUsed + 1_000_000,
+    });
+
+    expect(runs.getRun(runId)!.tokenBudget).toBe(tokensUsed + 1_000_000);
+    expect(status()).toBe("building");
+  });
+
+  it("still lets a person abort with nothing left to spend", async () => {
+    const { orchestrator, runId, status } = await spent();
+
+    orchestrator.resolveEscalation(runId, {
+      choice: "abort",
+      openDraftPrOnAbort: false,
+    });
+
+    expect(status()).not.toBe("escalated");
+  });
+});
+
 describe("AgentRunOrchestrator: Escalations", () => {
   it("stops at an Escalation when a Slice hits a limit", async () => {
     const { orchestrator, runId, status } = await approved({

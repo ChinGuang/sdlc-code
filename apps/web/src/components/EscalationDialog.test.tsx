@@ -204,6 +204,51 @@ describe("EscalationDialog", () => {
     ).toBeInTheDocument();
   });
 
+  // Going on with nothing left to spend stops again at once.
+  it("asks for a higher Token Budget when the budget is spent, and sends it", async () => {
+    const { calls } = open({
+      ...ESCALATED,
+      tokensUsed: 2_005_052,
+      tokenBudget: 2_000_000,
+      waiting: {
+        ...ESCALATED.waiting,
+        trigger: "tokenBudget",
+      } as RunDetail["waiting"],
+    });
+
+    pick(/Skip this slice/);
+    const budget = screen.getByLabelText(/New Token Budget/);
+    expect(budget).toHaveValue("3,000,000");
+    fireEvent.change(budget, { target: { value: "1,000,000" } });
+    expect(screen.getByRole("button", { name: "Skip slice" })).toBeDisabled();
+
+    fireEvent.change(budget, { target: { value: "2,500,000" } });
+    confirm("Skip slice");
+
+    await vi.waitFor(() => expect(calls.decisions).toHaveLength(1));
+    expect(calls.decisions).toEqual([
+      { escalation: { choice: "skipSlice", tokenBudget: 2_500_000 } },
+    ]);
+  });
+
+  it("asks for no budget while there is budget left", () => {
+    open();
+
+    pick(/Skip this slice/);
+    expect(screen.queryByLabelText(/New Token Budget/)).toBeNull();
+  });
+
+  it("answers again after a decision, even if the Run stops here again", async () => {
+    open();
+
+    pick(/Skip this slice/);
+    confirm("Skip slice");
+
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Skip slice" })).toBeEnabled(),
+    );
+  });
+
   it("says why an option is not there", () => {
     open({ ...ESCALATED, documents: [] });
 

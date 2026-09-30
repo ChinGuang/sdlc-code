@@ -58,6 +58,8 @@ export type Waiting =
     }
   | {
       for: "escalation";
+      /** Which Escalation: a later one is a new question, even if it reads the same. */
+      id: string;
       trigger: string;
       summary: string;
       /** The Slice it stopped in, by title; null outside the build. */
@@ -204,14 +206,17 @@ export type DesignVerdict = {
   comments: string;
 };
 
+/** Every way on but abort spends tokens: a spent budget must be raised. */
+type GoingOn = { tokenBudget?: number };
+
 /** The four ways out of an Escalation (CONTEXT.md). */
 export type EscalationResolution =
-  | { choice: "retryWithHint"; hint: string }
-  | {
+  | ({ choice: "retryWithHint"; hint: string } & GoingOn)
+  | ({
       choice: "editDocuments";
       edits: Array<{ documentKind: DocumentKind; comments: string }>;
-    }
-  | { choice: "skipSlice" }
+    } & GoingOn)
+  | ({ choice: "skipSlice" } & GoingOn)
   | { choice: "abort"; openDraftPrOnAbort: boolean };
 
 export type PullRequestDecision =

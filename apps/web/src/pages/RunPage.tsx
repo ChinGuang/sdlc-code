@@ -57,6 +57,9 @@ export function RunPage({
   });
   // Opens by itself for each Escalation; Cancel puts only that one aside.
   const [setAside, setSetAside] = useState<string | null>(null);
+  // The Escalation last answered here: one after it may be the Run stopping
+  // again at once, which the person must be told.
+  const [answered, setAnswered] = useState<string | null>(null);
 
   if (!detail)
     return (
@@ -166,9 +169,14 @@ export function RunPage({
       )}
       {escalation && escalation !== setAside && (
         <EscalationDialog
+          key={escalation}
           run={detail}
           api={api}
-          onDecided={accept}
+          stoppedAgain={answered !== null && answered !== escalation}
+          onDecided={(next) => {
+            setAnswered(escalation);
+            accept(next);
+          }}
           onClose={() => setSetAside(escalation)}
         />
       )}
@@ -193,13 +201,11 @@ function Breadcrumbs({
 
 /**
  * Which Escalation the Run waits at, if any: a later one is a new question,
- * so a dialog put aside for an earlier one opens again.
+ * even when it reads the same, so a dialog put aside for an earlier one opens
+ * again.
  */
 function escalationKey(run: RunDetail): string | null {
-  const { waiting } = run;
-  return waiting.for === "escalation"
-    ? JSON.stringify([waiting.trigger, waiting.summary, waiting.slice])
-    : null;
+  return run.waiting.for === "escalation" ? run.waiting.id : null;
 }
 
 /** What a person is being asked, with the way to answer it, or why the Run stopped. */

@@ -125,6 +125,7 @@ export const ESCALATED: RunDetail = {
   ],
   waiting: {
     for: "escalation",
+    id: "escalation-1",
     trigger: "loop",
     summary: "The same failure came back after a fix.",
     slice: "Sign in",

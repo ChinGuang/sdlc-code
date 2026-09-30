@@ -466,6 +466,7 @@ describe("RuntimeRunService: what a person decides on", () => {
 
     expect(api.getRun(run.id).waiting).toEqual({
       for: "escalation",
+      id: expect.any(String),
       trigger: "loop",
       summary: "The same failure came back.",
       slice: "Bookings",

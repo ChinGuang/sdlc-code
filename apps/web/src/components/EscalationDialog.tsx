@@ -35,6 +35,9 @@ const CHOICES: Array<{ choice: Choice; label: string; note: string }> = [
   { choice: "abort", label: "Abort run", note: "Stop the Run" },
 ];
 
+/** What a spent Token Budget is raised by unless the person says otherwise. */
+const RAISE_BY = 1_000_000;
+
 const CONFIRM: Record<Choice, string> = {
   retryWithHint: "Retry with hint",
   editDocuments: "Send to the owners",
@@ -51,11 +54,14 @@ const CONFIRM: Record<Choice, string> = {
 export function EscalationDialog({
   run,
   api,
+  stoppedAgain = false,
   onDecided,
   onClose,
 }: {
   run: RunDetail;
   api: RunsApi;
+  /** The Run stopped here again right after a person answered the last one. */
+  stoppedAgain?: boolean;
   onDecided: (detail: RunDetail) => void;
   onClose: () => void;
 }) {
@@ -65,6 +71,9 @@ export function EscalationDialog({
   const [edited, setEdited] = useState<DocumentKind[]>([]);
   const [comments, setComments] = useState("");
   const [draftPr, setDraftPr] = useState(waiting?.openDraftPrOnAbort ?? true);
+  const [budget, setBudget] = useState(
+    (run.tokenBudget + RAISE_BY).toLocaleString("en-US"),
+  );
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
@@ -98,23 +107,34 @@ export function EscalationDialog({
   // Stopped in review, not in a Slice: there is no Slice to skip, and a retry
   // runs the review again with its attempts back.
   const inReview = waiting.slice === null;
+  // Every way on but abort spends tokens; with none left, a person gives more.
+  const spent =
+    waiting.trigger === "tokenBudget" || run.tokensUsed >= run.tokenBudget;
+  const raised = Number(budget.replace(/[,_\s]/g, ""));
+  const raisedEnough = Number.isInteger(raised) && raised > run.tokensUsed;
+  const goingOn = (): { tokenBudget?: number } | null =>
+    !spent ? {} : raisedEnough ? { tokenBudget: raised } : null;
 
   const resolution = ((): EscalationResolution | null => {
+    const more = goingOn();
     switch (choice) {
       case "retryWithHint":
-        return hint.trim() ? { choice, hint: hint.trim() } : null;
+        return hint.trim() && more
+          ? { choice, hint: hint.trim(), ...more }
+          : null;
       case "editDocuments":
-        return edited.length > 0 && comments.trim()
+        return edited.length > 0 && comments.trim() && more
           ? {
               choice,
               edits: edited.map((documentKind) => ({
                 documentKind,
                 comments: comments.trim(),
               })),
+              ...more,
             }
           : null;
       case "skipSlice":
-        return { choice };
+        return more ? { choice, ...more } : null;
       case "abort":
         return { choice, openDraftPrOnAbort: draftPr };
       case null:
@@ -130,6 +150,8 @@ export function EscalationDialog({
       onDecided(await api.resolveEscalation(run.id, resolution));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      // The Run may stop here again at once; the dialog must still answer.
       setSending(false);
     }
   };
@@ -168,6 +190,14 @@ export function EscalationDialog({
             </strong>
           </div>
         </div>
+        {stoppedAgain && (
+          <div className="warning" role="status">
+            <strong>
+              Your decision went through, but the Run stopped again.
+            </strong>
+            <p>This is a new Escalation, just after the last one.</p>
+          </div>
+        )}
         <p>{waiting.summary}</p>
 
         {waiting.reports.length > 0 && (
@@ -286,6 +316,22 @@ export function EscalationDialog({
               />
             </label>
           </fieldset>
+        )}
+        {spent && choice !== null && choice !== "abort" && (
+          <label className="field">
+            New Token Budget
+            <input
+              className="mono"
+              inputMode="numeric"
+              value={budget}
+              onChange={(event) => setBudget(event.target.value)}
+            />
+            <span className="hint">
+              {raisedEnough
+                ? `The Run has spent ${formatTokens(run.tokensUsed)}; going on needs more.`
+                : `More than the ${run.tokensUsed.toLocaleString("en-US")} tokens already spent.`}
+            </span>
+          </label>
         )}
         {choice === "abort" && (
           <label className="check draft-pr">
