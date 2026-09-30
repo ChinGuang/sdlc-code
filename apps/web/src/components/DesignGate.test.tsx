@@ -5,7 +5,8 @@
  */
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { RunDetail } from "../api/types.js";
+import type { DocumentView, RunDetail } from "../api/types.js";
+import { API_CONTRACT, SLICE_PLAN } from "../testing/documentFixtures.js";
 import { fakeApi } from "../testing/fakeApi.js";
 import { AT_DESIGN_GATE, CONTENTS } from "../testing/gateFixtures.js";
 import { DesignGate } from "./DesignGate.js";
@@ -37,6 +38,61 @@ function choose(
       target: { value: comments },
     });
 }
+
+describe("DesignGate: the API Contract's Slices", () => {
+  const withPlan: RunDetail = {
+    ...AT_DESIGN_GATE,
+    documents: [
+      ...AT_DESIGN_GATE.documents,
+      {
+        kind: "slicePlan",
+        version: 1,
+        status: "inReview",
+        ownerAgent: "systemDesign",
+        wouldMakeStale: [],
+      },
+    ],
+  };
+  const view = (kind: DocumentView["kind"], content: string): DocumentView => ({
+    kind,
+    version: 1,
+    status: "inReview",
+    ownerAgent: "systemDesign",
+    content,
+  });
+
+  async function openContract(
+    documents: Partial<Record<DocumentView["kind"], DocumentView>>,
+  ) {
+    const fake = fakeApi({ detail: withPlan, documents });
+    render(<DesignGate run={withPlan} api={fake.api} onDecided={vi.fn()} />);
+    fireEvent.click(
+      documents_().getByRole("button", { name: /^API Contract/ }),
+    );
+    return within(await screen.findByRole("table", { name: "Endpoints" }));
+  }
+
+  it("says which Slice builds each endpoint, from the Slice Plan", async () => {
+    const table = await openContract({
+      apiContract: view("apiContract", API_CONTRACT),
+      slicePlan: view("slicePlan", SLICE_PLAN),
+    });
+
+    expect(table.getAllByRole("row")[1]).toHaveTextContent("Slice 1");
+  });
+
+  it("still shows the endpoints when the Slice Plan cannot be read", async () => {
+    const table = await openContract({
+      apiContract: view("apiContract", API_CONTRACT),
+    });
+
+    expect(table.getAllByRole("row")[1]).toHaveTextContent("/health");
+    expect(table.getAllByRole("row")[1]).not.toHaveTextContent("Slice");
+  });
+});
+
+const documents_ = () =>
+  within(screen.getByRole("region", { name: "Documents" }));
 
 describe("DesignGate", () => {
   it("lists every document with its owner and status, and shows the one chosen", async () => {

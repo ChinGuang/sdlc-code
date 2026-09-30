@@ -50,9 +50,9 @@ export function DocumentBody({
         </button>
       </div>
       {showRaw ? (
-        <pre className="document-body" aria-label="Raw document">
-          {raw(content)}
-        </pre>
+        <section aria-label="Raw document">
+          <pre className="document-body">{raw(content)}</pre>
+        </section>
       ) : readable ? (
         readable
       ) : (
@@ -105,8 +105,8 @@ function readableView(
               file, with {design.screens.length} screens drawn from the UI Spec:
             </p>
             <ul>
-              {design.screens.map((screen) => (
-                <li key={screen}>{screen}</li>
+              {design.screens.map((screen, index) => (
+                <li key={`${index}-${screen}`}>{screen}</li>
               ))}
             </ul>
           </div>
@@ -131,8 +131,8 @@ function SlicePlanView({ slices }: { slices: PlannedSlice[] }) {
           <p className="muted">{slice.goal}</p>
           {slice.endpoints.length > 0 && (
             <div className="chips">
-              {slice.endpoints.map((endpoint) => (
-                <span key={endpoint} className="chip mono">
+              {slice.endpoints.map((endpoint, index) => (
+                <span key={`${index}-${endpoint}`} className="chip mono">
                   {endpoint}
                 </span>
               ))}
@@ -197,6 +197,14 @@ function ApiContractView({
       {tab === "endpoints" ? (
         <>
           <table className="endpoints" aria-label="Endpoints">
+            <thead className="sr-only">
+              <tr>
+                <th scope="col">Method</th>
+                <th scope="col">Path</th>
+                <th scope="col">Summary</th>
+                <th scope="col">Slice</th>
+              </tr>
+            </thead>
             <tbody>
               {contract.operations.map((operation) => (
                 <tr
@@ -231,7 +239,7 @@ function ApiContractView({
           )}
           {contract.schemas.map(({ name, schema }) => (
             <section key={name} aria-label={`Schema ${name}`}>
-              <h4 className="mono">{name}</h4>
+              <h3 className="mono">{name}</h3>
               <Fields schema={schema} />
             </section>
           ))}
@@ -247,28 +255,28 @@ function OperationView({ operation }: { operation: Operation }) {
       className="operation"
       aria-label={`${operation.method} ${operation.path}`}
     >
-      <h4 className="mono">
+      <h3 className="mono">
         <span className={METHOD_TONE[operation.method] ?? ""}>
           {operation.method}
         </span>{" "}
         {operation.path}
-      </h4>
+      </h3>
       {operation.summary && <p className="muted">{operation.summary}</p>}
       {operation.parameters.length > 0 && (
         <>
-          <h5 className="eyebrow">Parameters</h5>
+          <h4 className="eyebrow">Parameters</h4>
           <FieldTable fields={operation.parameters} />
         </>
       )}
       {operation.requestBody && (
         <>
-          <h5 className="eyebrow">
+          <h4 className="eyebrow">
             Request body · {operation.requestBody.type}
-          </h5>
+          </h4>
           <Fields schema={operation.requestBody} />
         </>
       )}
-      <h5 className="eyebrow">Responses</h5>
+      <h4 className="eyebrow">Responses</h4>
       <ul className="responses">
         {operation.responses.map((response) => (
           <li key={response.status}>
@@ -302,9 +310,16 @@ function Fields({ schema }: { schema: SchemaView }) {
 function FieldTable({ fields }: { fields: SchemaView["fields"] }) {
   return (
     <table className="fields">
+      <thead className="sr-only">
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Type</th>
+          <th scope="col">Notes</th>
+        </tr>
+      </thead>
       <tbody>
-        {fields.map((field) => (
-          <tr key={field.name}>
+        {fields.map((field, index) => (
+          <tr key={`${index}-${field.name}`}>
             <td className="mono">
               {field.name}
               {field.required && <span className="text-red"> *</span>}
@@ -353,9 +368,9 @@ function UiSpecView({
           aria-label={`Screen ${screen.name}`}
         >
           <div className="screen-text">
-            <h4>
+            <h3>
               {screen.name} <span className="mono faint">{screen.route}</span>
-            </h4>
+            </h3>
             <p className="muted">{screen.purpose}</p>
             <p className="small faint">Slice: {screen.sliceTitle}</p>
             {screen.states.length > 0 && (
@@ -363,8 +378,8 @@ function UiSpecView({
             )}
             {screen.endpoints.length > 0 && (
               <div className="chips">
-                {screen.endpoints.map((endpoint) => (
-                  <span key={endpoint} className="chip mono">
+                {screen.endpoints.map((endpoint, index) => (
+                  <span key={`${index}-${endpoint}`} className="chip mono">
                     {endpoint}
                   </span>
                 ))}

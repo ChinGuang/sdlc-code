@@ -7,6 +7,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   API_CONTRACT,
+  RICH_CONTRACT,
   PENPOT_DESIGN,
   SLICE_PLAN,
   SYSTEM_DESIGN,
@@ -18,9 +19,12 @@ import { DocumentBody } from "./DocumentBody.js";
 vi.mock("mermaid", () => ({
   default: {
     initialize: () => {},
-    render: async (_id: string, source: string) => ({
-      svg: `<svg aria-label="diagram"><text>${source.split("\n")[0]}</text></svg>`,
-    }),
+    render: async (_id: string, source: string) => {
+      if (source.includes("broken")) throw new Error("Parse error");
+      return {
+        svg: `<svg aria-label="diagram"><text>${source.split("\n")[0]}</text></svg>`,
+      };
+    },
   },
 }));
 
@@ -44,6 +48,36 @@ describe("DocumentBody: the System Design", () => {
     expect(await screen.findByLabelText("diagram")).toHaveTextContent(
       "flowchart LR",
     );
+  });
+
+  it("shows a diagram that cannot be drawn as its source, and says so", async () => {
+    render(
+      <DocumentBody
+        kind="systemDesign"
+        content={"```mermaid\nflowchart broken\n```"}
+      />,
+    );
+
+    expect(
+      await screen.findByText("This diagram could not be drawn; its source:"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("flowchart broken")).toBeInTheDocument();
+  });
+
+  // Database columns and arithmetic are not emphasis.
+  it("leaves snake_case and 2*3*4 as written, and emphasises only whole words", () => {
+    render(
+      <DocumentBody
+        kind="systemDesign"
+        content="Stores created_at and snake_case_name; 2*3*4 is 24; this is _really_ *it*."
+      />,
+    );
+
+    expect(document.querySelectorAll("em")).toHaveLength(2);
+    expect(screen.getByText("really", { selector: "em" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/created_at and snake_case_name; 2\*3\*4/),
+    ).toBeInTheDocument();
   });
 
   // What a model wrote is shown as text, never as markup.
@@ -93,7 +127,8 @@ describe("DocumentBody: the API Contract", () => {
     const rows = within(
       screen.getByRole("table", { name: "Endpoints" }),
     ).getAllByRole("row");
-    expect(rows.map((row) => row.textContent)).toEqual([
+    // The first row is the column headers, for a screen reader.
+    expect(rows.slice(1).map((row) => row.textContent)).toEqual([
       "GET/healthHealth checkSlice 1",
       "POST/api/auth/loginSign inSlice 2",
     ]);
@@ -112,6 +147,23 @@ describe("DocumentBody: the API Contract", () => {
     expect(operation).toHaveTextContent("password *stringmin length 8");
     expect(operation).toHaveTextContent("200 Signed in → Session");
     expect(operation).toHaveTextContent("401 Wrong email or password");
+  });
+
+  it("follows references anywhere in the contract, and reads every type", () => {
+    render(<DocumentBody kind="apiContract" content={RICH_CONTRACT} />);
+
+    const operation = screen.getByRole("region", { name: "GET /events/{id}" });
+    // The path's own parameter, by reference, then the operation's.
+    expect(operation).toHaveTextContent("id *stringpath · uuid");
+    expect(operation).toHaveTextContent("expandbooleanquery");
+    // A response by reference, its schema an allOf of two.
+    expect(operation).toHaveTextContent("200 The event → Event");
+    expect(operation).toHaveTextContent("id *string");
+    expect(operation).toHaveTextContent("title *string");
+    expect(operation).toHaveTextContent("notestring | null");
+    expect(operation).toHaveTextContent("endsAtstring | nulldate-time");
+    expect(operation).toHaveTextContent("ownerstring | integer");
+    expect(operation).toHaveTextContent('tags("work" | "home")[]');
   });
 
   it("lists the shared schemas", () => {
@@ -156,9 +208,21 @@ describe("DocumentBody: Raw, and what cannot be read", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Raw" }));
 
-    expect(screen.getByLabelText("Raw document").textContent).toBe(SLICE_PLAN);
+    expect(
+      screen.getByRole("region", { name: "Raw document" }).textContent,
+    ).toBe(SLICE_PLAN);
     fireEvent.click(screen.getByRole("button", { name: "Readable" }));
-    expect(screen.queryByLabelText("Raw document")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Raw document" })).toBeNull();
+  });
+
+  it.each([
+    ["slicePlan", "[1, 2]"],
+    ["uiSpec", '{"screens": []}'],
+    ["penpotDesign", "{}"],
+  ] as const)("does not read %s %s as one", (kind, content) => {
+    render(<DocumentBody kind={kind} content={content} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(/not in the shape/);
   });
 
   it("shows a document of the wrong shape as written, and says so", () => {

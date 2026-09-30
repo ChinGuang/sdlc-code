@@ -67,8 +67,9 @@ export function blocksOf(markdown: string): Block[] {
 
 /** `code`, **bold**, *italic* and [links](https://…); anything else as text. */
 export function inline(text: string): ReactNode[] {
+  // Emphasis only at word edges: created_at and 2*3*4 are not italic.
   const pattern =
-    /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*|_[^_\s][^_]*_)|(\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g;
+    /(`[^`]+`)|(\*\*[^*]+\*\*)|((?<!\w)\*[^*\s][^*]*\*(?!\w)|(?<!\w)_[^_\s][^_]*_(?!\w))|(\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g;
   const nodes: ReactNode[] = [];
   let last = 0;
   for (const match of text.matchAll(pattern)) {
@@ -117,7 +118,8 @@ export function Markdown({ source }: { source: string }) {
           }
           case "code":
             return block.language === "mermaid" ? (
-              <Mermaid key={index} source={block.code} />
+              // A new source is a new diagram, not the old one kept on screen.
+              <Mermaid key={`${index}:${block.code}`} source={block.code} />
             ) : (
               <pre key={index} className="document-body">
                 {block.code}

@@ -162,3 +162,68 @@ export const PENPOT_DESIGN = JSON.stringify({
     { name: "Screen: Calendar", boardId: "b2" },
   ],
 });
+
+/**
+ * OpenAPI the agents also write: a path-level parameter by reference, a
+ * response by reference, allOf, 3.0's nullable, 3.1's type list, anyOf and an
+ * array of an enum.
+ */
+export const RICH_CONTRACT = JSON.stringify({
+  openapi: "3.1.0",
+  info: { title: "Calendar API", version: "2.0.0" },
+  paths: {
+    "/events/{id}": {
+      parameters: [{ $ref: "#/components/parameters/EventId" }],
+      get: {
+        summary: "One event",
+        parameters: [
+          { name: "expand", in: "query", schema: { type: "boolean" } },
+        ],
+        responses: { "200": { $ref: "#/components/responses/OneEvent" } },
+      },
+    },
+  },
+  components: {
+    parameters: {
+      EventId: {
+        name: "id",
+        in: "path",
+        required: true,
+        schema: { type: "string", format: "uuid" },
+      },
+    },
+    responses: {
+      OneEvent: {
+        description: "The event",
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/Event" },
+          },
+        },
+      },
+    },
+    schemas: {
+      Base: {
+        type: "object",
+        required: ["id"],
+        properties: { id: { type: "string" } },
+      },
+      Event: {
+        allOf: [
+          { $ref: "#/components/schemas/Base" },
+          {
+            type: "object",
+            required: ["title"],
+            properties: {
+              title: { type: "string" },
+              note: { type: "string", nullable: true },
+              endsAt: { type: ["string", "null"], format: "date-time" },
+              owner: { anyOf: [{ type: "string" }, { type: "integer" }] },
+              tags: { type: "array", items: { enum: ["work", "home"] } },
+            },
+          },
+        ],
+      },
+    },
+  },
+});

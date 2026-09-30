@@ -1091,8 +1091,7 @@ table.runs tr.row:hover td {
   line-height: 1.6;
 }
 
-.markdown code,
-.contract code {
+.markdown code {
   font-family: var(--mono);
   font-size: 12px;
   background: var(--raised);
@@ -1186,8 +1185,9 @@ table.endpoints tr.selected td {
   padding: 14px 16px;
 }
 
-.operation h4 {
+.operation h3 {
   margin: 0 0 6px;
+  font-size: 15px;
 }
 
 .responses {
@@ -1200,8 +1200,9 @@ table.endpoints tr.selected td {
   font-size: 13px;
 }
 
-.schemas h4 {
+.schemas h3 {
   margin: 14px 0 6px;
+  font-size: 14px;
 }
 
 .tokens {
@@ -1231,8 +1232,9 @@ table.endpoints tr.selected td {
   padding-top: 14px;
 }
 
-.screen h4 {
+.screen h3 {
   margin: 0 0 4px;
+  font-size: 15px;
 }
 
 .screen p {
