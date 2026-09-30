@@ -60,9 +60,65 @@ export type Waiting =
       for: "escalation";
       trigger: string;
       summary: string;
+      /** The Slice it stopped in, by title; null outside the build. */
+      slice: string | null;
+      /** What kept failing. */
+      reports: IssueSummary[];
+      /** Each Coding Agent's last note on that Slice: what it tried. */
+      workingMemory: Array<{ role: AgentRole; note: string }>;
       openDraftPrOnAbort: boolean;
     }
   | { for: "prGate"; pullRequest: PullRequest | null };
+
+/** An Issue Report (T16) as a person reads it; the evidence stays with the agents. */
+export type IssueSummary = {
+  step: string;
+  failingTest: string | null;
+  file: string | null;
+  endpoint: string | null;
+  error: string;
+  suspectedOwner: AgentRole | null;
+  occurrences: number;
+};
+
+export type RunDocument = {
+  kind: DocumentKind;
+  version: number;
+  status: DocumentStatus;
+  ownerAgent: AgentRole;
+  /** What a change to it would make Stale now: the Design Gate's warning. */
+  wouldMakeStale: DocumentKind[];
+};
+
+/** A document in full, read one at a time. */
+export type DocumentView = {
+  kind: DocumentKind;
+  version: number;
+  status: DocumentStatus;
+  ownerAgent: AgentRole;
+  content: string;
+};
+
+export type Severity = "blocking" | "major" | "minor";
+
+export type Finding = {
+  ruleId: string;
+  severity: Severity;
+  source: "linter" | "codeReview";
+  file: string;
+  /** 0 when it is about the file as a whole. */
+  line: number;
+  message: string;
+  suggestion: string | null;
+};
+
+export type Review = {
+  findings: Finding[];
+  /** "answered" unless the agent ran out of turns or Token Budget. */
+  stopReason: string;
+  problems: string[];
+  createdAt: string;
+};
 
 export type RunSlice = {
   id: string;
@@ -89,11 +145,9 @@ export type RunTask = {
 
 export type RunDetail = RunSummary & {
   slices: RunSlice[];
-  documents: Array<{
-    kind: DocumentKind;
-    version: number;
-    status: DocumentStatus;
-  }>;
+  documents: RunDocument[];
+  /** Every review of the Run's diff, oldest first. */
+  reviews: Review[];
   tasks: RunTask[];
   waiting: Waiting;
   failure: { trigger: string; summary: string; slice: string | null } | null;
@@ -142,3 +196,23 @@ export type StartRunRequest = {
   tokenBudget: number;
   targetRepo?: string | null;
 };
+
+/** A person's Verdict on one document at the Design Gate. */
+export type DesignVerdict = {
+  documentKind: DocumentKind;
+  decision: "approve" | "requestChanges";
+  comments: string;
+};
+
+/** The four ways out of an Escalation (CONTEXT.md). */
+export type EscalationResolution =
+  | { choice: "retryWithHint"; hint: string }
+  | {
+      choice: "editDocuments";
+      edits: Array<{ documentKind: DocumentKind; comments: string }>;
+    }
+  | { choice: "skipSlice" }
+  | { choice: "abort"; openDraftPrOnAbort: boolean };
+
+export type PullRequestDecision =
+  { choice: "approve" } | { choice: "requestChanges"; comments: string };

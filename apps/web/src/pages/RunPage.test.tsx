@@ -338,6 +338,9 @@ describe("RunPage: a Run that needs a person or stopped", () => {
         for: "escalation",
         trigger: "retryBudget",
         summary: "Slice 2 failed its Test Run three times.",
+        slice: "Sign in",
+        reports: [],
+        workingMemory: [],
         openDraftPrOnAbort: true,
       },
     });

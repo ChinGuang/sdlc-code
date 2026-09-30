@@ -4,7 +4,7 @@
  * (a Step began, a Slice was committed) is read again from the server, a moment
  * later, so one burst of events costs one request.
  */
-import { useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 import type { RunsApi } from "../api/client.js";
 import type { RunDetail, RunEvent } from "../api/types.js";
 import { describe } from "./view.js";
@@ -114,12 +114,21 @@ export type UseRunOptions = {
   refreshDelayMs?: number;
 };
 
+export type LiveRun = RunState & {
+  /** Takes the Run as a decision answered with, rather than reading it again. */
+  accept: (detail: RunDetail) => void;
+};
+
 export function useRun(
   api: RunsApi,
   runId: string,
   { refreshDelayMs = 400 }: UseRunOptions = {},
-): RunState {
+): LiveRun {
   const [state, dispatch] = useReducer(runReducer, initialRunState);
+  const accept = useCallback(
+    (detail: RunDetail) => dispatch({ type: "loaded", detail }),
+    [],
+  );
 
   useEffect(() => {
     let live = true;
@@ -156,5 +165,5 @@ export function useRun(
     };
   }, [api, runId, refreshDelayMs]);
 
-  return state;
+  return { ...state, accept };
 }

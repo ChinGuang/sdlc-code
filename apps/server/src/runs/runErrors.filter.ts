@@ -10,6 +10,7 @@ import {
   type ExceptionFilter,
 } from "@nestjs/common";
 import {
+  DocumentNotFoundError,
   RunConflictError,
   RunNotFoundError,
   RuntimeUnavailableError,
@@ -22,11 +23,17 @@ type JsonResponse = {
 
 const STATUS = new Map<unknown, number>([
   [RunNotFoundError, HttpStatus.NOT_FOUND],
+  [DocumentNotFoundError, HttpStatus.NOT_FOUND],
   [RunConflictError, HttpStatus.CONFLICT],
   [RuntimeUnavailableError, HttpStatus.SERVICE_UNAVAILABLE],
 ]);
 
-@Catch(RunNotFoundError, RunConflictError, RuntimeUnavailableError)
+@Catch(
+  RunNotFoundError,
+  DocumentNotFoundError,
+  RunConflictError,
+  RuntimeUnavailableError,
+)
 export class RunErrorsFilter implements ExceptionFilter {
   catch = (error: Error, host: ArgumentsHost): void => {
     const status =

@@ -32,6 +32,31 @@ describe("SqliteEscalationStore", () => {
     expect(store.getOpenEscalation(runId)).toEqual(escalation);
   });
 
+  it("has no Slice and no Issue Reports unless it is given them", () => {
+    const { store, runId } = setup();
+
+    expect(
+      store.openEscalation(runId, { trigger: "tokenBudget", summary: "spent" }),
+    ).toMatchObject({ slice: null, reports: [] });
+  });
+
+  it("keeps the Slice it stopped in and the Issue Reports behind it", () => {
+    const { store, runId } = setup();
+    const report = { step: "smoke", error: "POST /todos: 500", evidence: "…" };
+
+    store.openEscalation(runId, {
+      trigger: "loop",
+      summary: "same error twice",
+      slice: "Todos",
+      reports: [report],
+    });
+
+    expect(store.getOpenEscalation(runId)).toMatchObject({
+      slice: "Todos",
+      reports: [report],
+    });
+  });
+
   it("resolves with a hint", () => {
     const { store, runId } = setup();
     const { id } = store.openEscalation(runId, {

@@ -17,7 +17,7 @@ The whole pipeline works end to end against the real world — Nemotron on Token
 | M2 Design Phase | Done | PRs #10–#12 |
 | M3 Build loop | Done | PRs #13–#21, #23, #24 |
 | M4 Review & delivery | Done | PRs #26, #27 |
-| M5 Interfaces | T21 done, T22 in review; gate screens and CLI next | PRs #4, #6, #28 |
+| M5 Interfaces | T21, T22 done; T23 in review; CLI next | PRs #4, #6, #28, #29 |
 | M6 Hardening & submission | Not started | — |
 
 ---
@@ -67,12 +67,14 @@ Everything here is merged into `main`, has tests, and has been exercised by a re
 ### M5 — Interfaces
 
 - **T21 Server API + SSE** — a local-only (127.0.0.1) API to start and list Runs, read one with what it is waiting for, answer the Design Gate, the Escalation and the PR Gate, and abort; and a numbered SSE stream per Run carrying every Step as it starts and ends, every status a Run moves to, each agent turn, Test Run and delivery. A request never waits for a Run: the Run advances in the background, one loop per Run. On start the server resumes every unfinished Run. The wiring of a real Run is one runtime, shared with the terminal script.
-  - **Left for T22 and T23**, because they need the core to store or expose more: the documents' contents and the Penpot page link at the Design Gate, which documents a Verdict made Stale, the Findings and Issue Reports as records (today they reach the stream as text), and an Escalation's Working Memory. (Tasks and Steps in a Run's detail, and token usage as events, came with T22.)
+  - **Left for T22 and T23**, because they need the core to store or expose more: the documents' contents and the Penpot page link at the Design Gate, which documents a Verdict made Stale, the Findings and Issue Reports as records (today they reach the stream as text), and an Escalation's Working Memory. (Tasks and Steps in a Run's detail and token usage as events came with T22; the rest with T23, except the Penpot file link, which no stored document has.)
   - **Decided, not built**: abort is an Escalation's choice (CONTEXT.md), so a Run that is building cannot be aborted until it asks a person. `sdlccode abort` (T24) inherits that.
 
-- **T22 Dashboard: Runs + Run Overview** (in review) — boards 01 and 02 in `apps/web`: a New run form and the runs table, and one Run kept live on its event stream — status pill, phase stepper (gates skipped in auto mode, a stopped Run marked where it stopped), the Slice plan with the current Slice's backend and frontend lanes and its Retry Budget, the Token Budget, an Activity feed, and the last Test Run's Issues. The server now sends a Run's Tasks and Steps (with each Task's Retry Budget spent since the last hint, read from the Checkpoint) and a `tokens` event after each model call, and a reconnecting browser resumes from its Last-Event-ID.
+- **T22 Dashboard: Runs + Run Overview** — boards 01 and 02 in `apps/web`: a New run form and the runs table, and one Run kept live on its event stream — status pill, phase stepper (gates skipped in auto mode, a stopped Run marked where it stopped), the Slice plan with the current Slice's backend and frontend lanes and its Retry Budget, the Token Budget, an Activity feed, and the last Test Run's Issues. The server now sends a Run's Tasks and Steps (with each Task's Retry Budget spent since the last hint, read from the Checkpoint) and a `tokens` event after each model call, and a reconnecting browser resumes from its Last-Event-ID.
   - **Known gap**: taking up a hint does not save a Checkpoint, so until that Slice's next retry the saved baseline is the old one — the dashboard can overstate its retries, and a Run resumed in that window would start with a spent budget.
-  - **Left out, for want of data**: the Penpot file link, the model and file each lane is on, and Pause (not a Run state). The Design Gate and Code Review & PR tabs arrive with T23; until then the page says what the Run is waiting for.
+  - **Left out, for want of data**: the Penpot file link, the model and file each lane is on, and Pause (not a Run state).
+- **T23 Dashboard: Design Gate, PR Gate, Escalation** (in review) — boards 03, 04 and 05. The Design Gate tab reads each document in full and takes a Verdict on every one in review, with comments for each change; before a change to a System Design document is sent it says which UI documents will go Stale and be redone. The Code Review & PR tab lists the last review's Findings with their Rule IDs and severities, what earlier reviews sent back, and the pull request's Slice Commits, and approves or sends the PR back. An Escalation opens a dialog with what stopped the Run, the Issue Reports that kept failing and each Coding Agent's last Working Memory, and the four ways on; abort carries the Draft PR checkbox. The core now keeps every review's Findings and an Escalation's Slice and Issue Reports, and the server reads a document in full and says what each would make Stale.
+  - **Left out**: the Penpot file link (a Run's Penpot document names its page and boards, not the file), and the API Contract as an endpoint table: documents are shown as the agents wrote them.
 
 ### Proven by running it, not only by tests
 
@@ -99,7 +101,6 @@ In the plan's order. Dates are from [docs/PLAN.md](docs/PLAN.md); M4 and M5 over
 
 ### M5 — Interfaces
 
-- **T23 Dashboard: Design Gate, PR Gate, Escalation** · Oct 14–15 — boards 03, 04 and 05.
 - **T24 CLI `sdlccode`** · Oct 16 — `run`, `gate show`, `gate approve`, `gate request-changes`, `status --follow`, `abort`. `apps/cli` handles `--help` and `--version` today.
 
 ### M6 — Hardening & submission
@@ -116,4 +117,4 @@ Playwright tests in the Stack Profile · deploying the server on Nebius AI Cloud
 
 ## What the critical path looks like
 
-A Run now goes: request → design → Design Gate → Slices built, tested and committed → pull request → PR Gate → done, with a Draft PR of what it finished when it stops early (T20). The whole pipeline a Run needs is now there, reviewed and delivered. T21's local API and event stream are in place; what is missing is everywhere a person would use it from: the dashboard (**T22**, **T23**) and the CLI (**T24**), and the demo, README and video of **M6**. The API does not yet expose everything those screens need — see T21's entry above. The one thing to watch before the demo is cost: a Slice still runs to roughly 700k tokens, so a five-Slice application wants either a bigger budget or a resumed Run.
+A Run now goes: request → design → Design Gate → Slices built, tested and committed → pull request → PR Gate → done, with a Draft PR of what it finished when it stops early (T20). The whole pipeline a Run needs is now there, reviewed and delivered. T21's local API and event stream are in place; the dashboard now covers every decision a Run asks of a person (**T22**, **T23**); what is missing is the CLI (**T24**), and the demo, README and video of **M6**. The one thing to watch before the demo is cost: a Slice still runs to roughly 700k tokens, so a five-Slice application wants either a bigger budget or a resumed Run.

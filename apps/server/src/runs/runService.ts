@@ -12,6 +12,7 @@ import type {
   PullRequestDecision,
   RunMode,
   RunStatus,
+  Finding,
   RuntimeEvent,
   SliceStatus,
   StepStatus,
@@ -40,6 +41,54 @@ export type RunSummary = {
   updatedAt: string;
 };
 
+/**
+ * An Issue Report (T16) as a person reads it: what failed, where, and whose
+ * the Testing Agent suspects it is. The evidence stays with the agents.
+ */
+export type IssueSummary = {
+  step: string;
+  failingTest: string | null;
+  file: string | null;
+  endpoint: string | null;
+  error: string;
+  suspectedOwner: AgentRole | null;
+  /** How many failures shared it in one Test Run. */
+  occurrences: number;
+};
+
+/** What an agent wrote at the end of its last Step (CONTEXT.md "Working Memory"). */
+export type WorkingMemoryNote = { role: AgentRole; note: string };
+
+/** A Finding (T19): a Rule broken, with the Rule's severity. */
+export type FindingView = {
+  ruleId: string;
+  severity: Finding["severity"];
+  source: "linter" | "codeReview";
+  file: string;
+  /** 0 when it is about the file as a whole. */
+  line: number;
+  message: string;
+  suggestion: string | null;
+};
+
+/** One review of the Run's diff; a blocking Finding makes another. */
+export type ReviewView = {
+  findings: FindingView[];
+  /** "answered" unless the agent ran out of turns or Token Budget. */
+  stopReason: string;
+  problems: string[];
+  createdAt: string;
+};
+
+/** A design document in full, for the person judging it at the Design Gate. */
+export type DocumentView = {
+  kind: DocumentKind;
+  version: number;
+  status: DocumentStatus;
+  ownerAgent: AgentRole;
+  content: string;
+};
+
 /** What a person is being asked, if anything. */
 export type Waiting =
   | { for: "nothing" }
@@ -51,6 +100,12 @@ export type Waiting =
       for: "escalation";
       trigger: string;
       summary: string;
+      /** The Slice it stopped in, by title; null outside the build. */
+      slice: string | null;
+      /** What kept failing. */
+      reports: IssueSummary[];
+      /** Each Coding Agent's last note on that Slice: what it tried. */
+      workingMemory: WorkingMemoryNote[];
       /** The abort dialog's checkbox, ticked unless a person unticks it. */
       openDraftPrOnAbort: boolean;
     }
@@ -70,7 +125,12 @@ export type RunDetail = RunSummary & {
     kind: DocumentKind;
     version: number;
     status: DocumentStatus;
+    ownerAgent: AgentRole;
+    /** What a change to it would make Stale now: the Design Gate's warning. */
+    wouldMakeStale: DocumentKind[];
   }>;
+  /** Every review of the Run's diff, oldest first. */
+  reviews: ReviewView[];
   /**
    * Each agent's Task and its Steps: a Slice's backend and frontend lanes, and
    * how much of its Retry Budget each has spent.
@@ -111,6 +171,8 @@ export interface RunService {
   startRun: (request: StartRunRequest) => Promise<RunSummary>;
   listRuns: () => RunSummary[];
   getRun: (runId: string) => RunDetail;
+  /** A document's latest version in full; the Run's detail lists it only. */
+  getDocument: (runId: string, kind: DocumentKind) => DocumentView;
   decideDesign: (runId: string, verdicts: DesignVerdict[]) => RunDetail;
   resolveEscalation: (
     runId: string,
@@ -157,6 +219,14 @@ export class RunNotFoundError extends Error {
   constructor(runId: string) {
     super(`No Run ${runId}.`);
     this.name = "RunNotFoundError";
+  }
+}
+
+/** The Run has no such document (yet). */
+export class DocumentNotFoundError extends Error {
+  constructor(runId: string, kind: string) {
+    super(`Run ${runId} has no ${kind} document.`);
+    this.name = "DocumentNotFoundError";
   }
 }
 

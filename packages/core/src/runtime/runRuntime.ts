@@ -58,6 +58,10 @@ import {
   type EscalationStore,
 } from "../persistence/escalationStore.js";
 import { SqliteGateStore, type GateStore } from "../persistence/gateStore.js";
+import {
+  SqliteReviewStore,
+  type ReviewStore,
+} from "../persistence/reviewStore.js";
 import { SqliteRunStore, type RunStore } from "../persistence/runStore.js";
 import {
   SqliteSliceStore,
@@ -149,6 +153,7 @@ export interface RunRuntime {
   tasks: TaskStore;
   escalations: EscalationStore;
   gates: GateStore;
+  reviews: ReviewStore;
   orchestrator: RunOrchestrator;
   /** A new Run, with its repository scaffolded from the Stack Profile. */
   startRun: (request: NewRunRequest) => Promise<Run>;
@@ -193,6 +198,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
   const tasks: TaskStore = new SqliteTaskStore(store);
   const escalations: EscalationStore = new SqliteEscalationStore(store);
   const gates: GateStore = new SqliteGateStore(store);
+  const reviews: ReviewStore = new SqliteReviewStore(store);
   // The Orchestrator moves a Run many times per advance; each move is an event.
   const reportedRuns = reportingRunStore(runs, emit);
   const gate = new DocumentDesignGate({
@@ -395,6 +401,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
     tasks,
     escalations,
     gates,
+    reviews,
     gate,
     profile: () => profile,
     capabilities: {
@@ -475,6 +482,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
     tasks,
     escalations,
     gates,
+    reviews,
     orchestrator,
     startRun: async (request) => {
       const [owner, name] = (request.targetRepo ?? "").split("/");

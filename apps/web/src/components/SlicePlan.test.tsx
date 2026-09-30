@@ -39,7 +39,15 @@ describe("SlicePlan", () => {
 
     const approved: RunDetail = {
       ...DETAIL,
-      documents: [{ kind: "slicePlan", version: 1, status: "approved" }],
+      documents: [
+        {
+          kind: "slicePlan",
+          version: 1,
+          status: "approved",
+          ownerAgent: "systemDesign",
+          wouldMakeStale: [],
+        },
+      ],
     };
     rerender(<SlicePlan run={approved} />);
     expect(

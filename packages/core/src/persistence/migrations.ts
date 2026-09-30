@@ -141,4 +141,18 @@ export const MIGRATIONS: readonly string[] = [
   /* 4: why a Run failed, for its Draft PR (T20) */ `
   ALTER TABLE runs ADD COLUMN failure TEXT;
   `,
+
+  /* 5: what an Escalation is about, and every review's Findings, for the
+     person deciding (T23) */ `
+  ALTER TABLE escalations ADD COLUMN slice TEXT;
+  ALTER TABLE escalations ADD COLUMN reports TEXT NOT NULL DEFAULT '[]';
+  CREATE TABLE reviews (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    findings TEXT NOT NULL,
+    stop_reason TEXT NOT NULL,
+    problems TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  `,
 ];

@@ -4,6 +4,11 @@
  * what a person sees when a request is refused: it says what to do.
  */
 import type {
+  DesignVerdict,
+  DocumentKind,
+  DocumentView,
+  EscalationResolution,
+  PullRequestDecision,
   RunDetail,
   RunEvent,
   RunSummary,
@@ -28,6 +33,21 @@ export interface RunsApi {
   listRuns: () => Promise<RunSummary[]>;
   getRun: (runId: string) => Promise<RunDetail>;
   startRun: (request: StartRunRequest) => Promise<RunSummary>;
+  /** A document in full; the Run's detail only lists them. */
+  getDocument: (runId: string, kind: DocumentKind) => Promise<DocumentView>;
+  /** Each answers with the Run as the decision left it. */
+  decideDesign: (
+    runId: string,
+    verdicts: DesignVerdict[],
+  ) => Promise<RunDetail>;
+  resolveEscalation: (
+    runId: string,
+    resolution: EscalationResolution,
+  ) => Promise<RunDetail>;
+  decidePullRequest: (
+    runId: string,
+    decision: PullRequestDecision,
+  ) => Promise<RunDetail>;
   /** Whether the local server answers at all. */
   serverUp: () => Promise<boolean>;
   /** Follows a Run's events from `after`; returns what stops following. */
@@ -63,6 +83,27 @@ export class HttpRunsApi implements RunsApi {
 
   startRun = (request: StartRunRequest): Promise<RunSummary> =>
     this.#call("POST", "/runs", request);
+
+  getDocument = (runId: string, kind: DocumentKind): Promise<DocumentView> =>
+    this.#call("GET", `${runPath(runId)}/documents/${kind}`);
+
+  decideDesign = (
+    runId: string,
+    verdicts: DesignVerdict[],
+  ): Promise<RunDetail> =>
+    this.#call("POST", `${runPath(runId)}/design-gate`, { verdicts });
+
+  resolveEscalation = (
+    runId: string,
+    resolution: EscalationResolution,
+  ): Promise<RunDetail> =>
+    this.#call("POST", `${runPath(runId)}/escalation`, resolution);
+
+  decidePullRequest = (
+    runId: string,
+    decision: PullRequestDecision,
+  ): Promise<RunDetail> =>
+    this.#call("POST", `${runPath(runId)}/pr-gate`, decision);
 
   serverUp = (): Promise<boolean> =>
     this.#fetch(`${this.#base}/health`).then(
@@ -133,3 +174,5 @@ const EVENT_TYPES = [
   "delivery",
   "problem",
 ] as const;
+
+const runPath = (runId: string) => `/runs/${encodeURIComponent(runId)}`;

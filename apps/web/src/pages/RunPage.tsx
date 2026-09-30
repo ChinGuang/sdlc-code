@@ -1,30 +1,52 @@
+import { useState } from "react";
 import type { RunsApi } from "../api/client.js";
 import type { RunDetail } from "../api/types.js";
 import { ActivityFeed } from "../components/ActivityFeed.js";
 import { BudgetCard } from "../components/BudgetCard.js";
+import { DesignGate } from "../components/DesignGate.js";
+import { EscalationDialog } from "../components/EscalationDialog.js";
 import { IssueCard } from "../components/IssueCard.js";
 import { PhaseStepper } from "../components/PhaseStepper.js";
+import { ReviewPanel } from "../components/ReviewPanel.js";
 import { SlicePlan } from "../components/SlicePlan.js";
 import { StatusBadge } from "../components/StatusBadge.js";
-import { RUNS_HREF } from "../router.js";
+import { runHref, RUNS_HREF, type RunTab } from "../router.js";
 import { useRun } from "../run/useRun.js";
 import { currentSlice, shortId, triggerText } from "../run/view.js";
 
 const FINISHED = new Set(["done", "failed", "aborted"]);
 
-/** Board 02: one Run, live. */
+const TABS: Array<{ tab: RunTab; label: string }> = [
+  { tab: "overview", label: "Overview" },
+  { tab: "designGate", label: "Design Gate" },
+  { tab: "review", label: "Code Review & PR" },
+];
+
+/** Where a tab's dot says a person is needed, or that it is behind them. */
+function tabTone(tab: RunTab, run: RunDetail): string {
+  if (tab === "designGate" && run.waiting.for === "designGate") return "amber";
+  if (tab === "review" && run.waiting.for === "prGate") return "purple";
+  if (tab === "overview" && run.waiting.for === "escalation") return "red";
+  return "green";
+}
+
+/** Boards 02 to 05: one Run, live, and the decisions it waits for. */
 export function RunPage({
   api,
   runId,
+  tab = "overview",
   refreshDelayMs,
 }: {
   api: RunsApi;
   runId: string;
+  tab?: RunTab;
   refreshDelayMs?: number;
 }) {
-  const { detail, events, testRun, error } = useRun(api, runId, {
+  const { detail, events, testRun, error, accept } = useRun(api, runId, {
     refreshDelayMs,
   });
+  // Opens by itself while the Run is escalated; Cancel only puts it aside.
+  const [dialogClosed, setDialogClosed] = useState(false);
 
   if (!detail)
     return (
@@ -81,26 +103,55 @@ export function RunPage({
           {error}
         </div>
       )}
-      {/* The Design Gate and Code Review & PR tabs join it in T23. */}
-      <div className="tabs">
-        <span className="selected">Overview</span>
-      </div>
-      <PhaseStepper run={detail} />
-      <Waiting run={detail} />
-      <div className="overview">
-        <div className="column">
-          <SlicePlan run={detail} />
-        </div>
-        <div className="column">
-          <IssueCard testRun={testRun} />
-          <BudgetCard run={detail} />
-          <ActivityFeed
-            events={events}
-            slices={detail.slices}
-            live={!FINISHED.has(detail.status)}
-          />
-        </div>
-      </div>
+      <nav className="tabs" aria-label="Run">
+        {TABS.map((one) => (
+          <a
+            key={one.tab}
+            href={runHref(runId, one.tab)}
+            aria-current={one.tab === tab ? "page" : undefined}
+          >
+            <span className={`dot ${tabTone(one.tab, detail)}`} />
+            {one.label}
+          </a>
+        ))}
+      </nav>
+      {tab === "designGate" ? (
+        <DesignGate run={detail} api={api} onDecided={accept} />
+      ) : tab === "review" ? (
+        <ReviewPanel
+          run={detail}
+          testRun={testRun}
+          api={api}
+          onDecided={accept}
+        />
+      ) : (
+        <>
+          <PhaseStepper run={detail} />
+          <Waiting run={detail} onDecide={() => setDialogClosed(false)} />
+          <div className="overview">
+            <div className="column">
+              <SlicePlan run={detail} />
+            </div>
+            <div className="column">
+              <IssueCard testRun={testRun} />
+              <BudgetCard run={detail} />
+              <ActivityFeed
+                events={events}
+                slices={detail.slices}
+                live={!FINISHED.has(detail.status)}
+              />
+            </div>
+          </div>
+        </>
+      )}
+      {detail.waiting.for === "escalation" && !dialogClosed && (
+        <EscalationDialog
+          run={detail}
+          api={api}
+          onDecided={accept}
+          onClose={() => setDialogClosed(true)}
+        />
+      )}
     </>
   );
 }
@@ -120,8 +171,8 @@ function Breadcrumbs({
   );
 }
 
-/** What a person is being asked, or why the Run stopped. */
-function Waiting({ run }: { run: RunDetail }) {
+/** What a person is being asked, with the way to answer it, or why the Run stopped. */
+function Waiting({ run, onDecide }: { run: RunDetail; onDecide: () => void }) {
   const { waiting, failure } = run;
   if (waiting.for === "designGate")
     return (
@@ -129,25 +180,29 @@ function Waiting({ run }: { run: RunDetail }) {
         <strong>Waiting for you at the Design Gate.</strong>{" "}
         <span className="muted">
           {waiting.documents.length} documents to approve or send back.
-        </span>
+        </span>{" "}
+        <a href={runHref(run.id, "designGate")}>Review the documents</a>
       </section>
     );
   if (waiting.for === "prGate")
     return (
       <section className="card waiting" aria-label="Waiting">
         <strong>Waiting for you at the PR Gate.</strong>{" "}
-        {waiting.pullRequest && (
-          <a href={waiting.pullRequest.url} target="_blank" rel="noreferrer">
-            Review PR #{waiting.pullRequest.number}
-          </a>
-        )}
+        <a href={runHref(run.id, "review")}>Review the findings</a>
       </section>
     );
   if (waiting.for === "escalation")
     return (
       <section className="card waiting" aria-label="Waiting">
         <strong>Escalated: {triggerText(waiting.trigger)}.</strong>{" "}
-        <span className="muted">{waiting.summary}</span>
+        <span className="muted">{waiting.summary}</span>{" "}
+        <button
+          type="button"
+          className="button small-button"
+          onClick={onDecide}
+        >
+          Decide…
+        </button>
       </section>
     );
   if (failure)

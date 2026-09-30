@@ -33,6 +33,7 @@ import type {
 } from "../domain/entities.js";
 import type { EscalationTrigger, RunStatus } from "../domain/runLifecycle.js";
 import type { EscalationStore } from "../persistence/escalationStore.js";
+import type { ReviewStore } from "../persistence/reviewStore.js";
 import type { RunStore } from "../persistence/runStore.js";
 import { NotFoundError } from "../persistence/storeOptions.js";
 import type { DocumentStore } from "../persistence/documentStore.js";
@@ -110,6 +111,8 @@ export type RunOrchestratorOptions = {
    * is delivered unreviewed, which is what happened before T19 existed.
    */
   codeReview?: RunReview;
+  /** Where each review is kept for the PR Gate; none is kept without it. */
+  reviews?: ReviewStore;
   /** Told when a review could not be trusted, e.g. an invented Rule ID. */
   onReviewProblem?: (runId: string, problem: string) => void;
   /** How often blocking Findings may send the code back. Defaults to 3. */
@@ -300,6 +303,12 @@ export class AgentRunOrchestrator implements RunOrchestrator {
   async #review(run: Run): Promise<void> {
     const { runs, gates, delivery, codeReview } = this.#options;
     const reviewed = codeReview ? await codeReview.reviewRun(run) : null;
+    if (reviewed)
+      this.#options.reviews?.saveReview(run.id, {
+        findings: reviewed.findings,
+        stopReason: reviewed.stopReason,
+        problems: reviewed.problems,
+      });
     for (const problem of reviewed?.problems ?? [])
       this.#options.onReviewProblem?.(run.id, problem);
     const blocking = blockingFindings(reviewed?.findings ?? []);
@@ -562,11 +571,16 @@ export class AgentRunOrchestrator implements RunOrchestrator {
   ): void {
     const { runs, escalations } = this.#options;
     const next = runs.applyEvent(run.id, { type: "limitHit", trigger });
+    const current = this.#currentSlice(run.id);
     if (next.status === "escalated") {
-      escalations.openEscalation(run.id, { trigger, summary });
+      escalations.openEscalation(run.id, {
+        trigger,
+        summary,
+        slice: current?.title ?? null,
+        reports: [...reports],
+      });
       return;
     }
-    const current = this.#currentSlice(run.id);
     if (current) this.#failTasks(run.id, current.id);
     // The failure report the Draft PR carries (diagram 3b).
     runs.recordFailure(run.id, {

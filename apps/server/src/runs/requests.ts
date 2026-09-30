@@ -27,6 +27,9 @@ export const StartRunBody = z.strictObject({
     .optional(),
 });
 
+/** A document's kind in a URL: one a Run can have, or a 400 naming them. */
+export const DocumentKindParam = z.enum(DOCUMENT_KINDS);
+
 const Verdict = z.strictObject({
   documentKind: z.enum(DOCUMENT_KINDS),
   decision: z.enum(["approve", "requestChanges"]),

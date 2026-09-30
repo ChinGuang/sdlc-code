@@ -33,6 +33,7 @@ describe("openDatabase", () => {
       "documents",
       "escalations",
       "gates",
+      "reviews",
       "runs",
       "slices",
       "step_events",
