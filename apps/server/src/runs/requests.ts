@@ -27,6 +27,9 @@ export const StartRunBody = z.strictObject({
     .optional(),
 });
 
+/** A document's kind in a URL: one a Run can have, or a 400 naming them. */
+export const DocumentKindParam = z.enum(DOCUMENT_KINDS);
+
 const Verdict = z.strictObject({
   documentKind: z.enum(DOCUMENT_KINDS),
   decision: z.enum(["approve", "requestChanges"]),
@@ -37,10 +40,19 @@ export const DesignGateBody = z.strictObject({
   verdicts: z.array(Verdict).min(1),
 });
 
+/** A higher Token Budget: every way on but abort spends tokens. */
+const RaisedBudget = z
+  .number()
+  .int()
+  .positive()
+  .max(MAX_TOKEN_BUDGET)
+  .optional();
+
 export const EscalationBody = z.discriminatedUnion("choice", [
   z.strictObject({
     choice: z.literal("retryWithHint"),
     hint: z.string().trim().min(1),
+    tokenBudget: RaisedBudget,
   }),
   z.strictObject({
     choice: z.literal("editDocuments"),
@@ -52,8 +64,12 @@ export const EscalationBody = z.discriminatedUnion("choice", [
         }),
       )
       .min(1),
+    tokenBudget: RaisedBudget,
   }),
-  z.strictObject({ choice: z.literal("skipSlice") }),
+  z.strictObject({
+    choice: z.literal("skipSlice"),
+    tokenBudget: RaisedBudget,
+  }),
   z.strictObject({
     choice: z.literal("abort"),
     /** The dialog's checkbox; ticked unless a person unticks it (diagram 3b). */

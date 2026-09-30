@@ -150,6 +150,10 @@ export type Escalation = {
   choice: EscalationChoice | null;
   hint: string | null;
   openDraftPrOnAbort: boolean;
+  /** The Slice being built when it stopped; null when it was not building. */
+  slice: string | null;
+  /** The Issue Reports behind it (T16), as stored. */
+  reports: unknown[];
   createdAt: string;
   resolvedAt: string | null;
 };

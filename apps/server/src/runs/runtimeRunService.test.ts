@@ -10,6 +10,7 @@ import {
   SqliteEscalationStore,
   SqliteRunStore,
   SqliteSliceStore,
+  SqliteReviewStore,
   SqliteTaskStore,
   type Run,
   type RunOrchestrator,
@@ -21,6 +22,7 @@ import { firstValueFrom, take, toArray } from "rxjs";
 import { describe, expect, it } from "vitest";
 import { MemoryEventLog } from "./eventLog.js";
 import {
+  DocumentNotFoundError,
   RunConflictError,
   RunNotFoundError,
   RuntimeUnavailableError,
@@ -29,6 +31,7 @@ import {
   type StreamedEvent,
 } from "./runService.js";
 import {
+  issueSummary,
   retriesSpent,
   RuntimeRunService,
   type ServiceRuntime,
@@ -52,6 +55,9 @@ function setup(
   const runs = new SqliteRunStore(store);
   const escalations = new SqliteEscalationStore(store);
   const tasks = new SqliteTaskStore(store);
+  const documents = new SqliteDocumentStore(store);
+  const slices = new SqliteSliceStore(store);
+  const reviews = new SqliteReviewStore(store);
   const log = new MemoryEventLog();
   const script = [...steps];
   const advanced: string[] = [];
@@ -93,10 +99,11 @@ function setup(
 
   const runtime: ServiceRuntime = {
     runs,
-    documents: new SqliteDocumentStore(store),
-    slices: new SqliteSliceStore(store),
+    documents,
+    slices,
     tasks,
     escalations,
+    reviews,
     orchestrator,
     startRun: async (request) => {
       if (request.targetRepo)
@@ -137,6 +144,9 @@ function setup(
     settled: service.settled,
     runs,
     tasks,
+    documents,
+    slices,
+    reviews,
     escalations,
     log,
     advanced,
@@ -326,6 +336,172 @@ describe("RuntimeRunService: decisions it refuses", () => {
 
     expect(() => api.getRun("nope")).toThrow(RunNotFoundError);
     expect(() => api.events("nope")).toThrow(RunNotFoundError);
+  });
+});
+
+describe("RuntimeRunService: what a person decides on", () => {
+  /** A Run with some of its design documents written and in review. */
+  async function withDesignDocuments() {
+    const context = setup();
+    const run = await context.api.startRun(request);
+    await context.settled();
+    for (const kind of ["systemDesign", "apiContract", "uiSpec"] as const) {
+      context.documents.createDocument({
+        runId: run.id,
+        kind,
+        content: `${kind} v1`,
+      });
+      context.documents.applyEvent(run.id, kind, "ownerFinished");
+    }
+    return { ...context, run };
+  }
+
+  it("reads a document in full, and says when it is not there", async () => {
+    const { api, run } = await withDesignDocuments();
+
+    expect(api.getDocument(run.id, "apiContract")).toEqual({
+      kind: "apiContract",
+      version: 1,
+      status: "inReview",
+      ownerAgent: "systemDesign",
+      content: "apiContract v1",
+    });
+    expect(() => api.getDocument(run.id, "penpotDesign")).toThrow(
+      DocumentNotFoundError,
+    );
+  });
+
+  // The warning before a person asks for changes to a System Design document.
+  it("says which documents a change to each would make Stale", async () => {
+    const { api, run } = await withDesignDocuments();
+
+    const documents = api.getRun(run.id).documents;
+
+    expect(
+      Object.fromEntries(
+        documents.map(({ kind, wouldMakeStale }) => [kind, wouldMakeStale]),
+      ),
+    ).toEqual({
+      systemDesign: ["uiSpec"],
+      apiContract: ["uiSpec"],
+      uiSpec: [],
+    });
+  });
+
+  it("shows every review's Findings, as the PR Gate lists them", async () => {
+    const { api, reviews, settled } = setup();
+    const run = await api.startRun(request);
+    await settled();
+    reviews.saveReview(run.id, {
+      findings: [
+        {
+          ruleId: "REUSE-01",
+          file: "src/server/notes.ts",
+          line: 42,
+          message: "Duplicated tag parsing.",
+          severity: "major",
+          source: "codeReview",
+        },
+      ],
+      stopReason: "answered",
+      problems: [],
+    });
+
+    expect(api.getRun(run.id).reviews).toEqual([
+      {
+        findings: [
+          {
+            ruleId: "REUSE-01",
+            severity: "major",
+            source: "codeReview",
+            file: "src/server/notes.ts",
+            line: 42,
+            message: "Duplicated tag parsing.",
+            suggestion: null,
+          },
+        ],
+        stopReason: "answered",
+        problems: [],
+        createdAt: expect.any(String),
+      },
+    ]);
+  });
+
+  // What a person needs to give a hint that helps: what failed, and what
+  // each agent already tried.
+  it("shows an Escalation's Slice, its Issues and each agent's last note", async () => {
+    const { api, settled, runs, escalations, slices, tasks } = setup();
+    const run = await api.startRun(request);
+    await settled();
+    const [slice] = slices.saveSlices(run.id, [
+      { title: "Bookings", isWalkingSkeleton: false },
+    ]);
+    const task = tasks.createTask({
+      runId: run.id,
+      sliceId: slice!.id,
+      agentRole: "backendCoding",
+    });
+    tasks.completeStep(tasks.startStep(task.id).id, "Tried UTC; still 409.");
+    runs.applyEvent(run.id, { type: "documentsReady" });
+    runs.applyEvent(run.id, { type: "designApproved" });
+    runs.applyEvent(run.id, { type: "limitHit", trigger: "loop" });
+    escalations.openEscalation(run.id, {
+      trigger: "loop",
+      summary: "The same failure came back.",
+      slice: "Bookings",
+      reports: [
+        {
+          step: "smoke",
+          failingTest: "POST /api/bookings",
+          file: null,
+          endpoint: "POST /api/bookings",
+          error: "409 Conflict",
+          evidence: "a long log",
+          suspectedOwner: "backendCoding",
+          signature: "x",
+          occurrences: 2,
+        },
+      ],
+    });
+
+    expect(api.getRun(run.id).waiting).toEqual({
+      for: "escalation",
+      id: expect.any(String),
+      trigger: "loop",
+      summary: "The same failure came back.",
+      slice: "Bookings",
+      reports: [
+        {
+          step: "smoke",
+          failingTest: "POST /api/bookings",
+          file: null,
+          endpoint: "POST /api/bookings",
+          error: "409 Conflict",
+          suspectedOwner: "backendCoding",
+          occurrences: 2,
+        },
+      ],
+      workingMemory: [{ role: "backendCoding", note: "Tried UTC; still 409." }],
+      openDraftPrOnAbort: true,
+    });
+  });
+});
+
+describe("issueSummary", () => {
+  it("shows what a stored report has, and never its evidence", () => {
+    expect(issueSummary({ error: "boom", evidence: "secret log" })).toEqual({
+      step: "unknown",
+      failingTest: null,
+      file: null,
+      endpoint: null,
+      error: "boom",
+      suspectedOwner: null,
+      occurrences: 1,
+    });
+    expect(issueSummary(null).error).toBe("(no error recorded)");
+    expect(issueSummary({ suspectedOwner: "someoneElse" }).suspectedOwner).toBe(
+      null,
+    );
   });
 });
 

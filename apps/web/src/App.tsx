@@ -23,7 +23,12 @@ export function App({ api: given }: { api?: RunsApi }) {
   if (route.page === "run")
     return (
       <Layout title="Run" serverUp={serverUp} onRuns={false}>
-        <RunPage key={route.runId} api={api} runId={route.runId} />
+        <RunPage
+          key={route.runId}
+          api={api}
+          runId={route.runId}
+          tab={route.tab}
+        />
       </Layout>
     );
   return (

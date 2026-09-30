@@ -62,6 +62,17 @@ describe("reportingRunStore", () => {
     ]);
   });
 
+  it("reports a Token Budget a person raised", () => {
+    const { runs, run, events, emit } = setup();
+    runs.addTokensUsed(run.id, 1_000_000);
+
+    reportingRunStore(runs, emit).setTokenBudget(run.id, 2_000_000);
+
+    expect(events).toEqual([
+      { runId: run.id, type: "tokens", used: 1_000_000, budget: 2_000_000 },
+    ]);
+  });
+
   it("reports nothing for a move the lifecycle refuses", () => {
     const { runs, run, events, emit } = setup();
 

@@ -33,12 +33,14 @@ import { map, type Observable } from "rxjs";
 import {
   AbortBody,
   DesignGateBody,
+  DocumentKindParam,
   EscalationBody,
   PullRequestGateBody,
   StartRunBody,
 } from "./requests.js";
 import {
   RUN_SERVICE,
+  type DocumentView,
   type RunDetail,
   type RunService,
   type RunSummary,
@@ -66,6 +68,11 @@ export class RunsController {
   @Get(":id")
   get(@Param("id") id: string): RunDetail {
     return this.#runs.getRun(id);
+  }
+
+  @Get(":id/documents/:kind")
+  document(@Param("id") id: string, @Param("kind") kind: string): DocumentView {
+    return this.#runs.getDocument(id, parse(DocumentKindParam, kind));
   }
 
   @Post(":id/design-gate")

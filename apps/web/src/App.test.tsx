@@ -16,8 +16,14 @@ describe("parseRoute", () => {
     ["", { page: "runs" }],
     ["#/runs", { page: "runs" }],
     ["#new-run", { page: "runs" }],
-    ["#/runs/abc", { page: "run", runId: "abc" }],
-    ["#/runs/a%2Fb", { page: "run", runId: "a/b" }],
+    ["#/runs/abc", { page: "run", runId: "abc", tab: "overview" }],
+    ["#/runs/a%2Fb", { page: "run", runId: "a/b", tab: "overview" }],
+    [
+      "#/runs/abc/design-gate",
+      { page: "run", runId: "abc", tab: "designGate" },
+    ],
+    ["#/runs/abc/review", { page: "run", runId: "abc", tab: "review" }],
+    ["#/runs/abc/nonsense", { page: "run", runId: "abc", tab: "overview" }],
   ])("reads %j", (hash, route) => {
     expect(parseRoute(hash)).toEqual(route);
   });

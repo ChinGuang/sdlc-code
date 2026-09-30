@@ -3,7 +3,13 @@
  * as the server would.
  */
 import type { RunsApi } from "../api/client.js";
-import type { RunDetail, RunEvent, RunSummary } from "../api/types.js";
+import type {
+  DocumentKind,
+  DocumentView,
+  RunDetail,
+  RunEvent,
+  RunSummary,
+} from "../api/types.js";
 
 type Distribute<T> = T extends unknown
   ? Omit<T, "runId" | "seq" | "happenedAt">
@@ -14,10 +20,25 @@ export function fakeApi(options: {
   runs?: RunSummary[];
   detail?: RunDetail;
   startRun?: RunsApi["startRun"];
+  documents?: Partial<Record<DocumentKind, DocumentView>>;
+  /** What every decision is refused with, as the server would. */
+  refuse?: Error;
 }) {
   let detail = options.detail;
   const listeners = new Set<(event: RunEvent) => void>();
-  const calls = { getRun: 0, followedFrom: [] as number[], closed: 0 };
+  const calls = {
+    getRun: 0,
+    followedFrom: [] as number[],
+    closed: 0,
+    documents: [] as DocumentKind[],
+    decisions: [] as unknown[],
+  };
+  /** What a decision answers with: the Run as the server now has it. */
+  const answer = async () => {
+    if (options.refuse) throw options.refuse;
+    if (!detail) throw new Error("No Run.");
+    return detail;
+  };
   let seq = detail?.lastSeq ?? 0;
 
   const api: RunsApi = {
@@ -32,6 +53,24 @@ export function fakeApi(options: {
       (async () => {
         throw new Error("not in this test");
       }),
+    getDocument: async (_runId, kind) => {
+      calls.documents.push(kind);
+      const document = options.documents?.[kind];
+      if (!document) throw new Error(`No ${kind} document.`);
+      return document;
+    },
+    decideDesign: async (_runId, verdicts) => {
+      calls.decisions.push({ designGate: verdicts });
+      return answer();
+    },
+    resolveEscalation: async (_runId, resolution) => {
+      calls.decisions.push({ escalation: resolution });
+      return answer();
+    },
+    decidePullRequest: async (_runId, decision) => {
+      calls.decisions.push({ prGate: decision });
+      return answer();
+    },
     serverUp: async () => true,
     followRun: (_runId, after, onEvent) => {
       calls.followedFrom.push(after);
@@ -107,6 +146,7 @@ export const DETAIL: RunDetail = {
     },
   ],
   documents: [],
+  reviews: [],
   tasks: [
     {
       id: "t1",

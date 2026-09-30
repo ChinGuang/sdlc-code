@@ -336,8 +336,12 @@ describe("RunPage: a Run that needs a person or stopped", () => {
       status: "escalated",
       waiting: {
         for: "escalation",
+        id: "escalation-1",
         trigger: "retryBudget",
         summary: "Slice 2 failed its Test Run three times.",
+        slice: "Sign in",
+        reports: [],
+        workingMemory: [],
         openDraftPrOnAbort: true,
       },
     });

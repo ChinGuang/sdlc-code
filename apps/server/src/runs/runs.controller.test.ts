@@ -12,6 +12,7 @@ import { configureApp, HOST } from "../configureApp.js";
 import {
   RUN_LIFECYCLE,
   RUN_SERVICE,
+  DocumentNotFoundError,
   RunConflictError,
   RunNotFoundError,
   RuntimeUnavailableError,
@@ -48,6 +49,7 @@ const DETAIL: RunDetail = {
   ...SUMMARY,
   slices: [],
   documents: [],
+  reviews: [],
   tasks: [],
   waiting: { for: "nothing" },
   failure: null,
@@ -74,6 +76,17 @@ function fakeService(overrides: Partial<RunService> = {}) {
     getRun: (id) => {
       if (id !== RUN_ID) throw new RunNotFoundError(id);
       return DETAIL;
+    },
+    getDocument: (id, kind) => {
+      calls.push(["getDocument", [id, kind]]);
+      if (kind === "penpotDesign") throw new DocumentNotFoundError(id, kind);
+      return {
+        kind,
+        version: 2,
+        status: "inReview",
+        ownerAgent: "systemDesign",
+        content: "openapi: 3.1.0",
+      };
     },
     decideDesign: recorded("decideDesign", DETAIL),
     resolveEscalation: recorded("resolveEscalation", DETAIL),
@@ -208,6 +221,33 @@ describe("GET /runs and /runs/:id", () => {
     expect(await response.json()).toMatchObject({ message: "No Run nope." });
   });
 
+  it("reads one document in full for the Design Gate", async () => {
+    const { service, calls } = fakeService();
+    const url = await start(service);
+
+    const response = await fetch(`${url}/runs/${RUN_ID}/documents/apiContract`);
+
+    expect(await response.json()).toMatchObject({
+      kind: "apiContract",
+      content: "openapi: 3.1.0",
+    });
+    expect(calls).toContainEqual(["getDocument", [RUN_ID, "apiContract"]]);
+  });
+
+  it("answers 400 for a kind of document no Run has, and 404 for one not written yet", async () => {
+    const { service } = fakeService();
+    const url = await start(service);
+
+    const unknown = await fetch(`${url}/runs/${RUN_ID}/documents/readme`);
+    const missing = await fetch(`${url}/runs/${RUN_ID}/documents/penpotDesign`);
+
+    expect(unknown.status).toBe(400);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({
+      message: `Run ${RUN_ID} has no penpotDesign document.`,
+    });
+  });
+
   // The dashboard is another origin on this machine.
   it("lets a page on this machine call it, and no other", async () => {
     const { service } = fakeService();
@@ -303,6 +343,30 @@ describe("the Gates and the Escalation", () => {
       ["resolveEscalation", "editDocuments"],
       ["resolveEscalation", "skipSlice"],
       ["resolveEscalation", "abort"],
+    ]);
+  });
+
+  // A Token Budget Escalation goes on only with more to spend.
+  it("passes a raised Token Budget on with the choice", async () => {
+    const { service, calls } = fakeService();
+    const url = await start(service);
+
+    const response = await post(`${url}/runs/${RUN_ID}/escalation`, {
+      choice: "skipSlice",
+      tokenBudget: 3_000_000,
+    });
+    const refused = await post(`${url}/runs/${RUN_ID}/escalation`, {
+      choice: "skipSlice",
+      tokenBudget: -1,
+    });
+
+    expect(response.status).toBe(200);
+    expect(refused.status).toBe(400);
+    expect(calls).toEqual([
+      [
+        "resolveEscalation",
+        [RUN_ID, { choice: "skipSlice", tokenBudget: 3_000_000 }],
+      ],
     ]);
   });
 

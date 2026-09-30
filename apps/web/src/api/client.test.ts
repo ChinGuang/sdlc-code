@@ -55,6 +55,40 @@ describe("HttpRunsApi", () => {
     expect(sent[1]!.url).toBe("/api/runs/a%2Fb");
   });
 
+  // Each decision goes to its own route, and answers with the Run.
+  it("sends each decision to its route, as the server takes it", async () => {
+    const { sent, fetch } = withFetch(200, { id: "r1" });
+    const api: RunsApi = new HttpRunsApi({ fetch });
+
+    await api.getDocument("r1", "apiContract");
+    await api.decideDesign("r1", [
+      { documentKind: "uiSpec", decision: "approve", comments: "" },
+    ]);
+    await api.resolveEscalation("r1", {
+      choice: "abort",
+      openDraftPrOnAbort: false,
+    });
+    await api.decidePullRequest("r1", { choice: "approve" });
+
+    expect(sent.map(({ url, init }) => [init?.method, url])).toEqual([
+      ["GET", "/api/runs/r1/documents/apiContract"],
+      ["POST", "/api/runs/r1/design-gate"],
+      ["POST", "/api/runs/r1/escalation"],
+      ["POST", "/api/runs/r1/pr-gate"],
+    ]);
+    expect(
+      sent.slice(1).map(({ init }) => JSON.parse(init?.body as string)),
+    ).toEqual([
+      {
+        verdicts: [
+          { documentKind: "uiSpec", decision: "approve", comments: "" },
+        ],
+      },
+      { choice: "abort", openDraftPrOnAbort: false },
+      { choice: "approve" },
+    ]);
+  });
+
   // The server's 400 names every problem; a person sees each.
   it("turns a refusal into an ApiError with the server's own words", async () => {
     const { fetch } = withFetch(400, {

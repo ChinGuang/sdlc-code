@@ -48,7 +48,7 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Retry Budget** — How many times a Task may loop back after Issue Reports before the Run escalates, and separately how many times blocking Findings may send a Run's code back to be built again. Default 3 each.
 
-**Token Budget** — The maximum model usage a Run may spend before it escalates.
+**Token Budget** — The maximum model usage a Run may spend before it escalates. Every way on from an Escalation but abort spends tokens, so a Run whose budget is spent goes on only if the person raises it.
 
 **Loop** — An Issue Report matching an earlier one in the same Task (same failing test and error). Escalates immediately, without spending the remaining Retry Budget.
 

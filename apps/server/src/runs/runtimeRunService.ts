@@ -9,10 +9,15 @@
  * up, because `advance` reads the Run's state from the stores each time round.
  */
 import {
+  documentsMadeStale,
   IllegalTransitionError,
+  isAgentRole,
   memoryFromCheckpoint,
   MissingKeyError,
   type RunMemoryState,
+  type AgentRole,
+  type DocumentKind,
+  type DocumentStatus,
   type Run,
   type RunRuntime,
   type Task,
@@ -20,9 +25,12 @@ import {
 import type { Observable } from "rxjs";
 import type { EventLog } from "./eventLog.js";
 import {
+  DocumentNotFoundError,
   RunConflictError,
   RunNotFoundError,
   RuntimeUnavailableError,
+  type DocumentView,
+  type IssueSummary,
   type RunDetail,
   type RunLifecycle,
   type RunService,
@@ -30,6 +38,7 @@ import {
   type StartRunRequest,
   type StreamedEvent,
   type Waiting,
+  type WorkingMemoryNote,
 } from "./runService.js";
 
 /** The parts of the runtime this service uses. */
@@ -40,6 +49,7 @@ export type ServiceRuntime = Pick<
   | "slices"
   | "tasks"
   | "escalations"
+  | "reviews"
   | "orchestrator"
   | "startRun"
   | "resume"
@@ -91,6 +101,19 @@ export class RuntimeRunService implements RunService, RunLifecycle {
   listRuns = (): RunSummary[] => this.#runtime().runs.listRuns().map(summary);
 
   getRun = (runId: string): RunDetail => this.#detail(this.#run(runId));
+
+  getDocument = (runId: string, kind: DocumentKind): DocumentView => {
+    const run = this.#run(runId);
+    const document = this.#runtime().documents.getLatest(run.id, kind);
+    if (!document) throw new DocumentNotFoundError(run.id, kind);
+    return {
+      kind: document.kind,
+      version: document.version,
+      status: document.status,
+      ownerAgent: document.ownerAgent,
+      content: document.content,
+    };
+  };
 
   decideDesign: RunService["decideDesign"] = (runId, verdicts) =>
     this.#decide(runId, () =>
@@ -224,9 +247,21 @@ export class RuntimeRunService implements RunService, RunLifecycle {
         isWalkingSkeleton: slice.isWalkingSkeleton,
         commitSha: slice.commitSha,
       })),
-      documents: runtime.documents
-        .listLatest(run.id)
-        .map(({ kind, version, status }) => ({ kind, version, status })),
+      documents: documentsWithCascade(runtime.documents.listLatest(run.id)),
+      reviews: runtime.reviews.listReviews(run.id).map((review) => ({
+        findings: review.findings.map((finding) => ({
+          ruleId: finding.ruleId,
+          severity: finding.severity,
+          source: finding.source,
+          file: finding.file,
+          line: finding.line,
+          message: finding.message,
+          suggestion: finding.suggestion ?? null,
+        })),
+        stopReason: review.stopReason,
+        problems: review.problems,
+        createdAt: review.createdAt,
+      })),
       tasks: runtime.tasks.listTasks(run.id).map((task) => ({
         id: task.id,
         sliceId: task.sliceId,
@@ -255,6 +290,30 @@ export class RuntimeRunService implements RunService, RunLifecycle {
     };
   }
 
+  /**
+   * What each agent working on the stopped Slice last wrote: what it tried,
+   * which is what a person needs to give a useful hint.
+   */
+  #workingMemory(
+    runId: string,
+    sliceTitle: string | null,
+  ): WorkingMemoryNote[] {
+    const runtime = this.#runtime();
+    const slice = runtime.slices
+      .listSlices(runId)
+      .find((one) => one.title === sliceTitle);
+    if (!slice) return [];
+    return runtime.tasks
+      .listTasks(runId)
+      .filter((task) => task.sliceId === slice.id)
+      .flatMap((task) => {
+        const note = runtime.tasks
+          .listSteps(task.id)
+          .findLast((step) => step.workingMemory !== null)?.workingMemory;
+        return note ? [{ role: task.agentRole, note }] : [];
+      });
+  }
+
   /** What a person is being asked, read from the Run's own state. */
   #waiting(run: Run): Waiting {
     const runtime = this.#runtime();
@@ -272,8 +331,12 @@ export class RuntimeRunService implements RunService, RunLifecycle {
         return escalation
           ? {
               for: "escalation",
+              id: escalation.id,
               trigger: escalation.trigger,
               summary: escalation.summary,
+              slice: escalation.slice,
+              reports: escalation.reports.map(issueSummary),
+              workingMemory: this.#workingMemory(run.id, escalation.slice),
               openDraftPrOnAbort: escalation.openDraftPrOnAbort,
             }
           : { for: "nothing" };
@@ -335,4 +398,50 @@ export function retriesSpent(
   const baseline =
     memory?.histories.get(task.sliceId)?.retryBaseline[side] ?? 0;
   return Math.max(0, task.retries - baseline);
+}
+
+/**
+ * Each document with what a change to it would make Stale, given where the
+ * others are now: the Design Gate warns before a person asks for it.
+ */
+function documentsWithCascade(
+  documents: ReadonlyArray<{
+    kind: DocumentKind;
+    version: number;
+    status: DocumentStatus;
+    ownerAgent: AgentRole;
+  }>,
+): RunDetail["documents"] {
+  const statuses = Object.fromEntries(
+    documents.map(({ kind, status }) => [kind, status]),
+  );
+  return documents.map(({ kind, version, status, ownerAgent }) => ({
+    kind,
+    version,
+    status,
+    ownerAgent,
+    wouldMakeStale: documentsMadeStale(kind, statuses),
+  }));
+}
+
+/**
+ * An Issue Report as stored, cut to what a person reads. Stored as JSON, so
+ * each field is checked rather than trusted: a report from an older version
+ * shows what it has.
+ */
+export function issueSummary(stored: unknown): IssueSummary {
+  const report = (stored ?? {}) as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === "string" ? value : null);
+  return {
+    step: text(report.step) ?? "unknown",
+    failingTest: text(report.failingTest),
+    file: text(report.file),
+    endpoint: text(report.endpoint),
+    error: text(report.error) ?? "(no error recorded)",
+    suspectedOwner: isAgentRole(text(report.suspectedOwner) ?? "")
+      ? (report.suspectedOwner as AgentRole)
+      : null,
+    occurrences:
+      typeof report.occurrences === "number" ? report.occurrences : 1,
+  };
 }

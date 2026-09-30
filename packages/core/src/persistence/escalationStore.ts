@@ -21,7 +21,14 @@ export type EscalationDecision = {
   openDraftPrOnAbort?: boolean;
 };
 
-export type NewEscalation = { trigger: EscalationTrigger; summary: string };
+export type NewEscalation = {
+  trigger: EscalationTrigger;
+  summary: string;
+  /** The Slice being built, by title, as a Run's failure names it. */
+  slice?: string | null;
+  /** The Issue Reports that led here, so a person sees what kept failing. */
+  reports?: readonly unknown[];
+};
 
 /** Escalations and how humans resolved them. */
 export interface EscalationStore {
@@ -40,6 +47,8 @@ type EscalationRow = {
   choice: EscalationChoice | null;
   hint: string | null;
   open_draft_pr_on_abort: number;
+  slice: string | null;
+  reports: string;
   created_at: string;
   resolved_at: string | null;
 };
@@ -53,7 +62,7 @@ export class SqliteEscalationStore implements EscalationStore {
 
   openEscalation = (
     runId: string,
-    { trigger, summary }: NewEscalation,
+    { trigger, summary, slice = null, reports = [] }: NewEscalation,
   ): Escalation =>
     inTransaction(this.#ctx.db, () => {
       if (this.getOpenEscalation(runId))
@@ -61,9 +70,17 @@ export class SqliteEscalationStore implements EscalationStore {
       const id = this.#ctx.newId();
       this.#ctx.db
         .prepare(
-          "INSERT INTO escalations (id, run_id, trigger, summary, created_at) VALUES (?, ?, ?, ?, ?)",
+          "INSERT INTO escalations (id, run_id, trigger, summary, slice, reports, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
-        .run(id, runId, trigger, summary, this.#ctx.now());
+        .run(
+          id,
+          runId,
+          trigger,
+          summary,
+          slice,
+          JSON.stringify(reports),
+          this.#ctx.now(),
+        );
       return this.#require(id);
     });
 
@@ -118,6 +135,8 @@ function toEscalation(row: EscalationRow): Escalation {
     choice: row.choice,
     hint: row.hint,
     openDraftPrOnAbort: fromFlag(row.open_draft_pr_on_abort),
+    slice: row.slice,
+    reports: JSON.parse(row.reports) as unknown[],
     createdAt: row.created_at,
     resolvedAt: row.resolved_at,
   };

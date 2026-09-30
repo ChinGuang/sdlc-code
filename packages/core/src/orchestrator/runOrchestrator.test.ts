@@ -25,6 +25,10 @@ import type { RunMode } from "../domain/runLifecycle.js";
 import { openDatabase } from "../persistence/database.js";
 import { SqliteDocumentStore } from "../persistence/documentStore.js";
 import { SqliteEscalationStore } from "../persistence/escalationStore.js";
+import {
+  SqliteReviewStore,
+  type ReviewStore,
+} from "../persistence/reviewStore.js";
 import { SqliteGateStore } from "../persistence/gateStore.js";
 import { SqliteRunStore } from "../persistence/runStore.js";
 import { SqliteSliceStore } from "../persistence/sliceStore.js";
@@ -110,6 +114,7 @@ function setup(options: {
   const tasks = new SqliteTaskStore(store);
   const escalations = new SqliteEscalationStore(store);
   const gates = new SqliteGateStore(store);
+  const reviewRecords: ReviewStore = new SqliteReviewStore(store);
   const gate = new DocumentDesignGate({ db, runs, documents, gates });
   const run = runs.createRun({
     projectRequest: "Build a todo app",
@@ -228,6 +233,7 @@ function setup(options: {
       gate,
       delivery,
       codeReview,
+      reviews: reviewRecords,
       onReviewProblem: (runId, problem) =>
         reviewProblems.push([runId, problem]),
       reviewRetryBudget: options.reviewRetryBudget,
@@ -291,6 +297,7 @@ function setup(options: {
     gates,
     deliveries,
     reviews,
+    reviewRecords,
     reviewProblems,
     /** Reports a Checkpoint from inside a Slice, as the real runner does. */
     sliceCheckpoint: (checkpoint: SliceCheckpoint) =>
@@ -372,6 +379,28 @@ describe("AgentRunOrchestrator: the review before the pull request (T19)", () =>
       },
     ]);
     expect(context.status()).toBe("awaitingPrGate");
+  });
+
+  // The pull request's description has only what did not block; the PR Gate
+  // shows everything the review found.
+  it("keeps every review's Findings for the person at the PR Gate", async () => {
+    const context = await approved({
+      review: {
+        linter: [finding({ ruleId: "LINT-02", source: "linter" })],
+        agent: [finding()],
+      },
+    });
+
+    await context.orchestrator.advance(context.runId);
+
+    expect(context.reviewRecords.listReviews(context.runId)).toMatchObject([
+      {
+        runId: context.runId,
+        findings: [{ ruleId: "LINT-02" }, { ruleId: "CLEAN-01" }],
+        stopReason: "answered",
+        problems: [],
+      },
+    ]);
   });
 
   it("sends a blocking Finding back to the Slice, and pushes nothing", async () => {
@@ -896,6 +925,77 @@ describe("AgentRunOrchestrator: design", () => {
   });
 });
 
+describe("AgentRunOrchestrator: a Token Budget Escalation", () => {
+  /** A Run stopped at a Token Budget Escalation, its budget spent. */
+  async function spent() {
+    const context = await approved({
+      outcomes: [
+        { status: "passed", commit: "c1", attempts: 1 },
+        escalatedWith(),
+      ],
+    });
+    await context.orchestrator.advance(context.runId);
+    const run = context.runs.getRun(context.runId)!;
+    context.runs.addTokensUsed(
+      context.runId,
+      run.tokenBudget - run.tokensUsed + 5,
+    );
+    return context;
+  }
+
+  // Going on would stop again at once: the loop a person found in T23.
+  it("refuses to go on without a higher Token Budget, and changes nothing", async () => {
+    const { orchestrator, runId, status, escalations } = await spent();
+
+    for (const resolution of [
+      { choice: "retryWithHint", hint: "Try again." },
+      { choice: "skipSlice" },
+    ] as const)
+      expect(() => orchestrator.resolveEscalation(runId, resolution)).toThrow(
+        "The Token Budget is spent: raise it to go on, or abort the Run.",
+      );
+    expect(status()).toBe("escalated");
+    expect(escalations.getOpenEscalation(runId)).not.toBeNull();
+  });
+
+  it("refuses a budget that is not more than what was spent", async () => {
+    const { orchestrator, runId, runs } = await spent();
+    const { tokensUsed } = runs.getRun(runId)!;
+
+    expect(() =>
+      orchestrator.resolveEscalation(runId, {
+        choice: "skipSlice",
+        tokenBudget: tokensUsed,
+      }),
+    ).toThrow(/is not more than the .* tokens already spent/);
+  });
+
+  it("goes on with the higher budget a person gives it", async () => {
+    const { orchestrator, runId, runs, status } = await spent();
+    const { tokensUsed } = runs.getRun(runId)!;
+
+    orchestrator.resolveEscalation(runId, {
+      choice: "retryWithHint",
+      hint: "Render the empty state first.",
+      tokenBudget: tokensUsed + 1_000_000,
+    });
+
+    expect(runs.getRun(runId)!.tokenBudget).toBe(tokensUsed + 1_000_000);
+    expect(status()).toBe("building");
+  });
+
+  it("still lets a person abort with nothing left to spend", async () => {
+    const { orchestrator, runId, status } = await spent();
+
+    orchestrator.resolveEscalation(runId, {
+      choice: "abort",
+      openDraftPrOnAbort: false,
+    });
+
+    expect(status()).not.toBe("escalated");
+  });
+});
+
 describe("AgentRunOrchestrator: Escalations", () => {
   it("stops at an Escalation when a Slice hits a limit", async () => {
     const { orchestrator, runId, status } = await approved({
@@ -915,6 +1015,23 @@ describe("AgentRunOrchestrator: Escalations", () => {
       },
     });
     expect(status()).toBe("escalated");
+  });
+
+  // A person deciding sees which Slice stopped, and what kept failing.
+  it("keeps the Slice and its Issue Reports on the Escalation", async () => {
+    const { orchestrator, runId, escalations } = await approved({
+      outcomes: [
+        { status: "passed", commit: "c1", attempts: 1 },
+        escalatedWith(),
+      ],
+    });
+
+    await orchestrator.advance(runId);
+
+    expect(escalations.getOpenEscalation(runId)).toMatchObject({
+      slice: "Todos",
+      reports: [issueReport()],
+    });
   });
 
   it("retry with hint: builds the Slice again with the hint and its history", async () => {
