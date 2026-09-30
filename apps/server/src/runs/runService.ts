@@ -4,6 +4,7 @@
  * browser tab.
  */
 import type {
+  AgentRole,
   DesignVerdict,
   DocumentKind,
   DocumentStatus,
@@ -13,6 +14,8 @@ import type {
   RunStatus,
   RuntimeEvent,
   SliceStatus,
+  StepStatus,
+  TaskStatus,
 } from "@sdlc-code/core";
 import type { Observable } from "rxjs";
 
@@ -67,6 +70,25 @@ export type RunDetail = RunSummary & {
     kind: DocumentKind;
     version: number;
     status: DocumentStatus;
+  }>;
+  /**
+   * Each agent's Task and its Steps: a Slice's backend and frontend lanes, and
+   * how much of its Retry Budget each has spent.
+   */
+  tasks: Array<{
+    id: string;
+    /** Null for a design Task, which belongs to no Slice. */
+    sliceId: string | null;
+    role: AgentRole;
+    status: TaskStatus;
+    /** Spent of its Retry Budget: counted since the last hint refilled it. */
+    retriesSpent: number;
+    steps: Array<{
+      id: string;
+      status: StepStatus;
+      startedAt: string;
+      endedAt: string | null;
+    }>;
   }>;
   waiting: Waiting;
   failure: { trigger: string; summary: string; slice: string | null } | null;

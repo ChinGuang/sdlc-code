@@ -1,31 +1,48 @@
-// Dashboard shell. T22/T23 build the screens from the Penpot file "sdlc-code dashboard".
-export function App() {
+import { useEffect, useMemo, useState } from "react";
+import { HttpRunsApi, type RunsApi } from "./api/client.js";
+import { Layout } from "./Layout.js";
+import { RunPage } from "./pages/RunPage.js";
+import { RunsPage } from "./pages/RunsPage.js";
+import { useRoute } from "./router.js";
+
+/** The dashboard, from the Penpot file "sdlc-code dashboard". */
+export function App({ api: given }: { api?: RunsApi }) {
+  const api = useMemo(() => given ?? new HttpRunsApi(), [given]);
+  const route = useRoute();
+  const [search, setSearch] = useState("");
+  const [serverUp, setServerUp] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void api.serverUp().then((up) => live && setServerUp(up));
+    return () => {
+      live = false;
+    };
+  }, [api]);
+
+  if (route.page === "run")
+    return (
+      <Layout title="Run" serverUp={serverUp} onRuns={false}>
+        <RunPage key={route.runId} api={api} runId={route.runId} />
+      </Layout>
+    );
   return (
-    <div
-      style={{
-        display: "flex",
-        minHeight: "100vh",
-        background: "#0B0F14",
-        color: "#E6EDF3",
-        fontFamily: "Inter, system-ui, sans-serif",
-      }}
+    <Layout
+      title="Runs"
+      serverUp={serverUp}
+      onRuns
+      topbar={
+        <input
+          className="search"
+          type="search"
+          aria-label="Search runs"
+          placeholder="Search runs…"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+      }
     >
-      <nav
-        style={{
-          width: 232,
-          background: "#121821",
-          padding: 20,
-          borderRight: "1px solid #263041",
-        }}
-      >
-        <strong>sdlc-code</strong>
-      </nav>
-      <main style={{ padding: 32 }}>
-        <h1>Runs</h1>
-        <p style={{ color: "#8B98A9" }}>
-          Turn a product request into a reviewed pull request.
-        </p>
-      </main>
-    </div>
+      <RunsPage api={api} search={search} />
+    </Layout>
   );
 }

@@ -10,9 +10,12 @@ import {
   SqliteEscalationStore,
   SqliteRunStore,
   SqliteSliceStore,
+  SqliteTaskStore,
   type Run,
   type RunOrchestrator,
+  type RunMemoryState,
   type RunProgress,
+  type Task,
 } from "@sdlc-code/core";
 import { firstValueFrom, take, toArray } from "rxjs";
 import { describe, expect, it } from "vitest";
@@ -25,7 +28,11 @@ import {
   type RunService,
   type StreamedEvent,
 } from "./runService.js";
-import { RuntimeRunService, type ServiceRuntime } from "./runtimeRunService.js";
+import {
+  retriesSpent,
+  RuntimeRunService,
+  type ServiceRuntime,
+} from "./runtimeRunService.js";
 
 type Step = (run: Run) => RunProgress | Promise<RunProgress>;
 
@@ -44,6 +51,7 @@ function setup(
   const store = { db };
   const runs = new SqliteRunStore(store);
   const escalations = new SqliteEscalationStore(store);
+  const tasks = new SqliteTaskStore(store);
   const log = new MemoryEventLog();
   const script = [...steps];
   const advanced: string[] = [];
@@ -87,6 +95,7 @@ function setup(
     runs,
     documents: new SqliteDocumentStore(store),
     slices: new SqliteSliceStore(store),
+    tasks,
     escalations,
     orchestrator,
     startRun: async (request) => {
@@ -127,6 +136,7 @@ function setup(
     lifecycle,
     settled: service.settled,
     runs,
+    tasks,
     escalations,
     log,
     advanced,
@@ -228,6 +238,46 @@ describe("RuntimeRunService: starting and advancing", () => {
       type: "problem",
       problem: "The Run stopped: Token Factory refused key [redacted].",
     });
+  });
+});
+
+describe("RuntimeRunService.getRun", () => {
+  // A Slice's lanes: each agent's Task, how often it was sent back, its Steps.
+  it("shows each agent's Task and its Steps, and never a Transcript", async () => {
+    const { api, settled, tasks } = setup([
+      () => ({ waitingFor: "designGate" }),
+    ]);
+    const run = await api.startRun(request);
+    await settled();
+    const task = tasks.createTask({
+      runId: run.id,
+      sliceId: null,
+      agentRole: "backendCoding",
+    });
+    const step = tasks.startStep(task.id);
+    tasks.appendStepEvent(step.id, "message", { secret: "transcript" });
+    tasks.completeStep(step.id, "- wrote the route");
+
+    const detail = api.getRun(run.id);
+
+    expect(detail.tasks).toEqual([
+      {
+        id: task.id,
+        sliceId: null,
+        role: "backendCoding",
+        status: "pending",
+        retriesSpent: 0,
+        steps: [
+          {
+            id: step.id,
+            status: "completed",
+            startedAt: expect.any(String),
+            endedAt: expect.any(String),
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(detail)).not.toContain("transcript");
   });
 });
 
@@ -439,5 +489,54 @@ describe("RuntimeRunService as the server starts and stops", () => {
     await settled();
 
     expect(api.listRuns().map((run) => run.id)).toEqual([second.id, first.id]);
+  });
+});
+
+describe("retriesSpent", () => {
+  const memory = (
+    histories: Record<string, Partial<Record<"backend" | "frontend", number>>>,
+    hinted: string[] = [],
+  ): RunMemoryState => ({
+    revisions: [],
+    histories: new Map(
+      Object.entries(histories).map(([sliceId, retryBaseline]) => [
+        sliceId,
+        { earlier: { backend: [], frontend: [], design: [] }, retryBaseline },
+      ]),
+    ),
+    hints: new Map(
+      hinted.map((sliceId) => [
+        sliceId,
+        { from: "person" as const, issues: [] },
+      ]),
+    ),
+    reviewRetries: 0,
+  });
+  const task = (
+    retries: number,
+    agentRole: Task["agentRole"] = "backendCoding",
+  ) => ({
+    sliceId: "s1",
+    agentRole,
+    retries,
+  });
+
+  it("counts every retry on a Slice's first budget", () => {
+    expect(retriesSpent(task(2), null)).toBe(2);
+    expect(retriesSpent(task(2), memory({}))).toBe(2);
+  });
+
+  // The count behind "Retry 1/3": never more than the budget a hint refilled.
+  it("counts from the baseline a hint moved up, per side", () => {
+    const refilled = memory({ s1: { backend: 3, frontend: 1 } });
+
+    expect(retriesSpent(task(4), refilled)).toBe(1);
+    expect(retriesSpent(task(1, "frontendCoding"), refilled)).toBe(0);
+  });
+
+  it("counts none for a Slice whose hint is still to be taken up", () => {
+    expect(retriesSpent(task(3), memory({ s1: { backend: 0 } }, ["s1"]))).toBe(
+      0,
+    );
   });
 });

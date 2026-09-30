@@ -48,6 +48,20 @@ describe("reportingRunStore", () => {
     ]);
   });
 
+  // A budget bar follows the Run without asking for it.
+  it("reports what the Run has spent after each model call", () => {
+    const { runs, run, events, emit } = setup();
+    const reporting = reportingRunStore(runs, emit);
+
+    reporting.addTokensUsed(run.id, 1200);
+    reporting.addTokensUsed(run.id, 300);
+
+    expect(events).toEqual([
+      { runId: run.id, type: "tokens", used: 1200, budget: 1_000_000 },
+      { runId: run.id, type: "tokens", used: 1500, budget: 1_000_000 },
+    ]);
+  });
+
   it("reports nothing for a move the lifecycle refuses", () => {
     const { runs, run, events, emit } = setup();
 

@@ -99,9 +99,10 @@ export class RunsController {
     @Query("after") after?: string,
     @Headers("last-event-id") lastEventId?: string,
   ): Observable<MessageEvent> {
-    // A browser's EventSource reconnects on its own, and says where it got to
-    // in this header rather than in the URL.
-    const resumeFrom = after ?? lastEventId;
+    // A browser's EventSource reconnects on its own to the same URL, ?after
+    // and all, and says where it really got to in this header: so the header
+    // wins, or every reconnect would replay from the first page load.
+    const resumeFrom = lastEventId ?? after;
     const from = resumeFrom === undefined ? undefined : Number(resumeFrom);
     return this.#runs
       .events(id, Number.isInteger(from) ? from : undefined)
