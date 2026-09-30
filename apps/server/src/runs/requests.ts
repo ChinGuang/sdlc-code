@@ -27,6 +27,12 @@ export const StartRunBody = z.strictObject({
     .optional(),
 });
 
+/** A screenshot's design version and place in a URL: whole numbers from 1. */
+export const ScreenshotParams = z.strictObject({
+  version: z.coerce.number().int().positive(),
+  order: z.coerce.number().int().positive(),
+});
+
 /** A document's kind in a URL: one a Run can have, or a 400 naming them. */
 export const DocumentKindParam = z.enum(DOCUMENT_KINDS);
 

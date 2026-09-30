@@ -33,6 +33,8 @@ export interface RunsApi {
   listRuns: () => Promise<RunSummary[]>;
   getRun: (runId: string) => Promise<RunDetail>;
   startRun: (request: StartRunRequest) => Promise<RunSummary>;
+  /** Where a screen as drawn is, for an <img>: the server serves the image. */
+  screenshotUrl: (runId: string, version: number, order: number) => string;
   /** A document in full; the Run's detail only lists them. */
   getDocument: (runId: string, kind: DocumentKind) => Promise<DocumentView>;
   /** Each answers with the Run as the decision left it. */
@@ -83,6 +85,9 @@ export class HttpRunsApi implements RunsApi {
 
   startRun = (request: StartRunRequest): Promise<RunSummary> =>
     this.#call("POST", "/runs", request);
+
+  screenshotUrl = (runId: string, version: number, order: number): string =>
+    `${this.#base}${runPath(runId)}/screenshots/${version}/${order}`;
 
   getDocument = (runId: string, kind: DocumentKind): Promise<DocumentView> =>
     this.#call("GET", `${runPath(runId)}/documents/${kind}`);

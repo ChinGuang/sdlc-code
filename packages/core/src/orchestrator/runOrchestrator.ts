@@ -34,6 +34,7 @@ import type {
 import type { EscalationTrigger, RunStatus } from "../domain/runLifecycle.js";
 import type { EscalationStore } from "../persistence/escalationStore.js";
 import type { ReviewStore } from "../persistence/reviewStore.js";
+import type { ScreenshotStore } from "../persistence/screenshotStore.js";
 import type { RunStore } from "../persistence/runStore.js";
 import { NotFoundError } from "../persistence/storeOptions.js";
 import type { DocumentStore } from "../persistence/documentStore.js";
@@ -119,6 +120,8 @@ export type RunOrchestratorOptions = {
   codeReview?: RunReview;
   /** Where each review is kept for the PR Gate; none is kept without it. */
   reviews?: ReviewStore;
+  /** The screens as drawn; a resumed Run gives them to its Coding Agents again. */
+  screenshots?: ScreenshotStore;
   /** Told when a review could not be trusted, e.g. an invented Rule ID. */
   onReviewProblem?: (runId: string, problem: string) => void;
   /** How often blocking Findings may send the code back. Defaults to 3. */
@@ -654,7 +657,8 @@ export class AgentRunOrchestrator implements RunOrchestrator {
         histories: saved?.histories ?? new Map(),
         hints: saved?.hints ?? new Map(),
         reviewRetries: saved?.reviewRetries ?? 0,
-        screenImages: new Map(),
+        // Not in the Checkpoint (bytes, not decisions), but kept beside it.
+        screenImages: this.#options.screenshots?.images(runId) ?? new Map(),
       };
       this.#memory.set(runId, memory);
     }

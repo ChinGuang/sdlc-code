@@ -23,17 +23,19 @@ import {
   Headers,
   HttpCode,
   Inject,
+  type MessageEvent,
   Param,
   Post,
   Query,
   Sse,
-  type MessageEvent,
+  StreamableFile,
 } from "@nestjs/common";
 import { map, type Observable } from "rxjs";
 import {
   AbortBody,
   DesignGateBody,
   DocumentKindParam,
+  ScreenshotParams,
   EscalationBody,
   PullRequestGateBody,
   StartRunBody,
@@ -68,6 +70,18 @@ export class RunsController {
   @Get(":id")
   get(@Param("id") id: string): RunDetail {
     return this.#runs.getRun(id);
+  }
+
+  /** An image a browser shows as it is: a PNG, never JSON. */
+  @Get(":id/screenshots/:version/:order")
+  screenshot(
+    @Param("id") id: string,
+    @Param("version") version: string,
+    @Param("order") order: string,
+  ): StreamableFile {
+    const wanted = parse(ScreenshotParams, { version, order });
+    const image = this.#runs.getScreenshot(id, wanted.version, wanted.order);
+    return new StreamableFile(image.bytes, { type: image.mimeType });
   }
 
   @Get(":id/documents/:kind")

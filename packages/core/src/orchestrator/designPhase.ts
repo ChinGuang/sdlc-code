@@ -12,6 +12,7 @@ import type { SystemDesignAgent } from "../agents/systemDesign/systemDesignAgent
 import type { UiDesignAgent } from "../agents/uiDesign/uiDesignAgent.js";
 import type { DocumentKind } from "../domain/documentLifecycle.js";
 import type { Run } from "../domain/entities.js";
+import type { ScreenshotStore } from "../persistence/screenshotStore.js";
 import type { DocumentStore } from "../persistence/documentStore.js";
 import type { SliceStore } from "../persistence/sliceStore.js";
 import { documentContent, storedDesign } from "./approvedDocuments.js";
@@ -53,6 +54,8 @@ export type AgentDesignPhaseOptions = {
   profile: (run: Run) => StackProfile;
   /** The Run's page in the Penpot Workspace File (runPageName). */
   pageName: (run: Run) => string;
+  /** Where the screens as drawn are kept, for people and resumed Runs. */
+  screenshots?: ScreenshotStore;
 };
 
 export class AgentDesignPhase implements DesignPhase {
@@ -150,10 +153,15 @@ export class AgentDesignPhase implements DesignPhase {
           2,
         )}\n`,
       );
-      screenImages = new Map(
-        screens.flatMap((screen) =>
-          screen.export ? [[screen.name, screen.export] as const] : [],
-        ),
+      const exported = screens.flatMap((screen) =>
+        screen.export ? [{ name: screen.name, image: screen.export }] : [],
+      );
+      screenImages = new Map(exported.map(({ name, image }) => [name, image]));
+      // Kept with the version of the design they show, beside the document.
+      this.#options.screenshots?.save(
+        run.id,
+        documents.getLatest(run.id, "penpotDesign")!.version,
+        exported,
       );
     }
 

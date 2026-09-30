@@ -134,6 +134,11 @@ export type RunDetail = RunSummary & {
   /** Every review of the Run's diff, oldest first. */
   reviews: ReviewView[];
   /**
+   * The screens as drawn, for the latest UI design; each is served at
+   * /runs/:id/screenshots/:version/:order. None for a Run from before T24e.
+   */
+  screenshots: Array<{ screen: string; version: number; order: number }>;
+  /**
    * Each agent's Task and its Steps: a Slice's backend and frontend lanes, and
    * how much of its Retry Budget each has spent.
    */
@@ -175,6 +180,12 @@ export interface RunService {
   getRun: (runId: string) => RunDetail;
   /** A document's latest version in full; the Run's detail lists it only. */
   getDocument: (runId: string, kind: DocumentKind) => DocumentView;
+  /** One screen as drawn, as an image. */
+  getScreenshot: (
+    runId: string,
+    version: number,
+    order: number,
+  ) => { bytes: Buffer; mimeType: string };
   decideDesign: (runId: string, verdicts: DesignVerdict[]) => RunDetail;
   resolveEscalation: (
     runId: string,
@@ -229,6 +240,16 @@ export class DocumentNotFoundError extends Error {
   constructor(runId: string, kind: string) {
     super(`Run ${runId} has no ${kind} document.`);
     this.name = "DocumentNotFoundError";
+  }
+}
+
+/** The Run has no such screenshot. */
+export class ScreenshotNotFoundError extends Error {
+  constructor(runId: string, version: number, order: number) {
+    super(
+      `Run ${runId} has no screenshot ${order} of design version ${version}.`,
+    );
+    this.name = "ScreenshotNotFoundError";
   }
 }
 

@@ -150,6 +150,8 @@ export type RunDetail = RunSummary & {
   documents: RunDocument[];
   /** Every review of the Run's diff, oldest first. */
   reviews: Review[];
+  /** The screens as drawn, for the latest UI design; none for an old Run. */
+  screenshots: Array<{ screen: string; version: number; order: number }>;
   tasks: RunTask[];
   waiting: Waiting;
   failure: { trigger: string; summary: string; slice: string | null } | null;

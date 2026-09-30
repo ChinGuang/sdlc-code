@@ -170,11 +170,9 @@ describe("EscalationDialog", () => {
       screen.getByRole("radio", { name: /Edit approved documents/ }),
     );
 
+    expect(screen.queryByRole("checkbox", { name: "UI design" })).toBeNull();
     expect(
-      screen.queryByRole("checkbox", { name: "Penpot design" }),
-    ).toBeNull();
-    expect(
-      screen.getByText(/edit the UI Spec to change the Penpot design/),
+      screen.getByText(/edit the UI Spec to change the UI design/),
     ).toBeTruthy();
   });
 

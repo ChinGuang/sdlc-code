@@ -3,6 +3,9 @@
  * Design Phase, with scripted design agents and a scripted Slice runner:
  * Design Gate verdicts, Slices, and each Escalation choice.
  */
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { REACT_NODE } from "@sdlc-code/stack-profiles";
 import { describe, expect, it } from "vitest";
 import type { AgentLoopResult } from "../agentLoop/agentLoop.js";
@@ -29,6 +32,10 @@ import {
   SqliteReviewStore,
   type ReviewStore,
 } from "../persistence/reviewStore.js";
+import {
+  FileScreenshotStore,
+  type ScreenshotStore,
+} from "../persistence/screenshotStore.js";
 import { SqliteGateStore } from "../persistence/gateStore.js";
 import { SqliteRunStore } from "../persistence/runStore.js";
 import { SqliteSliceStore } from "../persistence/sliceStore.js";
@@ -115,6 +122,9 @@ function setup(options: {
   const escalations = new SqliteEscalationStore(store);
   const gates = new SqliteGateStore(store);
   const reviewRecords: ReviewStore = new SqliteReviewStore(store);
+  const screenshots: ScreenshotStore = new FileScreenshotStore({
+    dataDir: mkdtempSync(join(tmpdir(), "sdlc-screens-")),
+  });
   const gate = new DocumentDesignGate({ db, runs, documents, gates });
   const run = runs.createRun({
     projectRequest: "Build a todo app",
@@ -234,6 +244,7 @@ function setup(options: {
       delivery,
       codeReview,
       reviews: reviewRecords,
+      screenshots,
       onReviewProblem: (runId, problem) =>
         reviewProblems.push([runId, problem]),
       reviewRetryBudget: options.reviewRetryBudget,
@@ -246,6 +257,7 @@ function setup(options: {
           uiDesign,
           profile: () => REACT_NODE,
           pageName: () => "#1 Todo",
+          screenshots,
         }),
       sliceRunner: async (_run, onCheckpoint) => ({
         runSlice: async (input) => {
@@ -298,6 +310,7 @@ function setup(options: {
     deliveries,
     reviews,
     reviewRecords,
+    screenshots,
     reviewProblems,
     /** Reports a Checkpoint from inside a Slice, as the real runner does. */
     sliceCheckpoint: (checkpoint: SliceCheckpoint) =>
@@ -922,6 +935,39 @@ describe("AgentRunOrchestrator: design", () => {
       number: 7,
       draft: false,
     });
+  });
+});
+
+describe("AgentRunOrchestrator: the screens as drawn (T24e)", () => {
+  it("keeps each screenshot with the version of the design it shows", async () => {
+    const { orchestrator, runId, screenshots, documents } = setup({});
+
+    await orchestrator.advance(runId);
+
+    const version = documents.getLatest(runId, "penpotDesign")!.version;
+    expect(
+      screenshots
+        .list(runId)
+        .map(({ screen, order, version: v }) => [screen, order, v]),
+    ).toEqual([
+      ["Health", 1, version],
+      ["Todo list", 2, version],
+    ]);
+    expect(screenshots.read(runId, version, 2)?.bytes.toString()).toBe(
+      "Todo list",
+    );
+  });
+
+  // A restart used to lose them: they lived only in memory.
+  it("gives a resumed Run's Coding Agents the screenshots again", async () => {
+    const context = await approved({});
+
+    await context.restart().advance(context.runId);
+
+    expect([...context.runnerCalls[0]!.screenImages.keys()]).toEqual([
+      "Health",
+      "Todo list",
+    ]);
   });
 });
 

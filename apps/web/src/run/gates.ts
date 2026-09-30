@@ -20,7 +20,8 @@ export const DOCUMENT_NAMES: Record<DocumentKind, string> = {
   slicePlan: "Slice Plan",
   apiContract: "API Contract",
   uiSpec: "UI Spec",
-  penpotDesign: "Penpot design",
+  // Judged by its screens: Penpot is only the tool that drew them.
+  penpotDesign: "UI design",
 };
 
 export function documentBadge(status: DocumentStatus): Badge {
@@ -122,7 +123,7 @@ export function tally(documents: RunDocument[], draft: Draft): string {
   ].join(" · ");
 }
 
-/** "UI Spec and Penpot design": names read as a sentence. */
+/** "UI Spec and UI design": names read as a sentence. */
 export function names(kinds: readonly DocumentKind[]): string {
   const spelled = kinds.map((kind) => DOCUMENT_NAMES[kind]);
   return spelled.length <= 1

@@ -53,6 +53,8 @@ export function fakeApi(options: {
       (async () => {
         throw new Error("not in this test");
       }),
+    screenshotUrl: (runId, version, order) =>
+      `/fake/${runId}/screenshots/${version}/${order}`,
     getDocument: async (_runId, kind) => {
       calls.documents.push(kind);
       const document = options.documents?.[kind];
@@ -147,6 +149,7 @@ export const DETAIL: RunDetail = {
   ],
   documents: [],
   reviews: [],
+  screenshots: [],
   tasks: [
     {
       id: "t1",

@@ -2,6 +2,9 @@
  * The service over real stores and a scripted Orchestrator: a request answers at
  * once, the Run advances in the background, and what it does arrives in order.
  */
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   IllegalTransitionError,
   MissingKeyError,
@@ -10,6 +13,7 @@ import {
   SqliteEscalationStore,
   SqliteRunStore,
   SqliteSliceStore,
+  FileScreenshotStore,
   SqliteReviewStore,
   SqliteTaskStore,
   type Run,
@@ -23,6 +27,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryEventLog } from "./eventLog.js";
 import {
   DocumentNotFoundError,
+  ScreenshotNotFoundError,
   RunConflictError,
   RunNotFoundError,
   RuntimeUnavailableError,
@@ -58,6 +63,9 @@ function setup(
   const documents = new SqliteDocumentStore(store);
   const slices = new SqliteSliceStore(store);
   const reviews = new SqliteReviewStore(store);
+  const screenshots = new FileScreenshotStore({
+    dataDir: mkdtempSync(join(tmpdir(), "sdlc-screens-")),
+  });
   const log = new MemoryEventLog();
   const script = [...steps];
   const advanced: string[] = [];
@@ -104,6 +112,7 @@ function setup(
     tasks,
     escalations,
     reviews,
+    screenshots,
     orchestrator,
     startRun: async (request) => {
       if (request.targetRepo)
@@ -147,6 +156,7 @@ function setup(
     documents,
     slices,
     reviews,
+    screenshots,
     escalations,
     log,
     advanced,
@@ -484,6 +494,48 @@ describe("RuntimeRunService: what a person decides on", () => {
       workingMemory: [{ role: "backendCoding", note: "Tried UTC; still 409." }],
       openDraftPrOnAbort: true,
     });
+  });
+});
+
+describe("RuntimeRunService: the screens as drawn", () => {
+  it("lists the latest design's screenshots and serves each", async () => {
+    const { api, settled, screenshots } = setup();
+    const run = await api.startRun(request);
+    await settled();
+    screenshots.save(run.id, 1, [
+      {
+        name: "Home",
+        image: { bytes: Buffer.from("old"), mimeType: "image/png" },
+      },
+    ]);
+    screenshots.save(run.id, 2, [
+      {
+        name: "Home",
+        image: { bytes: Buffer.from("new"), mimeType: "image/png" },
+      },
+      {
+        name: "Add",
+        image: { bytes: Buffer.from("add"), mimeType: "image/png" },
+      },
+    ]);
+
+    expect(api.getRun(run.id).screenshots).toEqual([
+      { screen: "Home", version: 2, order: 1 },
+      { screen: "Add", version: 2, order: 2 },
+    ]);
+    expect(api.getScreenshot(run.id, 1, 1).bytes.toString()).toBe("old");
+    expect(() => api.getScreenshot(run.id, 2, 3)).toThrow(
+      ScreenshotNotFoundError,
+    );
+  });
+
+  // Runs from before T24e kept none.
+  it("lists none for a Run that kept none", async () => {
+    const { api, settled } = setup();
+    const run = await api.startRun(request);
+    await settled();
+
+    expect(api.getRun(run.id).screenshots).toEqual([]);
   });
 });
 

@@ -13,6 +13,7 @@ import {
   RUN_LIFECYCLE,
   RUN_SERVICE,
   DocumentNotFoundError,
+  ScreenshotNotFoundError,
   RunConflictError,
   RunNotFoundError,
   RuntimeUnavailableError,
@@ -50,6 +51,7 @@ const DETAIL: RunDetail = {
   slices: [],
   documents: [],
   reviews: [],
+  screenshots: [],
   tasks: [],
   waiting: { for: "nothing" },
   failure: null,
@@ -87,6 +89,11 @@ function fakeService(overrides: Partial<RunService> = {}) {
         ownerAgent: "systemDesign",
         content: "openapi: 3.1.0",
       };
+    },
+    getScreenshot: (id, version, order) => {
+      calls.push(["getScreenshot", [id, version, order]]);
+      if (order > 1) throw new ScreenshotNotFoundError(id, version, order);
+      return { bytes: Buffer.from("\x89PNG fake"), mimeType: "image/png" };
     },
     decideDesign: recorded("decideDesign", DETAIL),
     resolveEscalation: recorded("resolveEscalation", DETAIL),
@@ -245,6 +252,35 @@ describe("GET /runs and /runs/:id", () => {
     expect(missing.status).toBe(404);
     expect(await missing.json()).toMatchObject({
       message: `Run ${RUN_ID} has no penpotDesign document.`,
+    });
+  });
+
+  // An <img src> gets an image, not JSON.
+  it("serves a screenshot as the image it is", async () => {
+    const { service, calls } = fakeService();
+    const url = await start(service);
+
+    const response = await fetch(`${url}/runs/${RUN_ID}/screenshots/2/1`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await response.arrayBuffer()).toString()).toBe(
+      "\x89PNG fake",
+    );
+    expect(calls).toContainEqual(["getScreenshot", [RUN_ID, 2, 1]]);
+  });
+
+  it("answers 400 for a screenshot that is not a number, and 404 for one not kept", async () => {
+    const { service } = fakeService();
+    const url = await start(service);
+
+    const bad = await fetch(`${url}/runs/${RUN_ID}/screenshots/two/1`);
+    const missing = await fetch(`${url}/runs/${RUN_ID}/screenshots/2/9`);
+
+    expect(bad.status).toBe(400);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({
+      message: `Run ${RUN_ID} has no screenshot 9 of design version 2.`,
     });
   });
 
