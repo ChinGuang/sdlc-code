@@ -320,8 +320,9 @@ function appFileIn(
 
 /**
  * The lines that follow the error line and say why: up to the first blank
- * line after them, without stack frames, rulers ("   |") or the
- * tool's own trailer. Null when the error stood alone.
+ * line after them or the next thing that is not about this error, without
+ * stack frames, rulers ("   |") or the tool's own trailer. Null when the
+ * error stood alone.
  */
 function causeAfter(lines: readonly string[], errorAt: number): string | null {
   const kept: string[] = [];
@@ -330,6 +331,7 @@ function causeAfter(lines: readonly string[], errorAt: number): string | null {
       if (kept.length > 0) break;
       continue;
     }
+    if (ENDS_A_CAUSE.some((pattern) => pattern.test(line))) break;
     if (NOT_A_CAUSE.some((pattern) => pattern.test(line))) continue;
     kept.push(line);
     if (kept.length === MAX_CAUSE_LINES) break;
@@ -348,7 +350,15 @@ const NOT_A_CAUSE = [
   /^(at |❯ )/,
   /^\[Context: .*\]$/,
   /^Prisma CLI Version/,
+  /^Node\.js v\d/,
+  /complete log of this run/i,
 ];
+
+/**
+ * Where what follows is no longer this error's cause: the next compiler
+ * error, or the DOM a Testing Library failure prints after its message.
+ */
+const ENDS_A_CAUSE = [/error TS\d+/, /^Ignored nodes/, /^</];
 
 function firstLine(text: string): string | null {
   return (
@@ -434,9 +444,9 @@ function report(draft: Draft): IssueReport {
         draft.step,
         draft.failingTest ?? "",
         draft.failingTest ? (draft.file ?? "") : "",
+        // Not the cause: its code frames and line numbers change with every
+        // edit, and a Loop is the same error coming back however it reads.
         normalizeError(draft.error),
-        // The same error with another cause is another failure.
-        normalizeError(draft.cause ?? ""),
       ].join("\n"),
     )
     .digest("hex")

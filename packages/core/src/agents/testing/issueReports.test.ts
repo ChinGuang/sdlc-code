@@ -295,13 +295,53 @@ describe("issueReports: the cause after the error (T24c)", () => {
     expect(framed!.cause).toBeNull();
   });
 
-  it("tells two failures with one error but different causes apart", () => {
-    const other = prisma.replace("VarChar", "Text").replace("VarChar", "Text");
+  // Found in the T24c review: a field added above line 19 moved the code
+  // frame, and the same VarChar error no longer counted as a Loop.
+  it("keeps a Loop a Loop when only the cause's line numbers moved", () => {
+    const moved = prisma.replaceAll("19", "20").replace("18 |", "19 |");
     const [first] = issueReports(failedWith(step("unit", prisma)), REACT_NODE);
-    const [second] = issueReports(failedWith(step("unit", other)), REACT_NODE);
+    const [again] = issueReports(failedWith(step("unit", moved)), REACT_NODE);
 
-    expect(first!.error).toBe(second!.error);
-    expect(first!.signature).not.toBe(second!.signature);
+    expect(again!.cause).not.toBe(first!.cause);
+    expect(again!.signature).toBe(first!.signature);
+  });
+
+  it("stops at the next compiler error and at a dumped DOM", () => {
+    const [compiler] = issueReports(
+      failedWith(
+        step(
+          "unit",
+          [
+            "server/app.ts(3,10): error TS2305: Module has no exported member 'route'.",
+            "  Did you mean 'routes'?",
+            "server/todos.ts(40,1): error TS2322: Type 'string' is not assignable.",
+          ].join("\n"),
+        ),
+      ),
+      REACT_NODE,
+    );
+    const [screen] = issueReports(
+      failedWith(
+        step("unit", "", [
+          {
+            test: "TodoList > shows the empty state",
+            file: "/app/src/TodoList.test.tsx",
+            message: [
+              "TestingLibraryElementError: Unable to find an element with the text: No todos yet",
+              "",
+              "Ignored nodes: comments, script, style",
+              "<body>",
+              "  <div />",
+              "</body>",
+            ].join("\n"),
+          },
+        ]),
+      ),
+      REACT_NODE,
+    );
+
+    expect(compiler!.cause).toBe("Did you mean 'routes'?");
+    expect(screen!.cause).toBeNull();
   });
 });
 

@@ -10,7 +10,7 @@ import { goodUiSpec } from "../agents/uiDesign/fixtures/goodUiSpec.js";
 import type { Escalation, Run } from "../domain/entities.js";
 import {
   briefFacts,
-  MAX_BRIEF_TOKENS,
+  lookTokens,
   ModelEscalationBriefer,
   WRITE_BRIEF,
   type BriefInput,
@@ -172,6 +172,48 @@ describe("briefFacts", () => {
     );
   });
 
+  it("reads every way a module exports, so none is reported lost by mistake", () => {
+    const template: TemplateFile[] = [
+      {
+        path: "server/app.ts",
+        contents: [
+          "export default app;",
+          "export type { Handler } from './types.js';",
+          "export { type Options, route as handle };",
+          "export abstract class Base {}",
+          "export const enum Mode { A }",
+        ].join("\n"),
+      },
+    ];
+
+    expect(briefFacts(input({ reports: [] }), template, template)).toEqual([]);
+    expect(
+      briefFacts(input({ reports: [] }), template, [
+        { path: "server/app.ts", contents: "export const other = 1;" },
+      ]),
+    ).toEqual([
+      "server/app.ts no longer exports Base, Mode, default, Handler, Options, handle, which the template's version did.",
+    ]);
+  });
+
+  it("puts what only code can find before the cause lines, so it is never the one cut", () => {
+    const many = Array.from({ length: 5 }, (_, index) =>
+      issueReport({
+        file: `server/route${index}.ts`,
+        cause: `cause ${index}`,
+        occurrences: 2,
+        error: `error ${index}`,
+      }),
+    );
+
+    const facts = briefFacts(input({ reports: many }), TEMPLATE, MERGED);
+
+    expect(facts[0]).toBe(
+      "server/app.ts no longer exports createApp, route, which the template's version did.",
+    );
+    expect(facts).toHaveLength(8);
+  });
+
   it("says a template code file is gone, and ignores files that are not code", () => {
     const facts = briefFacts(input(), TEMPLATE, [MERGED[1]!]);
 
@@ -270,15 +312,52 @@ describe("ModelEscalationBriefer", () => {
     expect(brief.facts.length).toBeGreaterThan(0);
   });
 
-  it("asks no model when less of the budget is left than a look takes", async () => {
+  // Found in the T24c review: 30k left was taken as enough for a look
+  // that could spend 40k, which pushed the Run past its budget.
+  it("asks no model unless the whole look fits in what is left", async () => {
     const { briefer, requests } = brieferAnswering(written(ANSWER), {
-      left: MAX_BRIEF_TOKENS - 1,
+      left: 5_000,
     });
 
     const brief = await briefer.brief(input());
 
     expect(requests).toHaveLength(0);
     expect(brief.withoutAnalysis).toMatch(/Too little/);
+  });
+
+  it("asks when the prompt and the longest answer fit, and spends no more", async () => {
+    const { briefer, requests } = brieferAnswering(written(ANSWER));
+    await briefer.brief(input());
+    const message = requests[0]!.messages[1]!.content as string;
+    const needed = lookTokens(message);
+
+    const fits = brieferAnswering(written(ANSWER), { left: needed });
+    await fits.briefer.brief(input());
+    const short = brieferAnswering(written(ANSWER), { left: needed - 1 });
+    await short.briefer.brief(input());
+
+    expect(fits.requests).toHaveLength(1);
+    expect(fits.requests[0]!.maxTokens).toBe(8000);
+    expect(short.requests).toHaveLength(0);
+  });
+
+  // The dialog offers no Slice to skip in review, so neither does the brief.
+  it("tells the look it stopped in review, and takes no skip from it", async () => {
+    const { briefer, requests } = brieferAnswering(
+      written({ ...ANSWER, choice: "skipSlice" }),
+    );
+
+    const brief = await briefer.brief(
+      input({ sliceId: null, escalation: escalation({ slice: null }) }),
+    );
+
+    const message = requests[0]!.messages[1]!.content as string;
+    expect(message).toContain("It stopped in the review");
+    const tool = requests[0]!.tools![0]!.parameters as {
+      properties: { choice: { enum: string[] } };
+    };
+    expect(tool.properties.choice.enum).not.toContain("skipSlice");
+    expect(brief.analysis).toBeNull();
   });
 
   it("keeps a hint only for retry with hint", async () => {

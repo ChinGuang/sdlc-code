@@ -21,7 +21,7 @@ import type { SliceHint, SliceHistory } from "./sliceRunner.js";
  * `satisfies` is the link to IssueReport: a field added there and not here
  * stops this file compiling, rather than being dropped from every resume.
  */
-const IssueReportSchema = z.strictObject({
+export const IssueReportSchema = z.strictObject({
   step: z.union([z.enum(TEST_STEPS), z.literal("sandbox")]),
   failingTest: z.string().nullable(),
   file: z.string().nullable(),

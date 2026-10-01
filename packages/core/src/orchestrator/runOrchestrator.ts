@@ -50,6 +50,8 @@ import {
   MissingDocumentError,
 } from "./approvedDocuments.js";
 import type { EscalationBriefer } from "./escalationBrief.js";
+import { lastWorkingMemory } from "./workingMemory.js";
+import type { ApprovedDocuments } from "../agents/coding/codingContext.js";
 import type {
   DesignGate,
   DesignVerdict,
@@ -59,6 +61,7 @@ import type {
 import { DesignPhaseError, type DesignPhase } from "./designPhase.js";
 import {
   checkpointPayload,
+  IssueReportSchema,
   memoryFromCheckpoint,
   type RunMemoryState,
 } from "./runCheckpoint.js";
@@ -750,20 +753,16 @@ export class AgentRunOrchestrator implements RunOrchestrator {
         run,
         escalation,
         sliceId: slice?.id ?? null,
-        reports: escalation.reports as IssueReport[],
-        workingMemory: slice
-          ? tasks
-              .listTasks(run.id)
-              .filter((task) => task.sliceId === slice.id)
-              .flatMap((task) => {
-                const note = tasks
-                  .listSteps(task.id)
-                  .findLast(
-                    (step) => step.workingMemory !== null,
-                  )?.workingMemory;
-                return note ? [{ role: task.agentRole, note }] : [];
-              })
-          : [],
+        // Stored as JSON: a row this version cannot read is left out.
+        reports: escalation.reports.flatMap((stored) => {
+          const report = IssueReportSchema.safeParse(stored);
+          return report.success ? [report.data] : [];
+        }),
+        workingMemory: lastWorkingMemory(
+          { slices, tasks },
+          run.id,
+          escalation.slice,
+        ),
         documents: this.#approvedDocumentsOrNull(run.id),
       });
       escalations.setBrief(escalation.id, brief);
@@ -777,7 +776,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
   }
 
   /** None before the design is approved: an Escalation can come before it. */
-  #approvedDocumentsOrNull(runId: string) {
+  #approvedDocumentsOrNull(runId: string): ApprovedDocuments | null {
     try {
       return loadApprovedDocuments(this.#options.documents, runId);
     } catch (error) {

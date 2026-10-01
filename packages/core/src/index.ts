@@ -60,6 +60,7 @@ export * from "./agents/testing/testingAgent.js";
 export * from "./orchestrator/ownerResolution.js";
 export * from "./orchestrator/ownerJudge.js";
 export * from "./orchestrator/escalationBrief.js";
+export * from "./orchestrator/workingMemory.js";
 export * from "./orchestrator/retryPolicy.js";
 export * from "./orchestrator/issueRouting.js";
 export * from "./orchestrator/sliceRunner.js";

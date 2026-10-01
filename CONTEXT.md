@@ -52,7 +52,7 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Token Budget** — The maximum model usage a Run may spend before it escalates. Every way on from an Escalation but abort spends tokens, so a Run whose budget is spent goes on only if the person raises it.
 
-**Loop** — An Issue Report matching an earlier one in the same Task (same failing test, error and cause). Escalates immediately, without spending the remaining Retry Budget.
+**Loop** — An Issue Report matching an earlier one in the same Task (same failing test and error). Escalates immediately, without spending the remaining Retry Budget.
 
 **Escalation** — Pausing a Run for a human, with a failure summary and Working Memory. The human chooses: retry with a hint, edit Approved Documents, skip the Slice, or abort. Aborting offers to open a Draft PR (on by default). In auto mode there is no human: the Run ends and always opens a Draft PR.
 

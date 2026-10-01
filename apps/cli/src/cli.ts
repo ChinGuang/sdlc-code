@@ -540,17 +540,18 @@ async function escalationShow(parsed: Parsed, io: CliIo, deps: CliDeps) {
   const budget = spent ? ` --budget ${suggestedBudget(run)}` : "";
   io.out("  Ways on:");
   const hint = brief?.analysis?.hint;
-  // The brief's hint, quoted, ready to send as it is or changed first.
-  if (hint)
-    io.out(
-      paint.muted(
-        `    sdlccode escalation retry ${id} ${JSON.stringify(hint)}${budget}`,
-      ),
-    );
-  else
-    io.out(
-      paint.muted(`    sdlccode escalation retry ${id} "<hint>"${budget}`),
-    );
+  // The hint came from a model that read the application's output, so it is
+  // never pasted inside double quotes, where a shell would run `$(…)`. Single
+  // quotes keep it literal in bash, zsh and PowerShell alike; one that holds
+  // a single quote is shown on its own for the person to quote.
+  const ready =
+    hint && !hint.includes("'") ? `'${hint.replace(/\s+/g, " ")}'` : null;
+  if (hint && !ready) io.out(`    Suggested hint: ${hint}`);
+  io.out(
+    paint.muted(
+      `    sdlccode escalation retry ${id} ${ready ?? '"<hint>"'}${budget}`,
+    ),
+  );
   io.out(
     paint.muted(
       `    sdlccode escalation edit ${id} <document> "<comments>"${budget}`,
