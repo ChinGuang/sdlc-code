@@ -45,3 +45,23 @@ export async function mermaidProblem(source: string): Promise<string | null> {
     return message.split("\n").slice(0, 3).join(" ").slice(0, 300);
   }
 }
+
+/**
+ * Flowchart edge labels as Mermaid reads them. A label with punctuation, such
+ * as `-->|PUT /events/{id}|`, breaks the parser unless it is quoted, and the
+ * model rarely remembers (seen in Run #d4f0e8: rejected four times, then out
+ * of turns). Quoting it changes nothing a person sees, so it is done here
+ * rather than asked for again. Only flowcharts: other diagrams use `|` for
+ * other things (`<|--` in a classDiagram).
+ */
+export function repairMermaid(source: string): string {
+  if (!/^\s*(flowchart|graph)\b/.test(source)) return source;
+  return source.replace(
+    /((?:--|==|-\.)[-=.]*>?)\s*\|([^|\n]*)\|/g,
+    (_whole, arrow: string, label: string) => {
+      const text = label.trim().replace(/^"(.*)"$/, "$1");
+      const plain = /^[\w ]*$/.test(text);
+      return `${arrow}|${plain ? text : `"${text.replace(/"/g, "#quot;")}"`}|`;
+    },
+  );
+}

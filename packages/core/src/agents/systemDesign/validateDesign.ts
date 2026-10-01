@@ -47,7 +47,7 @@ export async function systemDesignProblems(
         return `Diagram "${diagram.title}": send Mermaid source without \`\`\` fences.`;
       const problem = await mermaidProblem(diagram.mermaid);
       return problem
-        ? `Diagram "${diagram.title}" is not valid Mermaid: ${problem}`
+        ? `Diagram "${diagram.title}" is not valid Mermaid: ${problem} Quote any label with punctuation: A["Web app (React)"] and A -->|"PUT /events/{id}"| B.`
         : null;
     }),
   );

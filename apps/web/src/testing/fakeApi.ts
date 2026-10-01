@@ -59,6 +59,10 @@ export function fakeApi(options: {
       if (!document) throw new Error(`No ${kind} document.`);
       return document;
     },
+    retryDesign: async () => {
+      calls.decisions.push({ retryDesign: true });
+      return answer();
+    },
     decideDesign: async (_runId, verdicts) => {
       calls.decisions.push({ designGate: verdicts });
       return answer();

@@ -90,7 +90,8 @@ import type { RuntimeEvent, RuntimeEventSink } from "./runtimeEvents.js";
 
 /** Model turns a Step of each kind may take, from what live Runs needed. */
 const TURNS = {
-  systemDesign: 12,
+  // Each rejected part costs a turn; 12 ran out in Run #d4f0e8.
+  systemDesign: 20,
   uiDesign: 10,
   coding: 45,
   codeReview: 12,

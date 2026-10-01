@@ -115,6 +115,9 @@ export class RuntimeRunService implements RunService, RunLifecycle {
     };
   };
 
+  retryDesign: RunService["retryDesign"] = (runId) =>
+    this.#decide(runId, () => this.#runtime().orchestrator.retryDesign(runId));
+
   decideDesign: RunService["decideDesign"] = (runId, verdicts) =>
     this.#decide(runId, () =>
       this.#runtime().orchestrator.decideDesign(runId, verdicts),
@@ -204,7 +207,14 @@ export class RuntimeRunService implements RunService, RunLifecycle {
       try {
         do {
           this.#again.delete(runId);
-          await this.#runtime().orchestrator.advance(runId);
+          const progress = await this.#runtime().orchestrator.advance(runId);
+          // The status stays designing, so say it: a follower would wait on.
+          if ("waitingFor" in progress && progress.waitingFor === "designRetry")
+            this.#log.publish({
+              runId,
+              type: "problem",
+              problem: `The design failed: ${this.#describe(progress.problem)}`,
+            });
         } while (this.#again.has(runId));
       } catch (error) {
         // A Run that throws has not failed by the domain's rules; it stopped,
@@ -318,6 +328,10 @@ export class RuntimeRunService implements RunService, RunLifecycle {
   #waiting(run: Run): Waiting {
     const runtime = this.#runtime();
     switch (run.status) {
+      case "designing":
+        return run.mode === "gated" && run.failure?.trigger === "design"
+          ? { for: "designRetry", problem: run.failure.summary }
+          : { for: "nothing" };
       case "awaitingDesignGate":
         return {
           for: "designGate",

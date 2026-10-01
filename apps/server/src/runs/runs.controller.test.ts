@@ -89,6 +89,7 @@ function fakeService(overrides: Partial<RunService> = {}) {
       };
     },
     decideDesign: recorded("decideDesign", DETAIL),
+    retryDesign: recorded("retryDesign", DETAIL),
     resolveEscalation: recorded("resolveEscalation", DETAIL),
     decidePullRequest: recorded("decidePullRequest", DETAIL),
     abortRun: recorded("abortRun", DETAIL),
@@ -368,6 +369,16 @@ describe("the Gates and the Escalation", () => {
         [RUN_ID, { choice: "skipSlice", tokenBudget: 3_000_000 }],
       ],
     ]);
+  });
+
+  it("designs a Run again when asked", async () => {
+    const { service, calls } = fakeService();
+    const url = await start(service);
+
+    const response = await post(`${url}/runs/${RUN_ID}/retry-design`, {});
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([["retryDesign", [RUN_ID]]]);
   });
 
   it("answers 409 when the Run is not where the decision needs it", async () => {

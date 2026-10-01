@@ -150,7 +150,7 @@ export function RunPage({
       ) : (
         <>
           <PhaseStepper run={detail} />
-          <Waiting run={detail} />
+          <Waiting run={detail} api={api} onDecided={accept} />
           <div className="overview">
             <div className="column">
               <SlicePlan run={detail} />
@@ -209,8 +209,25 @@ function escalationKey(run: RunDetail): string | null {
 }
 
 /** What a person is being asked, with the way to answer it, or why the Run stopped. */
-function Waiting({ run }: { run: RunDetail }) {
+function Waiting({
+  run,
+  api,
+  onDecided,
+}: {
+  run: RunDetail;
+  api: RunsApi;
+  onDecided: (detail: RunDetail) => void;
+}) {
   const { waiting, failure } = run;
+  if (waiting.for === "designRetry")
+    return (
+      <DesignFailed
+        run={run}
+        problem={waiting.problem}
+        api={api}
+        onDecided={onDecided}
+      />
+    );
   if (waiting.for === "designGate")
     return (
       <section className="card waiting" aria-label="Waiting">
@@ -245,4 +262,58 @@ function Waiting({ run }: { run: RunDetail }) {
       </section>
     );
   return null;
+}
+
+/**
+ * A gated Run whose design failed waits in designing until a person asks for
+ * another try (T24f): said here, with the button that asks, rather than a
+ * "Designing" that never moves.
+ */
+function DesignFailed({
+  run,
+  problem,
+  api,
+  onDecided,
+}: {
+  run: RunDetail;
+  problem: string;
+  api: RunsApi;
+  onDecided: (detail: RunDetail) => void;
+}) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const retry = async () => {
+    setSending(true);
+    setError(null);
+    try {
+      onDecided(await api.retryDesign(run.id));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <section className="card issue" aria-label="Design failed">
+      <strong className="text-red">The design failed.</strong>{" "}
+      <span className="muted">{problem}</span>
+      <p className="small faint">
+        Nothing runs until you try again; it designs from the start, with any
+        changes you asked for.
+      </p>
+      <button
+        type="button"
+        className="button primary"
+        disabled={sending}
+        onClick={retry}
+      >
+        {sending ? "Starting…" : "Retry design"}
+      </button>
+      {error && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
+    </section>
+  );
 }

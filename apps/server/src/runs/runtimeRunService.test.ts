@@ -18,7 +18,7 @@ import {
   type RunProgress,
   type Task,
 } from "@sdlc-code/core";
-import { firstValueFrom, take, toArray } from "rxjs";
+import { filter, firstValueFrom, take, toArray } from "rxjs";
 import { describe, expect, it } from "vitest";
 import { MemoryEventLog } from "./eventLog.js";
 import {
@@ -82,6 +82,12 @@ function setup(
         status: runs.getRun(runId)!.status,
       });
       return progress;
+    },
+    retryDesign: (runId) => {
+      if (runs.getRun(runId)?.failure?.trigger !== "design")
+        throw new Error(`Run ${runId} has no failed design to try again.`);
+      decisions.push(`retryDesign:${runId}`);
+      runs.clearFailure(runId);
     },
     decideDesign: (runId) => {
       decisions.push(`design:${runId}`);
@@ -502,6 +508,59 @@ describe("issueSummary", () => {
     expect(issueSummary({ suspectedOwner: "someoneElse" }).suspectedOwner).toBe(
       null,
     );
+  });
+});
+
+describe("RuntimeRunService: a failed design", () => {
+  // It stays designing, so without a word a follower would wait for ever.
+  it("says the design failed, waits for a person, and designs again when asked", async () => {
+    const { api, settled, runs, log, decisions, advanced } = setup([
+      (run) => {
+        runs.recordFailure(run.id, {
+          trigger: "design",
+          summary: "The System Design Agent produced no valid design.",
+          slice: null,
+          reports: [],
+        });
+        return {
+          waitingFor: "designRetry",
+          problem: "The System Design Agent produced no valid design.",
+        };
+      },
+      () => ({ waitingFor: "designGate" }),
+    ]);
+    const run = await api.startRun({ ...request, mode: "gated" });
+    await settled();
+
+    expect(api.getRun(run.id).waiting).toEqual({
+      for: "designRetry",
+      problem: "The System Design Agent produced no valid design.",
+    });
+    const problem = await firstValueFrom(
+      log.follow(run.id, 0).pipe(
+        filter((event) => event.type === "problem"),
+        take(1),
+      ),
+    );
+    expect(problem).toMatchObject({
+      problem:
+        "The design failed: The System Design Agent produced no valid design.",
+    });
+
+    api.retryDesign(run.id);
+    await settled();
+
+    expect(decisions).toEqual([`retryDesign:${run.id}`]);
+    expect(advanced).toHaveLength(2);
+    expect(api.getRun(run.id).waiting).toEqual({ for: "nothing" });
+  });
+
+  it("refuses to retry a design that did not fail", async () => {
+    const { api, settled } = setup([() => ({ waitingFor: "designGate" })]);
+    const run = await api.startRun(request);
+    await settled();
+
+    expect(() => api.retryDesign(run.id)).toThrow(RunConflictError);
   });
 });
 

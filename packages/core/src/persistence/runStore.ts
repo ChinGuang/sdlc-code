@@ -42,6 +42,8 @@ export interface RunStore {
   setPullRequest: (id: string, pullRequest: RunPullRequest) => Run;
   /** Records why the Run failed; it is not a Checkpoint, nothing resumes from it. */
   recordFailure: (id: string, failure: RunFailure) => Run;
+  /** Forgets why it stopped: a person asked for another try. */
+  clearFailure: (id: string) => Run;
   saveCheckpoint: (runId: string, payload: unknown) => Checkpoint;
   latestCheckpoint: (runId: string) => Checkpoint | null;
 }
@@ -177,6 +179,15 @@ export class SqliteRunStore implements RunStore {
       this.#ctx.db
         .prepare("UPDATE runs SET failure = ?, updated_at = ? WHERE id = ?")
         .run(JSON.stringify(failure), this.#ctx.now(), id);
+      return this.#require(id);
+    });
+
+  clearFailure = (id: string): Run =>
+    inTransaction(this.#ctx.db, () => {
+      this.#require(id);
+      this.#ctx.db
+        .prepare("UPDATE runs SET failure = NULL, updated_at = ? WHERE id = ?")
+        .run(this.#ctx.now(), id);
       return this.#require(id);
     });
 

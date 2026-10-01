@@ -67,6 +67,8 @@ import type { GateStore } from "../persistence/gateStore.js";
 /** Where a Run stopped, and why. */
 export type RunProgress =
   | { waitingFor: "designGate" }
+  /** No valid design came out of a gated Run: a person asks for another try. */
+  | { waitingFor: "designRetry"; problem: string }
   | { waitingFor: "escalation"; escalation: Escalation }
   | { waitingFor: "prGate"; pullRequest: RunPullRequest | null }
   | { finished: Extract<RunStatus, "done" | "failed" | "aborted"> };
@@ -94,6 +96,8 @@ export type EscalationResolution =
 export interface RunOrchestrator {
   /** Runs until a person must decide or the Run leaves building. */
   advance: (runId: string) => Promise<RunProgress>;
+  /** Clears a gated Run's failed design so advance designs again. */
+  retryDesign: (runId: string) => void;
   /** The human's Verdicts at the Design Gate; then call advance. */
   decideDesign: (runId: string, verdicts: DesignVerdict[]) => GateDecision;
   /** The human's choice at an Escalation; then call advance. */
@@ -168,6 +172,10 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       const run = this.#run(runId);
       switch (run.status) {
         case "designing":
+          // Tried again only when a person asks: not by itself, and not on
+          // a restart, which would spend tokens no one asked it to.
+          if (run.mode === "gated" && run.failure?.trigger === "design")
+            return { waitingFor: "designRetry", problem: run.failure.summary };
           await this.#design(run);
           continue;
         case "building":
@@ -200,6 +208,13 @@ export class AgentRunOrchestrator implements RunOrchestrator {
           return { finished: run.status };
       }
     }
+  };
+
+  retryDesign = (runId: string): void => {
+    const run = this.#run(runId);
+    if (run.status !== "designing" || run.failure?.trigger !== "design")
+      throw new Error(`Run ${runId} has no failed design to try again.`);
+    this.#options.runs.clearFailure(runId);
   };
 
   decideDesign = (runId: string, verdicts: DesignVerdict[]): GateDecision => {
@@ -470,8 +485,16 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     } catch (error) {
       if (!(error instanceof DesignPhaseError)) throw error;
       // With a person, the Run waits in designing, its revisions kept, and
-      // advance tries again; with no one to ask, the Run fails.
-      if (run.mode === "gated") throw error;
+      // says why (retryDesign tries again); with no one to ask, it fails.
+      if (run.mode === "gated") {
+        this.#options.runs.recordFailure(run.id, {
+          trigger: "design",
+          summary: error.message,
+          slice: null,
+          reports: [],
+        });
+        return;
+      }
       this.#options.runs.applyEvent(run.id, { type: "designFailed" });
       this.#options.runs.recordFailure(run.id, {
         trigger: "design",

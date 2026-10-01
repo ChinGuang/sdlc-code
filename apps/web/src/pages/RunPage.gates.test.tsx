@@ -163,3 +163,36 @@ describe("RunPage: an Escalation", () => {
     ]);
   });
 });
+
+describe("RunPage: a design that failed", () => {
+  const FAILED: RunDetail = {
+    ...DETAIL,
+    status: "designing",
+    slices: [],
+    tasks: [],
+    advancing: false,
+    waiting: {
+      for: "designRetry",
+      problem: "The System Design Agent produced no valid design.",
+    },
+  };
+
+  // Found in Run #d4f0e8: "Designing", for ever, with nothing to press.
+  it("says so, and designs again when asked", async () => {
+    const fake = await open(FAILED);
+    fake.setDetail({ ...FAILED, advancing: true, waiting: { for: "nothing" } });
+
+    const card = screen.getByRole("region", { name: "Design failed" });
+    expect(card).toHaveTextContent(
+      "The design failed. The System Design Agent produced no valid design.",
+    );
+    fireEvent.click(within(card).getByRole("button", { name: "Retry design" }));
+
+    await vi.waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "Design failed" }),
+      ).toBeNull(),
+    );
+    expect(fake.calls.decisions).toEqual([{ retryDesign: true }]);
+  });
+});

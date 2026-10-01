@@ -68,7 +68,9 @@ export type Waiting =
       workingMemory: Array<{ role: AgentRole; note: string }>;
       openDraftPrOnAbort: boolean;
     }
-  | { for: "prGate"; pullRequest: PullRequest | null };
+  | { for: "prGate"; pullRequest: PullRequest | null }
+  /** No valid design came out of a gated Run: a person asks for another try. */
+  | { for: "designRetry"; problem: string };
 
 export type Finding = {
   ruleId: string;
@@ -178,6 +180,8 @@ export interface ServerApi {
   getRun: (runId: string) => Promise<RunDetail>;
   getDocument: (runId: string, kind: DocumentKind) => Promise<DocumentView>;
   startRun: (request: StartRunRequest) => Promise<RunSummary>;
+  /** Designs a gated Run again after its design failed. */
+  retryDesign: (runId: string) => Promise<RunDetail>;
   decideDesign: (
     runId: string,
     verdicts: DesignVerdict[],
@@ -228,6 +232,9 @@ export class HttpServerApi implements ServerApi {
 
   startRun = (request: StartRunRequest): Promise<RunSummary> =>
     this.#call("POST", "/runs", request);
+
+  retryDesign = (runId: string): Promise<RunDetail> =>
+    this.#call("POST", `${runPath(runId)}/retry-design`, {});
 
   decideDesign = (
     runId: string,

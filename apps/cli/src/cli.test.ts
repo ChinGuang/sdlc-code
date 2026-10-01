@@ -499,6 +499,49 @@ describe("sdlccode: following a Run to its end", () => {
   });
 });
 
+describe("sdlccode: a design that failed", () => {
+  const FAILED: RunDetail = {
+    ...DETAIL,
+    status: "designing",
+    slices: [],
+    tasks: [],
+    advancing: false,
+    waiting: {
+      for: "designRetry",
+      problem: "The System Design Agent produced no valid design.",
+    },
+  };
+
+  it("says the design failed and how to try again, and does not wait on it", async () => {
+    const { run, out, requests } = await cli(FAILED);
+
+    expect(await run("status", "27f388", "--follow")).toBe(0);
+
+    const printed = out.join("\n");
+    expect(printed).toMatch(
+      /■ The design failed: The System Design Agent produced no valid design\./,
+    );
+    expect(printed).toMatch(/sdlccode retry-design 27f388/);
+    expect(printed).not.toMatch(/not moving|stopped sending/);
+    expect(requests.some((request) => request.path.includes("/events"))).toBe(
+      false,
+    );
+  });
+
+  it("designs again when asked", async () => {
+    const { run, out, posted } = await cli(FAILED, (request) =>
+      request.path === `/runs/${ID}/retry-design`
+        ? { json: { ...FAILED, advancing: false, waiting: { for: "nothing" } } }
+        : undefined,
+    );
+
+    expect(await run("retry-design", "27f388")).toBe(0);
+
+    expect(posted()).toEqual([[`/runs/${ID}/retry-design`, {}]]);
+    expect(out[0]).toMatch(/✓ Designing #27f388 again\./);
+  });
+});
+
 describe("sdlccode status", () => {
   it("shows each Slice, the current one's lanes, and the spend", async () => {
     const { run, out } = await cli(DETAIL);

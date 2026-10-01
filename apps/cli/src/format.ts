@@ -179,6 +179,11 @@ export function waitingLines(run: RunDetail, paint: Paint): string[] {
         paint.red(`■ Escalated: ${waiting.summary}`),
         paint.muted(`  sdlccode escalation show ${id}`),
       ];
+    case "designRetry":
+      return [
+        paint.red(`■ The design failed: ${waiting.problem}`),
+        paint.muted(`  sdlccode retry-design ${id}`),
+      ];
     case "nothing":
       if (run.failure) return [paint.red(`■ Stopped: ${run.failure.summary}`)];
       if (run.pullRequest)

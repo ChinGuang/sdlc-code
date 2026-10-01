@@ -111,7 +111,9 @@ export type Waiting =
       /** The abort dialog's checkbox, ticked unless a person unticks it. */
       openDraftPrOnAbort: boolean;
     }
-  | { for: "prGate"; pullRequest: RunSummary["pullRequest"] };
+  | { for: "prGate"; pullRequest: RunSummary["pullRequest"] }
+  /** No valid design came out of a gated Run: a person asks for another try. */
+  | { for: "designRetry"; problem: string };
 
 /** A Run as its own page shows it. */
 export type RunDetail = RunSummary & {
@@ -176,6 +178,8 @@ export interface RunService {
   /** A document's latest version in full; the Run's detail lists it only. */
   getDocument: (runId: string, kind: DocumentKind) => DocumentView;
   decideDesign: (runId: string, verdicts: DesignVerdict[]) => RunDetail;
+  /** Designs a gated Run again after its design failed. */
+  retryDesign: (runId: string) => RunDetail;
   resolveEscalation: (
     runId: string,
     resolution: EscalationResolution,

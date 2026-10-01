@@ -70,7 +70,9 @@ export type Waiting =
       workingMemory: Array<{ role: AgentRole; note: string }>;
       openDraftPrOnAbort: boolean;
     }
-  | { for: "prGate"; pullRequest: PullRequest | null };
+  | { for: "prGate"; pullRequest: PullRequest | null }
+  /** No valid design came out of a gated Run: a person asks for another try. */
+  | { for: "designRetry"; problem: string };
 
 /** An Issue Report (T16) as a person reads it; the evidence stays with the agents. */
 export type IssueSummary = {

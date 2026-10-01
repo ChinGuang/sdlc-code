@@ -22,6 +22,7 @@ import {
   slicePlanProblems,
   systemDesignProblems,
 } from "./validateDesign.js";
+import { repairMermaid } from "./mermaid.js";
 
 export type SystemDesignInput = {
   projectRequest: string;
@@ -119,7 +120,15 @@ function designTools(
       name: DESIGN_TOOLS.systemDesign,
       description: "Submit the System Design: overview and Mermaid diagrams.",
       input: SystemDesignPart,
-      run: async (systemDesign) => {
+      run: async (submitted) => {
+        // What the model gets wrong every time is put right, not sent back.
+        const systemDesign = {
+          ...submitted,
+          diagrams: submitted.diagrams.map((diagram) => ({
+            ...diagram,
+            mermaid: repairMermaid(diagram.mermaid),
+          })),
+        };
         const problems = await systemDesignProblems(systemDesign);
         save("systemDesign", systemDesign, problems);
         return verdict("System Design", problems, "System Design saved.");

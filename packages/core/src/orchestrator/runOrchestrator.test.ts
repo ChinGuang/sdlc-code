@@ -1392,8 +1392,10 @@ describe("AgentRunOrchestrator: a design agent fails", () => {
     });
   });
 
-  it("waits in designing with a person, and tries again with the same revisions", async () => {
-    const { orchestrator, runId, status, designCalls } = setup({
+  // Found in Run #d4f0e8: it waited in designing with nothing said and
+  // nothing to press, and only a restart tried again.
+  it("waits in designing with a person, says why, and tries again only when asked", async () => {
+    const { orchestrator, runId, status, designCalls, runs } = setup({
       failDesign: [2],
     });
     await orchestrator.advance(runId);
@@ -1406,14 +1408,36 @@ describe("AgentRunOrchestrator: a design agent fails", () => {
       },
     ]);
 
-    await expect(orchestrator.advance(runId)).rejects.toThrow(
-      /no valid design/,
-    );
-    expect(status()).toBe("designing");
+    const failed = await orchestrator.advance(runId);
 
+    expect(failed).toMatchObject({
+      waitingFor: "designRetry",
+      problem: expect.stringMatching(/no valid design/),
+    });
+    expect(status()).toBe("designing");
+    expect(runs.getRun(runId)!.failure).toMatchObject({ trigger: "design" });
+
+    // Not by itself, and not on a restart: that would spend unasked tokens.
+    const calls = designCalls.length;
+    await expect(orchestrator.advance(runId)).resolves.toMatchObject({
+      waitingFor: "designRetry",
+    });
+    expect(designCalls).toHaveLength(calls);
+
+    orchestrator.retryDesign(runId);
     await expect(orchestrator.advance(runId)).resolves.toEqual({
       waitingFor: "designGate",
     });
+    expect(runs.getRun(runId)!.failure).toBeNull();
     expect(designCalls.at(-1)!.revision?.comments).toEqual(["Add paging."]);
+  });
+
+  it("refuses to retry a design that did not fail", async () => {
+    const { orchestrator, runId } = setup({});
+    await orchestrator.advance(runId);
+
+    expect(() => orchestrator.retryDesign(runId)).toThrow(
+      /has no failed design to try again/,
+    );
   });
 });

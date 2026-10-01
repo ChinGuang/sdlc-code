@@ -36,6 +36,8 @@ export interface RunsApi {
   /** A document in full; the Run's detail only lists them. */
   getDocument: (runId: string, kind: DocumentKind) => Promise<DocumentView>;
   /** Each answers with the Run as the decision left it. */
+  /** Designs a gated Run again after its design failed. */
+  retryDesign: (runId: string) => Promise<RunDetail>;
   decideDesign: (
     runId: string,
     verdicts: DesignVerdict[],
@@ -86,6 +88,9 @@ export class HttpRunsApi implements RunsApi {
 
   getDocument = (runId: string, kind: DocumentKind): Promise<DocumentView> =>
     this.#call("GET", `${runPath(runId)}/documents/${kind}`);
+
+  retryDesign = (runId: string): Promise<RunDetail> =>
+    this.#call("POST", `${runPath(runId)}/retry-design`, {});
 
   decideDesign = (
     runId: string,
