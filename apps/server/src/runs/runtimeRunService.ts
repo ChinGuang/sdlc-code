@@ -115,6 +115,9 @@ export class RuntimeRunService implements RunService, RunLifecycle {
     };
   };
 
+  retryDesign: RunService["retryDesign"] = (runId) =>
+    this.#decide(runId, () => this.#runtime().orchestrator.retryDesign(runId));
+
   decideDesign: RunService["decideDesign"] = (runId, verdicts) =>
     this.#decide(runId, () =>
       this.#runtime().orchestrator.decideDesign(runId, verdicts),
@@ -131,14 +134,17 @@ export class RuntimeRunService implements RunService, RunLifecycle {
     );
 
   abortRun = (runId: string, openDraftPrOnAbort: boolean): RunDetail => {
-    if (this.#waiting(this.#run(runId)).for !== "escalation")
-      throw new RunConflictError(
-        `Run ${runId} is not at an Escalation, and a Run is aborted from one.`,
-      );
-    return this.resolveEscalation(runId, {
-      choice: "abort",
-      openDraftPrOnAbort,
-    });
+    this.#run(runId);
+    try {
+      this.#runtime().orchestrator.abort(runId, { openDraftPrOnAbort });
+    } catch (error) {
+      if (isRefusal(error)) throw new RunConflictError(error.message);
+      throw error;
+    }
+    // A Run under way stops at its next model turn and settles in the loop
+    // already advancing it; one that was waiting settles now.
+    if (!this.#advancing.has(runId)) this.#advance(runId);
+    return this.#detail(this.#run(runId));
   };
 
   events = (runId: string, after?: number): Observable<StreamedEvent> => {
@@ -153,14 +159,30 @@ export class RuntimeRunService implements RunService, RunLifecycle {
     for (const run of runtime.runs.listUnfinishedRuns()) {
       try {
         await runtime.resume(run.id);
-        this.#advance(run.id);
+        // It waits for a person, and said so when it failed: advancing it
+        // would only say it again.
+        if (this.#waiting(run).for !== "designRetry") this.#advance(run.id);
         resumed.push(run.id);
       } catch (error) {
         failed.push({ runId: run.id, problem: this.#describe(error) });
       }
     }
+    // Not resumed, settled: a Run aborted while a Step ran, by a server that
+    // stopped before the Step ended, still owes its Draft PR (T24g).
+    for (const run of runtime.runs.listRuns())
+      if (run.status === "aborted" && this.#hasRunningStep(run.id))
+        this.#advance(run.id);
     return { resumed, failed };
   };
+
+  #hasRunningStep(runId: string): boolean {
+    const { tasks } = this.#runtime();
+    return tasks
+      .listTasks(runId)
+      .some((task) =>
+        tasks.listSteps(task.id).some((step) => step.status === "running"),
+      );
+  }
 
   /**
    * Closes what the runtime opened. It does not wait for Runs being advanced:
@@ -204,7 +226,14 @@ export class RuntimeRunService implements RunService, RunLifecycle {
       try {
         do {
           this.#again.delete(runId);
-          await this.#runtime().orchestrator.advance(runId);
+          const progress = await this.#runtime().orchestrator.advance(runId);
+          // The status stays designing, so say it: a follower would wait on.
+          if ("waitingFor" in progress && progress.waitingFor === "designRetry")
+            this.#log.publish({
+              runId,
+              type: "problem",
+              problem: `The design failed: ${this.#describe(progress.problem)}`,
+            });
         } while (this.#again.has(runId));
       } catch (error) {
         // A Run that throws has not failed by the domain's rules; it stopped,
@@ -318,6 +347,10 @@ export class RuntimeRunService implements RunService, RunLifecycle {
   #waiting(run: Run): Waiting {
     const runtime = this.#runtime();
     switch (run.status) {
+      case "designing":
+        return run.mode === "gated" && run.failure?.trigger === "design"
+          ? { for: "designRetry", problem: run.failure.summary }
+          : { for: "nothing" };
       case "awaitingDesignGate":
         return {
           for: "designGate",
@@ -372,7 +405,26 @@ function summary(run: Run): RunSummary {
     pullRequest: run.pullRequest,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
+    waitingFor: waitingFor(run),
   };
+}
+
+/** What a Run waits for a person to do, from the Run alone: for the list. */
+function waitingFor(run: Run): Waiting["for"] {
+  switch (run.status) {
+    case "designing":
+      return run.mode === "gated" && run.failure?.trigger === "design"
+        ? "designRetry"
+        : "nothing";
+    case "awaitingDesignGate":
+      return "designGate";
+    case "escalated":
+      return "escalation";
+    case "awaitingPrGate":
+      return "prGate";
+    default:
+      return "nothing";
+  }
 }
 
 const SIDE = { backendCoding: "backend", frontendCoding: "frontend" } as const;

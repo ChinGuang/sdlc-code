@@ -107,6 +107,8 @@ const CHANGES_DETAIL = new Set<RunEvent["type"]>([
   "checkpoint",
   "testRun",
   "delivery",
+  // A design that failed says so only in a problem; its status stays.
+  "problem",
 ]);
 
 export type UseRunOptions = {

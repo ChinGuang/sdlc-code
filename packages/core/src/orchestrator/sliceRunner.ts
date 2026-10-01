@@ -9,7 +9,11 @@
  */
 import type { ExportedImage } from "@sdlc-code/clients";
 import type { CodingSide, StackProfile } from "@sdlc-code/stack-profiles";
-import type { StopReason, TokenBudget } from "../agentLoop/agentLoop.js";
+import {
+  RunStoppedError,
+  type StopReason,
+  type TokenBudget,
+} from "../agentLoop/agentLoop.js";
 import type { CodingAgent } from "../agents/coding/codingAgent.js";
 import {
   codingSides,
@@ -136,6 +140,11 @@ export type SliceRunnerOptions = {
   codingAgent: (side: CodingSide, stepId: string) => CodingAgent;
   retryBudget?: number;
   checkpoint?: (checkpoint: SliceCheckpoint) => void;
+  /**
+   * Whether a person stopped the Run (T24g): asked before a merge, a Test
+   * Run and a commit, so nothing new starts after an abort.
+   */
+  stopped?: () => boolean;
 };
 
 /** How one side's Step ended. */
@@ -154,6 +163,10 @@ export class OrchestratedSliceRunner implements SliceRunner {
 
   constructor(options: SliceRunnerOptions) {
     this.#options = options;
+  }
+
+  #stopIfAborted(): void {
+    if (this.#options.stopped?.()) throw new RunStoppedError();
   }
 
   runSlice = async (input: SliceRunInput): Promise<SliceOutcome> => {
@@ -268,6 +281,7 @@ export class OrchestratedSliceRunner implements SliceRunner {
           history,
         );
 
+      this.#stopIfAborted();
       const merged = await workspaces.mergeSlice(input.slice.id, opened);
       if (merged.status === "conflict")
         return this.#escalate(
@@ -284,12 +298,15 @@ export class OrchestratedSliceRunner implements SliceRunner {
         commit: merged.commit,
       });
 
+      this.#stopIfAborted();
       this.#move(input, "testing");
       const tested = await testing.testSlice({
         profile: input.profile,
         files: await workspaces.readFiles(merged.commit),
       });
       if (tested.testRun.status === "passed") {
+        // A Slice that passed after the abort is not committed to its Run.
+        this.#stopIfAborted();
         const commit = await workspaces.commitSlice(
           merged,
           // Checked just above; the union does not narrow on its own.

@@ -88,7 +88,10 @@ export function statusText(status: RunDetail["status"], paint: Paint): string {
 
 /** One line per Run: `27f388  escalated  1.3M / 2.0M  A calendar app…`. */
 export function runLine(run: RunSummary, paint: Paint): string {
-  const [label, tone] = STATUS[run.status] ?? [run.status, "muted"];
+  const [label, tone]: [string, keyof Paint] =
+    run.waitingFor === "designRetry"
+      ? ["design failed", "amber"]
+      : (STATUS[run.status] ?? [run.status, "muted"]);
   return [
     paint.bold(shortId(run.id)),
     paint[tone](label.padEnd(20)),
@@ -178,6 +181,11 @@ export function waitingLines(run: RunDetail, paint: Paint): string[] {
       return [
         paint.red(`■ Escalated: ${waiting.summary}`),
         paint.muted(`  sdlccode escalation show ${id}`),
+      ];
+    case "designRetry":
+      return [
+        paint.red(`■ The design failed: ${waiting.problem}`),
+        paint.muted(`  sdlccode retry-design ${id}`),
       ];
     case "nothing":
       if (run.failure) return [paint.red(`■ Stopped: ${run.failure.summary}`)];

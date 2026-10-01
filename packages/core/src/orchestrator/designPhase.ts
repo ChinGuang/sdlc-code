@@ -76,6 +76,8 @@ export class AgentDesignPhase implements DesignPhase {
     const needs = (kinds: readonly DocumentKind[]) =>
       first ||
       revisions.some((revision) => kinds.includes(revision.documentKind)) ||
+      // Never written: a first design whose UI Design failed (T24f's retry).
+      kinds.some((kind) => documents.getLatest(run.id, kind) === null) ||
       kinds.some((kind) => {
         const status = documents.getLatest(run.id, kind)?.status;
         // Drafting: sent back after approval, and not rewritten yet.

@@ -23,7 +23,11 @@ export type TargetRepo = {
 
 export type RunPullRequest = { number: number; url: string; draft: boolean };
 
-/** Why a Run failed with no one to ask (auto mode): its Draft PR says so (T20). */
+/**
+ * Why a Run failed with no one to ask (auto mode): its Draft PR says so (T20).
+ * Also why a gated Run's design failed, while it waits for a person to ask
+ * for another try (T24f).
+ */
 export type RunFailure = {
   /** An Escalation trigger, or "design" when no valid design came out. */
   trigger: EscalationTrigger | "design";
@@ -45,6 +49,11 @@ export type Run = {
   tokensUsed: number;
   pullRequest: RunPullRequest | null;
   failure: RunFailure | null;
+  /**
+   * Whether a person who aborted it outside an Escalation asked for a Draft
+   * PR of what passed; null when no one did (T24g).
+   */
+  openDraftPrOnAbort: boolean | null;
   createdAt: string;
   updatedAt: string;
 };

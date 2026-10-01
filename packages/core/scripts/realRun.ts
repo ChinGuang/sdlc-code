@@ -310,6 +310,13 @@ try {
       await resolveEscalation(progress.escalation.summary);
       continue;
     }
+    if (progress.waitingFor === "designRetry") {
+      console.log(`\nThe design failed: ${progress.problem}`);
+      const again = await ask.ask("Design again? [y/N] ");
+      if (!/^y/i.test(again.trim())) break;
+      orchestrator.retryDesign(run.id);
+      continue;
+    }
     await decidePullRequest(progress.pullRequest);
   }
   const commits = slices

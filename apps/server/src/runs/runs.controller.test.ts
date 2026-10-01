@@ -43,6 +43,7 @@ const SUMMARY: RunSummary = {
   pullRequest: null,
   createdAt: "2026-09-29T00:00:00.000Z",
   updatedAt: "2026-09-29T00:00:00.000Z",
+  waitingFor: "nothing",
 };
 
 const DETAIL: RunDetail = {
@@ -89,6 +90,7 @@ function fakeService(overrides: Partial<RunService> = {}) {
       };
     },
     decideDesign: recorded("decideDesign", DETAIL),
+    retryDesign: recorded("retryDesign", DETAIL),
     resolveEscalation: recorded("resolveEscalation", DETAIL),
     decidePullRequest: recorded("decidePullRequest", DETAIL),
     abortRun: recorded("abortRun", DETAIL),
@@ -370,6 +372,16 @@ describe("the Gates and the Escalation", () => {
     ]);
   });
 
+  it("designs a Run again when asked", async () => {
+    const { service, calls } = fakeService();
+    const url = await start(service);
+
+    const response = await post(`${url}/runs/${RUN_ID}/retry-design`, {});
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([["retryDesign", [RUN_ID]]]);
+  });
+
   it("answers 409 when the Run is not where the decision needs it", async () => {
     const { service } = fakeService({
       decidePullRequest: () => {
@@ -403,10 +415,10 @@ describe("POST /runs/:id/abort", () => {
     ]);
   });
 
-  it("answers 409 for a Run that is not at an Escalation", async () => {
+  it("answers 409 for a Run that has finished", async () => {
     const { service } = fakeService({
       abortRun: () => {
-        throw new RunConflictError("Run run-1 is not at an Escalation.");
+        throw new RunConflictError("Run run-1 is done already.");
       },
     });
     const url = await start(service);

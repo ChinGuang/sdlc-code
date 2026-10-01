@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
+  RunStoppedError,
   ChatAgentLoop,
   type AgentLoop,
   type AgentLoopOptions,
@@ -570,5 +571,32 @@ describe("ChatAgentLoop: API errors", () => {
     const { run } = loop;
 
     await expect(run(task)).resolves.toMatchObject({ stopReason: "answered" });
+  });
+});
+
+describe("ChatAgentLoop: a person stops the Run", () => {
+  // The turn under way finishes; no new one starts, and nothing is taken for
+  // an answer or a limit.
+  it("stops before the next model call, and says so by throwing", async () => {
+    let stopped = false;
+    const { loop, requests } = makeLoop(
+      [
+        {
+          toolCalls: [toolCall("read_file", { path: "a.ts" })],
+          finishReason: "tool_calls",
+        },
+        { content: "never asked for" },
+      ],
+      {
+        stopped: () => {
+          const now = stopped;
+          stopped = true;
+          return now;
+        },
+      },
+    );
+
+    await expect(loop.run(task)).rejects.toThrow(RunStoppedError);
+    expect(requests).toHaveLength(1);
   });
 });

@@ -39,6 +39,8 @@ export type RunSummary = {
   pullRequest: { number: number; url: string; draft: boolean } | null;
   createdAt: string;
   updatedAt: string;
+  /** What it waits for a person to do, if anything: the list says so. */
+  waitingFor: Waiting["for"];
 };
 
 /**
@@ -111,7 +113,9 @@ export type Waiting =
       /** The abort dialog's checkbox, ticked unless a person unticks it. */
       openDraftPrOnAbort: boolean;
     }
-  | { for: "prGate"; pullRequest: RunSummary["pullRequest"] };
+  | { for: "prGate"; pullRequest: RunSummary["pullRequest"] }
+  /** No valid design came out of a gated Run: a person asks for another try. */
+  | { for: "designRetry"; problem: string };
 
 /** A Run as its own page shows it. */
 export type RunDetail = RunSummary & {
@@ -176,6 +180,8 @@ export interface RunService {
   /** A document's latest version in full; the Run's detail lists it only. */
   getDocument: (runId: string, kind: DocumentKind) => DocumentView;
   decideDesign: (runId: string, verdicts: DesignVerdict[]) => RunDetail;
+  /** Designs a gated Run again after its design failed. */
+  retryDesign: (runId: string) => RunDetail;
   resolveEscalation: (
     runId: string,
     resolution: EscalationResolution,
@@ -185,8 +191,9 @@ export interface RunService {
     decision: PullRequestDecision,
   ) => RunDetail;
   /**
-   * Aborts a Run at its Escalation, the only place the domain lets a Run be
-   * aborted (CONTEXT.md). A Draft PR of what passed unless a person unticks it.
+   * Aborts a Run, whatever it is doing (T24g): at an Escalation as its abort
+   * choice, otherwise at once, work under way stopping at its next model
+   * turn. A Draft PR of what passed unless a person unticks it.
    */
   abortRun: (runId: string, openDraftPrOnAbort: boolean) => RunDetail;
   /**

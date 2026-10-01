@@ -66,7 +66,8 @@ Commands:
   escalation retry <run> "<hint>" [--budget 3M]
   escalation edit <run> <document> "<comments>" [--budget 3M]
   escalation skip <run> [--budget 3M]
-  abort <run> [--no-draft-pr]               Stop a Run at its Escalation
+  retry-design <run>                        Design again after a gated Run's design failed
+  abort <run> [--no-draft-pr]               Stop a Run, whatever it is doing
 
 <run> is a Run's id or its first characters, e.g. 27f388.
 <document> is system-design, slice-plan, api-contract, ui-spec or penpot.
@@ -134,6 +135,8 @@ async function command(parsed: Parsed, io: CliIo, deps: CliDeps) {
       return status(parsed, io, deps);
     case "abort":
       return abort(parsed, io, deps);
+    case "retry-design":
+      return retryDesign(parsed, io, deps);
     case "gate":
       if (sub === "show") return gateShow(parsed, io, deps);
       if (sub === "approve") return gateApprove(parsed, io, deps);
@@ -203,7 +206,9 @@ async function status(parsed: Parsed, io: CliIo, deps: CliDeps) {
 async function follow(runId: string, io: CliIo, deps: CliDeps) {
   const { api, paint } = deps;
   let detail = await api.getRun(runId);
-  if (!settled(detail) && !detail.advancing) {
+  if (detail.waiting.for === "designRetry") {
+    // Waits for a person; statusLines below says so, and how to answer.
+  } else if (!settled(detail) && !detail.advancing) {
     // Nothing is moving it: its loop stopped, and a restart resumes it.
     io.out(
       paint.amber(
@@ -231,7 +236,11 @@ async function follow(runId: string, io: CliIo, deps: CliDeps) {
       runId,
       detail.lastSeq,
       (event) => {
-        const line = eventLine(event, detail, paint);
+        // A failed design is said once, by the status below, not twice.
+        const failedDesign =
+          event.type === "problem" &&
+          String(event.problem).startsWith("The design failed:");
+        const line = failedDesign ? null : eventLine(event, detail, paint);
         if (line) io.out(line);
         // What a failed or aborted Run delivers comes just after its status.
         if (event.type === "delivery") return "stop";
@@ -251,7 +260,7 @@ async function follow(runId: string, io: CliIo, deps: CliDeps) {
     );
     detail = await api.getRun(runId);
     // The stream ended without the Run resting: the server went away.
-    if (!RESTING.has(detail.status))
+    if (!RESTING.has(detail.status) && detail.waiting.for !== "designRetry")
       io.out(
         paint.amber(
           `The server stopped sending; follow again with: sdlccode status ${shortId(runId)} --follow`,
@@ -282,6 +291,7 @@ function linkFor(run: RunDetail, dashboardUrl: string): string | null {
     case "prGate":
       return `${base}/review`;
     case "escalation":
+    case "designRetry":
       return base;
     case "nothing":
       return null;
@@ -574,6 +584,14 @@ async function escalationGoOn(
     }${more.tokenBudget ? ` Token Budget is now ${formatTokens(more.tokenBudget)}.` : ""}`,
   );
   return after(next, io, deps);
+}
+
+async function retryDesign(parsed: Parsed, io: CliIo, deps: CliDeps) {
+  onlyFlags(parsed, []);
+  const runId = await findRun(deps.api, parsed.words[1]);
+  await deps.api.retryDesign(runId);
+  io.out(`${deps.paint.green("✓")} Designing #${shortId(runId)} again.`);
+  await follow(runId, io, deps);
 }
 
 async function abort(parsed: Parsed, io: CliIo, deps: CliDeps) {

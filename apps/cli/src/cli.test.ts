@@ -499,6 +499,63 @@ describe("sdlccode: following a Run to its end", () => {
   });
 });
 
+describe("sdlccode: a design that failed", () => {
+  const FAILED: RunDetail = {
+    ...DETAIL,
+    status: "designing",
+    slices: [],
+    tasks: [],
+    advancing: false,
+    waiting: {
+      for: "designRetry",
+      problem: "The System Design Agent produced no valid design.",
+    },
+  };
+
+  it("says the design failed and how to try again, and does not wait on it", async () => {
+    const { run, out, requests } = await cli(FAILED);
+
+    expect(await run("status", "27f388", "--follow")).toBe(0);
+
+    const printed = out.join("\n");
+    expect(printed).toMatch(
+      /■ The design failed: The System Design Agent produced no valid design\./,
+    );
+    expect(printed).toMatch(/sdlccode retry-design 27f388/);
+    expect(printed).not.toMatch(/not moving|stopped sending/);
+    expect(requests.some((request) => request.path.includes("/events"))).toBe(
+      false,
+    );
+  });
+
+  it("designs again when asked, and follows it to the Design Gate", async () => {
+    let retried = false;
+    const { run, out, posted } = await cli(FAILED, (request) => {
+      if (request.path === `/runs/${ID}/retry-design`) {
+        retried = true;
+        return {
+          json: { ...FAILED, advancing: true, waiting: { for: "nothing" } },
+        };
+      }
+      if (request.path.startsWith(`/runs/${ID}/events`))
+        return { events: [{ type: "status", status: "awaitingDesignGate" }] };
+      if (request.path === `/runs/${ID}`)
+        return {
+          json: retried ? { ...AT_DESIGN_GATE, advancing: false } : FAILED,
+        };
+      return undefined;
+    });
+
+    expect(await run("retry-design", "27f388")).toBe(0);
+
+    expect(posted()).toEqual([[`/runs/${ID}/retry-design`, {}]]);
+    const printed = out.join("\n");
+    expect(printed).toMatch(/✓ Designing #27f388 again\./);
+    expect(printed).toMatch(/Design Gate: 4 documents to judge/);
+    expect(printed).not.toMatch(/The design failed/);
+  });
+});
+
 describe("sdlccode status", () => {
   it("shows each Slice, the current one's lanes, and the spend", async () => {
     const { run, out } = await cli(DETAIL);
