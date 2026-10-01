@@ -28,6 +28,8 @@ export type EscalationChoice =
 
 export type RunEvent =
   | { type: "documentsReady" }
+  /** A person stopped the Run before it finished (T24g); escalated has its own. */
+  | { type: "aborted" }
   /** No valid design came out; with no one to ask (auto mode), the Run fails. */
   | { type: "designFailed" }
   | { type: "designChangesRequested" }
@@ -50,6 +52,7 @@ export type RunEvent =
 
 export const RUN_EVENT_TYPES = [
   "documentsReady",
+  "aborted",
   "designFailed",
   "designChangesRequested",
   "designApproved",
@@ -85,6 +88,9 @@ export function nextRunStatus(
 ): RunStatus {
   const gated = mode === "gated";
   const next = ((): RunStatus | null => {
+    // At an Escalation, abort is one of its four choices, made by resolving it.
+    if (event.type === "aborted")
+      return isFinished(status) || status === "escalated" ? null : "aborted";
     switch (status) {
       case "designing":
         if (event.type === "designFailed") return gated ? null : "failed";

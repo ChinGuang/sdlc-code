@@ -119,6 +119,9 @@ export function RunPage({
               Decide…
             </button>
           )}
+          {!FINISHED.has(detail.status) && (
+            <CancelRun run={detail} api={api} onDecided={accept} />
+          )}
         </div>
       </div>
       {error && (
@@ -315,5 +318,87 @@ function DesignFailed({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * A person stops the Run, whatever it is doing (T24g). Asked first, because it
+ * cannot be undone; work under way stops at its next model turn.
+ */
+function CancelRun({
+  run,
+  api,
+  onDecided,
+}: {
+  run: RunDetail;
+  api: RunsApi;
+  onDecided: (detail: RunDetail) => void;
+}) {
+  const [asking, setAsking] = useState(false);
+  const [draftPr, setDraftPr] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const cancel = async () => {
+    setSending(true);
+    setError(null);
+    try {
+      onDecided(await api.abortRun(run.id, draftPr));
+      setAsking(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSending(false);
+    }
+  };
+  if (!asking)
+    return (
+      <button
+        type="button"
+        className="button small-button danger-text"
+        onClick={() => setAsking(true)}
+      >
+        Cancel run…
+      </button>
+    );
+  return (
+    <div className="card cancel-run" role="group" aria-label="Cancel run">
+      <strong>Cancel this Run?</strong>
+      <p className="small muted">
+        {run.advancing
+          ? "It stops after the model turn under way; nothing new starts."
+          : "It stops now."}{" "}
+        This cannot be undone.
+      </p>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={draftPr}
+          onChange={(event) => setDraftPr(event.target.checked)}
+        />
+        <span>Open a Draft PR with the passed slices</span>
+      </label>
+      {error && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="dialog-actions">
+        <button
+          type="button"
+          className="button"
+          onClick={() => setAsking(false)}
+        >
+          Keep running
+        </button>
+        <button
+          type="button"
+          className="button danger-fill"
+          disabled={sending}
+          onClick={cancel}
+        >
+          {sending ? "Cancelling…" : "Cancel run"}
+        </button>
+      </div>
+    </div>
   );
 }

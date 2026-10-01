@@ -49,6 +49,11 @@ export type Run = {
   tokensUsed: number;
   pullRequest: RunPullRequest | null;
   failure: RunFailure | null;
+  /**
+   * Whether a person who aborted it outside an Escalation asked for a Draft
+   * PR of what passed; null when no one did (T24g).
+   */
+  openDraftPrOnAbort: boolean | null;
   createdAt: string;
   updatedAt: string;
 };

@@ -285,6 +285,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
         tools,
         maxIterations,
         budget: budgetFor(run),
+        stopped: () => runs.getRun(run.id)?.status === "aborted",
         transcript: {
           record: (event) => {
             transcript?.record(event);

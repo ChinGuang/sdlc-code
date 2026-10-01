@@ -93,7 +93,24 @@ export type AgentLoopOptions = {
   /** Attempts per model call when Token Factory returns 429 or 5xx. */
   maxApiAttempts?: number;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Whether a person stopped the Run: asked before each model call, so the
+   * turn under way finishes and no new one starts (T24g).
+   */
+  stopped?: () => boolean;
 };
+
+/**
+ * A person stopped the Run while this Step ran. It is thrown, not returned:
+ * whatever called the loop must not take it for an answer, a failure to
+ * retry, or a limit to escalate. The Step is discarded on the way up.
+ */
+export class RunStoppedError extends Error {
+  constructor() {
+    super("A person stopped the Run.");
+    this.name = "RunStoppedError";
+  }
+}
 
 export type StopReason =
   "answered" | "maxIterations" | "tokenBudget" | "emptyAnswer" | "apiError";
@@ -201,6 +218,7 @@ export class ChatAgentLoop implements AgentLoop {
 
   async #turns(state: LoopState, messages: ChatMessage[]): Promise<void> {
     while (state.iterations < this.#options.maxIterations) {
+      if (this.#options.stopped?.()) throw new RunStoppedError();
       if (this.#budgetSpent()) {
         state.stopReason = "tokenBudget";
         return;

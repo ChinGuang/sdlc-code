@@ -59,6 +59,10 @@ export function fakeApi(options: {
       if (!document) throw new Error(`No ${kind} document.`);
       return document;
     },
+    abortRun: async (_runId, openDraftPrOnAbort) => {
+      calls.decisions.push({ abort: openDraftPrOnAbort });
+      return answer();
+    },
     retryDesign: async () => {
       calls.decisions.push({ retryDesign: true });
       return answer();

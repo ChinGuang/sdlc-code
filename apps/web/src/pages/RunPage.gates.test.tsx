@@ -196,3 +196,34 @@ describe("RunPage: a design that failed", () => {
     expect(fake.calls.decisions).toEqual([{ retryDesign: true }]);
   });
 });
+
+describe("RunPage: cancelling a Run (T24g)", () => {
+  it("asks first, then stops the Run with the Draft PR choice", async () => {
+    const fake = await open(DETAIL);
+    fake.setDetail({ ...DETAIL, status: "aborted", advancing: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run…" }));
+    const ask = screen.getByRole("group", { name: "Cancel run" });
+    expect(ask).toHaveTextContent("It stops after the model turn under way");
+    fireEvent.click(within(ask).getByRole("checkbox", { name: /Draft PR/ }));
+    fireEvent.click(within(ask).getByRole("button", { name: "Cancel run" }));
+
+    await vi.waitFor(() =>
+      expect(fake.calls.decisions).toEqual([{ abort: false }]),
+    );
+    expect(
+      await screen.findByText("Aborted", { selector: ".badge" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel run…" })).toBeNull();
+  });
+
+  it("keeps the Run going when the person changes their mind", async () => {
+    const fake = await open(DETAIL);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep running" }));
+
+    expect(screen.queryByRole("group", { name: "Cancel run" })).toBeNull();
+    expect(fake.calls.decisions).toEqual([]);
+  });
+});

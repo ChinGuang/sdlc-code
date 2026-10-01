@@ -31,7 +31,11 @@ import type {
   RunPullRequest,
   Slice,
 } from "../domain/entities.js";
-import type { EscalationTrigger, RunStatus } from "../domain/runLifecycle.js";
+import {
+  isFinished,
+  type EscalationTrigger,
+  type RunStatus,
+} from "../domain/runLifecycle.js";
 import type { EscalationStore } from "../persistence/escalationStore.js";
 import type { ReviewStore } from "../persistence/reviewStore.js";
 import type { RunStore } from "../persistence/runStore.js";
@@ -98,6 +102,12 @@ export interface RunOrchestrator {
   advance: (runId: string) => Promise<RunProgress>;
   /** Clears a gated Run's failed design so advance designs again. */
   retryDesign: (runId: string) => void;
+  /**
+   * A person stops the Run, whatever it is doing (T24g): at an Escalation as
+   * its abort choice, otherwise at once. Work under way stops at the next
+   * model turn; call advance to settle it and deliver what is owed.
+   */
+  abort: (runId: string, options?: { openDraftPrOnAbort?: boolean }) => void;
   /** The human's Verdicts at the Design Gate; then call advance. */
   decideDesign: (runId: string, verdicts: DesignVerdict[]) => GateDecision;
   /** The human's choice at an Escalation; then call advance. */
@@ -169,46 +179,77 @@ export class AgentRunOrchestrator implements RunOrchestrator {
 
   advance = async (runId: string): Promise<RunProgress> => {
     for (;;) {
-      const run = this.#run(runId);
-      switch (run.status) {
-        case "designing":
-          // Tried again only when a person asks: not by itself, and not on
-          // a restart, which would spend tokens no one asked it to.
-          if (run.mode === "gated" && run.failure?.trigger === "design")
-            return { waitingFor: "designRetry", problem: run.failure.summary };
-          await this.#design(run);
-          continue;
-        case "building":
-          await this.#build(run);
-          continue;
-        case "awaitingDesignGate":
-          return { waitingFor: "designGate" };
-        case "escalated": {
-          const escalation = this.#options.escalations.getOpenEscalation(runId);
-          if (!escalation)
-            throw new Error(
-              `Run ${runId} is escalated but has no open Escalation.`,
-            );
-          return { waitingFor: "escalation", escalation };
-        }
-        case "reviewing":
-          await this.#review(run);
-          continue;
-        case "awaitingPrGate": {
-          // A process that died between opening the pull request and opening
-          // the Gate would otherwise leave nothing for a person to answer.
-          if (!this.#options.gates.getOpenGate(run.id))
-            this.#options.gates.openGate(run.id, "pr");
-          return { waitingFor: "prGate", pullRequest: run.pullRequest };
-        }
-        case "done":
-        case "failed":
-        case "aborted":
-          await this.#deliverIfOwed(run);
-          return { finished: run.status };
+      try {
+        const progress = await this.#next(runId);
+        if (progress) return progress;
+      } catch (error) {
+        // Stopped by a person: whatever was under way ends here, and the
+        // aborted Run settles below like any other.
+        if (this.#run(runId).status !== "aborted") throw error;
+        this.#settleStopped(runId);
       }
     }
   };
+
+  abort = (
+    runId: string,
+    { openDraftPrOnAbort = true }: { openDraftPrOnAbort?: boolean } = {},
+  ): void => {
+    const run = this.#run(runId);
+    if (run.status === "escalated") {
+      this.resolveEscalation(runId, { choice: "abort", openDraftPrOnAbort });
+      return;
+    }
+    if (isFinished(run.status))
+      throw new Error(`Run ${runId} is ${run.status} already.`);
+    this.#options.runs.setOpenDraftPrOnAbort(runId, openDraftPrOnAbort);
+    this.#options.runs.applyEvent(runId, { type: "aborted" });
+  };
+
+  /**
+   * One move of the Run, or what it waits for: null when it moved and should
+   * be looked at again.
+   */
+  async #next(runId: string): Promise<RunProgress | null> {
+    const run = this.#run(runId);
+    switch (run.status) {
+      case "designing":
+        // Tried again only when a person asks: not by itself, and not on
+        // a restart, which would spend tokens no one asked it to.
+        if (run.mode === "gated" && run.failure?.trigger === "design")
+          return { waitingFor: "designRetry", problem: run.failure.summary };
+        await this.#design(run);
+        return null;
+      case "building":
+        await this.#build(run);
+        return null;
+      case "awaitingDesignGate":
+        return { waitingFor: "designGate" };
+      case "escalated": {
+        const escalation = this.#options.escalations.getOpenEscalation(runId);
+        if (!escalation)
+          throw new Error(
+            `Run ${runId} is escalated but has no open Escalation.`,
+          );
+        return { waitingFor: "escalation", escalation };
+      }
+      case "reviewing":
+        await this.#review(run);
+        return null;
+      case "awaitingPrGate": {
+        // A process that died between opening the pull request and opening
+        // the Gate would otherwise leave nothing for a person to answer.
+        if (!this.#options.gates.getOpenGate(run.id))
+          this.#options.gates.openGate(run.id, "pr");
+        return { waitingFor: "prGate", pullRequest: run.pullRequest };
+      }
+      case "done":
+      case "failed":
+      case "aborted":
+        await this.#deliverIfOwed(run);
+        return { finished: run.status };
+    }
+  }
 
   retryDesign = (runId: string): void => {
     const run = this.#run(runId);
@@ -596,8 +637,24 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     });
   }
 
+  /**
+   * A Run a person stopped mid-work: the Step that was running is discarded
+   * (a Step is redone, never resumed, and this one never will be) and the
+   * Slice's Tasks fail. The Run is aborted already.
+   */
+  #settleStopped(runId: string): void {
+    const { tasks } = this.#options;
+    for (const task of tasks.listTasks(runId))
+      for (const step of tasks.listSteps(task.id))
+        if (step.status === "running") tasks.discardStep(step.id);
+    const current = this.#currentSlice(runId);
+    if (current) this.#failTasks(runId, current.id);
+  }
+
   /** What the person ticked when they aborted; the default is to offer one. */
   #abortedWithDraftPr(runId: string): boolean {
+    const asked = this.#run(runId).openDraftPrOnAbort;
+    if (asked !== null) return asked;
     const abort = this.#options.escalations
       .listEscalations(runId)
       .filter((escalation) => escalation.choice === "abort")

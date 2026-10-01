@@ -67,7 +67,7 @@ Commands:
   escalation edit <run> <document> "<comments>" [--budget 3M]
   escalation skip <run> [--budget 3M]
   retry-design <run>                        Design again after a gated Run's design failed
-  abort <run> [--no-draft-pr]               Stop a Run at its Escalation
+  abort <run> [--no-draft-pr]               Stop a Run, whatever it is doing
 
 <run> is a Run's id or its first characters, e.g. 27f388.
 <document> is system-design, slice-plan, api-contract, ui-spec or penpot.

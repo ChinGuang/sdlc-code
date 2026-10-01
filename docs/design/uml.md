@@ -289,6 +289,8 @@ stateDiagram-v2
   Escalated --> Building : retry with hint / skip slice
   Escalated --> Designing : edit approved documents
   Escalated --> Aborted : abort
+  Designing --> Aborted : a person aborts (at any time)
+  Building --> Aborted : a person aborts, after the turn under way
 
   Building --> Failed : limit hit in auto mode
   Reviewing --> Failed : limit hit in auto mode

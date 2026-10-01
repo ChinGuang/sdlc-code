@@ -191,8 +191,9 @@ export interface RunService {
     decision: PullRequestDecision,
   ) => RunDetail;
   /**
-   * Aborts a Run at its Escalation, the only place the domain lets a Run be
-   * aborted (CONTEXT.md). A Draft PR of what passed unless a person unticks it.
+   * Aborts a Run, whatever it is doing (T24g): at an Escalation as its abort
+   * choice, otherwise at once, work under way stopping at its next model
+   * turn. A Draft PR of what passed unless a person unticks it.
    */
   abortRun: (runId: string, openDraftPrOnAbort: boolean) => RunDetail;
   /**

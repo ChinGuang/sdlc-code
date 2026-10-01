@@ -44,6 +44,7 @@ describe("SqliteRunStore runs", () => {
       tokensUsed: 0,
       pullRequest: null,
       failure: null,
+      openDraftPrOnAbort: null,
       createdAt: "2026-09-20T00:00:00.000Z",
       updatedAt: "2026-09-20T00:00:00.000Z",
     });
