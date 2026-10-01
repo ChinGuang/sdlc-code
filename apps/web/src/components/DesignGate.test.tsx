@@ -121,13 +121,13 @@ describe("DesignGate", () => {
     choose("UI Spec", "Approve");
     expect(submit()).toBeDisabled();
 
-    choose("Penpot design", "Approve");
+    choose("UI design", "Approve");
     expect(submit()).toBeEnabled();
   });
 
   it("asks for comments with every change requested", () => {
     open();
-    for (const name of ["System Design", "UI Spec", "Penpot design"])
+    for (const name of ["System Design", "UI Spec", "UI design"])
       choose(name, "Approve");
 
     choose("API Contract", "Request changes");
@@ -151,7 +151,7 @@ describe("DesignGate", () => {
     const warning = verdict().getByRole("status");
     expect(warning).toHaveTextContent("2 documents will go stale");
     expect(warning).toHaveTextContent(
-      "UI Spec and Penpot design will be redone by the UI Design Agent after the System Design Agent updates the API Contract.",
+      "UI Spec and UI design will be redone by the UI Design Agent after the System Design Agent updates the API Contract.",
     );
     expect(
       screen.getByText("0 approved · 1 changes requested · 2 stale"),
@@ -169,7 +169,7 @@ describe("DesignGate", () => {
       "1 document will go stale",
     );
     expect(verdict().getByRole("status")).toHaveTextContent(
-      /^⚠ 1 document will go stale\s*Penpot design will be redone/,
+      /^⚠ 1 document will go stale\s*UI design will be redone/,
     );
     expect(
       screen.getByText("0 approved · 2 changes requested · 1 stale"),
@@ -190,7 +190,7 @@ describe("DesignGate", () => {
     choose("System Design", "Approve");
     choose("API Contract", "Request changes", "  Add rate limiting.  ");
     choose("UI Spec", "Approve", "Nice.");
-    choose("Penpot design", "Approve");
+    choose("UI design", "Approve");
 
     fireEvent.click(submit());
 
@@ -220,7 +220,7 @@ describe("DesignGate", () => {
       "System Design",
       "API Contract",
       "UI Spec",
-      "Penpot design",
+      "UI design",
     ])
       choose(name, "Approve");
 

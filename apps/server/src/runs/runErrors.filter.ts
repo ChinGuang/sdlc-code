@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import {
   DocumentNotFoundError,
+  ScreenshotNotFoundError,
   RunConflictError,
   RunNotFoundError,
   RuntimeUnavailableError,
@@ -24,6 +25,7 @@ type JsonResponse = {
 const STATUS = new Map<unknown, number>([
   [RunNotFoundError, HttpStatus.NOT_FOUND],
   [DocumentNotFoundError, HttpStatus.NOT_FOUND],
+  [ScreenshotNotFoundError, HttpStatus.NOT_FOUND],
   [RunConflictError, HttpStatus.CONFLICT],
   [RuntimeUnavailableError, HttpStatus.SERVICE_UNAVAILABLE],
 ]);
@@ -31,6 +33,7 @@ const STATUS = new Map<unknown, number>([
 @Catch(
   RunNotFoundError,
   DocumentNotFoundError,
+  ScreenshotNotFoundError,
   RunConflictError,
   RuntimeUnavailableError,
 )

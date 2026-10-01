@@ -12,6 +12,7 @@ import type { SystemDesignAgent } from "../agents/systemDesign/systemDesignAgent
 import type { UiDesignAgent } from "../agents/uiDesign/uiDesignAgent.js";
 import type { DocumentKind } from "../domain/documentLifecycle.js";
 import type { Run } from "../domain/entities.js";
+import type { ScreenshotStore } from "../persistence/screenshotStore.js";
 import type { DocumentStore } from "../persistence/documentStore.js";
 import type { SliceStore } from "../persistence/sliceStore.js";
 import { documentContent, storedDesign } from "./approvedDocuments.js";
@@ -27,6 +28,8 @@ const UI_DESIGN_KINDS: readonly DocumentKind[] = ["uiSpec", "penpotDesign"];
 export type DesignPhaseResult = {
   /** The boards the UI Design Agent exported, by screen name (for `vision`). */
   screenImages: Map<string, ExportedImage>;
+  /** Whether the screens were drawn this time; if not, the old images stand. */
+  redrawn: boolean;
 };
 
 export interface DesignPhase {
@@ -53,6 +56,10 @@ export type AgentDesignPhaseOptions = {
   profile: (run: Run) => StackProfile;
   /** The Run's page in the Penpot Workspace File (runPageName). */
   pageName: (run: Run) => string;
+  /** Where the screens as drawn are kept, for people and resumed Runs. */
+  screenshots?: ScreenshotStore;
+  /** They could not be kept (a full disk, a locked file): the Run goes on. */
+  onScreenshotsNotKept?: (reason: string) => void;
 };
 
 export class AgentDesignPhase implements DesignPhase {
@@ -118,7 +125,8 @@ export class AgentDesignPhase implements DesignPhase {
     }
 
     let screenImages = new Map<string, ExportedImage>();
-    if (needs(UI_DESIGN_KINDS)) {
+    const redrawn = needs(UI_DESIGN_KINDS);
+    if (redrawn) {
       const approved = loadDesignForUi(documents, run.id);
       const previousSpec = documents.getLatest(run.id, "uiSpec");
       const { spec, screens, page, loop } = await this.#options.uiDesign.design(
@@ -152,16 +160,50 @@ export class AgentDesignPhase implements DesignPhase {
           2,
         )}\n`,
       );
-      screenImages = new Map(
-        screens.flatMap((screen) =>
-          screen.export ? [[screen.name, screen.export] as const] : [],
-        ),
+      const exported = screens.flatMap((screen, index) =>
+        screen.export
+          ? [{ name: screen.name, order: index + 1, image: screen.export }]
+          : [],
       );
+      screenImages = new Map(exported.map(({ name, image }) => [name, image]));
+      this.#keepScreenshots(run.id, exported);
     }
 
     this.#options.gate.open(run.id);
-    return { screenImages };
+    return { screenImages, redrawn };
   };
+
+  /**
+   * Keeps the screens as drawn with the version of the design they show. The
+   * design is saved already; failing to keep its pictures loses only them,
+   * as a failed export does, and never the Run.
+   */
+  #keepScreenshots(
+    runId: string,
+    exported: ReadonlyArray<{
+      name: string;
+      order: number;
+      image: ExportedImage;
+    }>,
+  ): void {
+    const { screenshots, documents, onScreenshotsNotKept } = this.#options;
+    if (!screenshots) return;
+    try {
+      // By the UI Spec they were drawn from: a changed drawing always comes
+      // from a changed UI Spec, which is a new version, so a redraw never
+      // overwrites what a person already judged. (The Penpot design document
+      // can keep its version through a redraw: same boards, same names.)
+      screenshots.save(
+        runId,
+        documents.getLatest(runId, "uiSpec")!.version,
+        exported,
+      );
+    } catch (error) {
+      onScreenshotsNotKept?.(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
 
   /**
    * Saves a document as its next version, moving it to drafting first. An

@@ -19,18 +19,33 @@ import {
   type UiScreen,
 } from "./parse.js";
 
+/** A screen as drawn, where its image is served. */
+export type ScreenShot = { screen: string; url: string };
+
 export function DocumentBody({
   kind,
   content,
   slicePlan = null,
+  screenshots = [],
+  screenshotsKept = false,
 }: {
   kind: DocumentKind;
   content: string;
   /** The Slice Plan's text, for the API Contract's "which Slice" column. */
   slicePlan?: string | null;
+  /** The screens as drawn, for the UI design and the UI Spec. */
+  screenshots?: ScreenShot[];
+  /** Whether any were kept for this design, even if every export failed. */
+  screenshotsKept?: boolean;
 }) {
   const [showRaw, setShowRaw] = useState(false);
-  const readable = readableView(kind, content, slicePlan);
+  const readable = readableView(
+    kind,
+    content,
+    slicePlan,
+    screenshots,
+    screenshotsKept,
+  );
   return (
     <div className="document-view">
       <div className="segmented view-switch" role="group" aria-label="View">
@@ -72,6 +87,8 @@ function readableView(
   kind: DocumentKind,
   content: string,
   slicePlan: string | null,
+  screenshots: ScreenShot[],
+  screenshotsKept: boolean,
 ) {
   switch (kind) {
     case "systemDesign":
@@ -93,27 +110,97 @@ function readableView(
     }
     case "uiSpec": {
       const spec = parseUiSpec(content);
-      return spec && <UiSpecView screens={spec.screens} tokens={spec.tokens} />;
+      return (
+        spec && (
+          <UiSpecView
+            screens={spec.screens}
+            tokens={spec.tokens}
+            screenshots={screenshots}
+          />
+        )
+      );
     }
     case "penpotDesign": {
       const design = parsePenpotDesign(content);
       return (
         design && (
-          <div className="penpot-view">
-            <p>
-              Page <strong>{design.page || "(unnamed)"}</strong> in the Penpot
-              file, with {design.screens.length} screens drawn from the UI Spec:
-            </p>
-            <ul>
-              {design.screens.map((screen, index) => (
-                <li key={`${index}-${screen}`}>{screen}</li>
-              ))}
-            </ul>
-          </div>
+          <UiDesignView
+            page={design.page}
+            screens={design.screens}
+            screenshots={screenshots}
+            kept={screenshotsKept}
+          />
         )
       );
     }
   }
+}
+
+/**
+ * The UI design as a person judges it: each screen as it was drawn. Which
+ * tool drew it (Penpot today) is a footnote.
+ */
+function UiDesignView({
+  page,
+  screens,
+  screenshots,
+  kept,
+}: {
+  page: string;
+  screens: string[];
+  screenshots: ScreenShot[];
+  /** Whether any were kept for this design, even if every export failed. */
+  kept: boolean;
+}) {
+  const shots = new Map(screenshots.map((shot) => [shot.screen, shot]));
+  const missing = screens.filter((screen) => !shots.has(screen)).length;
+  return (
+    <div className="ui-design">
+      {!kept ? (
+        <p className="warning small" role="status">
+          No screenshots were kept for this Run: it was designed before they
+          were. The UI Spec shows each screen's layout.
+        </p>
+      ) : (
+        missing > 0 && (
+          <p className="warning small" role="status">
+            {missing === screens.length
+              ? "No screen could be exported"
+              : `${missing} of ${screens.length} screens could not be exported`}
+            ; the UI Spec shows their layouts.
+          </p>
+        )
+      )}
+      <div className="gallery">
+        {screens.map((screen, index) => {
+          const shot = shots.get(screen);
+          return shot ? (
+            <Screenshot key={`${index}-${screen}`} shot={shot} />
+          ) : (
+            <figure key={`${index}-${screen}`} className="screenshot missing">
+              <div className="no-shot faint small">No screenshot</div>
+              <figcaption>{screen}</figcaption>
+            </figure>
+          );
+        })}
+      </div>
+      <p className="faint small">
+        Drawn in Penpot{page ? `, on the page "${page}"` : ""}.
+      </p>
+    </div>
+  );
+}
+
+/** One screen as drawn; opens full size in a new tab. */
+function Screenshot({ shot }: { shot: ScreenShot }) {
+  return (
+    <figure className="screenshot">
+      <a href={shot.url} target="_blank" rel="noreferrer">
+        <img src={shot.url} alt={`${shot.screen}, as drawn`} loading="lazy" />
+      </a>
+      <figcaption>{shot.screen}</figcaption>
+    </figure>
+  );
 }
 
 function SlicePlanView({ slices }: { slices: PlannedSlice[] }) {
@@ -339,10 +426,16 @@ const BOARD = { width: 1280, height: 800 };
 function UiSpecView({
   screens,
   tokens,
+  screenshots,
 }: {
   screens: UiScreen[];
   tokens: Array<{ name: string; value: string }>;
+  screenshots: ScreenShot[];
 }) {
+  // The first screenshot of each name, looked up once.
+  const shots = new Map<string, ScreenShot>();
+  for (const shot of screenshots)
+    if (!shots.has(shot.screen)) shots.set(shot.screen, shot);
   return (
     <div className="ui-spec">
       {tokens.length > 0 && (
@@ -386,29 +479,33 @@ function UiSpecView({
               </div>
             )}
           </div>
-          {/* The layout, scaled down: a wireframe of what Penpot draws. */}
-          <div
-            className="wireframe"
-            role="img"
-            aria-label={`Layout of ${screen.name}: ${screen.elements
-              .map((element) => `${element.kind} "${element.label}"`)
-              .join(", ")}`}
-          >
-            {screen.elements.map((element, index) => (
-              <span
-                key={index}
-                className={`element element-${element.kind}`}
-                style={{
-                  left: `${(element.x / BOARD.width) * 100}%`,
-                  top: `${(element.y / BOARD.height) * 100}%`,
-                  width: `${(element.width / BOARD.width) * 100}%`,
-                  height: `${(element.height / BOARD.height) * 100}%`,
-                }}
-              >
-                {element.label}
-              </span>
-            ))}
-          </div>
+          {/* As drawn when it was kept; otherwise its layout, scaled down. */}
+          {shots.has(screen.name) ? (
+            <Screenshot shot={shots.get(screen.name)!} />
+          ) : (
+            <div
+              className="wireframe"
+              role="img"
+              aria-label={`Layout of ${screen.name}: ${screen.elements
+                .map((element) => `${element.kind} "${element.label}"`)
+                .join(", ")}`}
+            >
+              {screen.elements.map((element, index) => (
+                <span
+                  key={index}
+                  className={`element element-${element.kind}`}
+                  style={{
+                    left: `${(element.x / BOARD.width) * 100}%`,
+                    top: `${(element.y / BOARD.height) * 100}%`,
+                    width: `${(element.width / BOARD.width) * 100}%`,
+                    height: `${(element.height / BOARD.height) * 100}%`,
+                  }}
+                >
+                  {element.label}
+                </span>
+              ))}
+            </div>
+          )}
         </section>
       ))}
     </div>

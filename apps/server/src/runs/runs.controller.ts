@@ -20,20 +20,23 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Headers,
   HttpCode,
   Inject,
+  type MessageEvent,
   Param,
   Post,
   Query,
   Sse,
-  type MessageEvent,
+  StreamableFile,
 } from "@nestjs/common";
 import { map, type Observable } from "rxjs";
 import {
   AbortBody,
   DesignGateBody,
   DocumentKindParam,
+  ScreenshotParams,
   EscalationBody,
   PullRequestGateBody,
   StartRunBody,
@@ -68,6 +71,25 @@ export class RunsController {
   @Get(":id")
   get(@Param("id") id: string): RunDetail {
     return this.#runs.getRun(id);
+  }
+
+  /**
+   * An image a browser shows as it is: a PNG or JPEG, never JSON. It opens in
+   * a tab on this origin, so nothing in it may run: no sniffing, no scripts.
+   * A version can be drawn again, so it is kept for minutes, not for ever.
+   */
+  @Get(":id/screenshots/:version/:order")
+  @Header("X-Content-Type-Options", "nosniff")
+  @Header("Content-Security-Policy", "default-src 'none'")
+  @Header("Cache-Control", "private, max-age=300")
+  screenshot(
+    @Param("id") id: string,
+    @Param("version") version: string,
+    @Param("order") order: string,
+  ): StreamableFile {
+    const wanted = parse(ScreenshotParams, { version, order });
+    const image = this.#runs.getScreenshot(id, wanted.version, wanted.order);
+    return new StreamableFile(image.bytes, { type: image.mimeType });
   }
 
   @Get(":id/documents/:kind")

@@ -26,6 +26,7 @@ import type { Observable } from "rxjs";
 import type { EventLog } from "./eventLog.js";
 import {
   DocumentNotFoundError,
+  ScreenshotNotFoundError,
   RunConflictError,
   RunNotFoundError,
   RuntimeUnavailableError,
@@ -50,6 +51,7 @@ export type ServiceRuntime = Pick<
   | "tasks"
   | "escalations"
   | "reviews"
+  | "screenshots"
   | "orchestrator"
   | "startRun"
   | "resume"
@@ -101,6 +103,17 @@ export class RuntimeRunService implements RunService, RunLifecycle {
   listRuns = (): RunSummary[] => this.#runtime().runs.listRuns().map(summary);
 
   getRun = (runId: string): RunDetail => this.#detail(this.#run(runId));
+
+  getScreenshot = (
+    runId: string,
+    version: number,
+    order: number,
+  ): { bytes: Buffer; mimeType: string } => {
+    const run = this.#run(runId);
+    const image = this.#runtime().screenshots.read(run.id, version, order);
+    if (!image) throw new ScreenshotNotFoundError(run.id, version, order);
+    return image;
+  };
 
   getDocument = (runId: string, kind: DocumentKind): DocumentView => {
     const run = this.#run(runId);
@@ -277,6 +290,10 @@ export class RuntimeRunService implements RunService, RunLifecycle {
         commitSha: slice.commitSha,
       })),
       documents: documentsWithCascade(runtime.documents.listLatest(run.id)),
+      screenshots: runtime.screenshots
+        .list(run.id)
+        .map(({ screen, version, order }) => ({ screen, version, order })),
+      screenshotsVersion: runtime.screenshots.latestVersion(run.id),
       reviews: runtime.reviews.listReviews(run.id).map((review) => ({
         findings: review.findings.map((finding) => ({
           ruleId: finding.ruleId,

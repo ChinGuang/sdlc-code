@@ -62,6 +62,10 @@ import {
   SqliteReviewStore,
   type ReviewStore,
 } from "../persistence/reviewStore.js";
+import {
+  FileScreenshotStore,
+  type ScreenshotStore,
+} from "../persistence/screenshotStore.js";
 import { SqliteRunStore, type RunStore } from "../persistence/runStore.js";
 import {
   SqliteSliceStore,
@@ -155,6 +159,7 @@ export interface RunRuntime {
   escalations: EscalationStore;
   gates: GateStore;
   reviews: ReviewStore;
+  screenshots: ScreenshotStore;
   orchestrator: RunOrchestrator;
   /** A new Run, with its repository scaffolded from the Stack Profile. */
   startRun: (request: NewRunRequest) => Promise<Run>;
@@ -200,6 +205,9 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
   const escalations: EscalationStore = new SqliteEscalationStore(store);
   const gates: GateStore = new SqliteGateStore(store);
   const reviews: ReviewStore = new SqliteReviewStore(store);
+  const screenshots: ScreenshotStore = new FileScreenshotStore({
+    dataDir: options.dataDir,
+  });
   // The Orchestrator moves a Run many times per advance; each move is an event.
   const reportedRuns = reportingRunStore(runs, emit);
   const gate = new DocumentDesignGate({
@@ -404,6 +412,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
     escalations,
     gates,
     reviews,
+    screenshots,
     gate,
     profile: () => profile,
     capabilities: {
@@ -418,6 +427,13 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
         gate,
         profile: () => profile,
         pageName: () => pageNameFor(run),
+        screenshots,
+        onScreenshotsNotKept: (reason) =>
+          emit({
+            runId: run.id,
+            type: "problem",
+            problem: `The screenshots could not be kept: ${reason.slice(0, 200)}`,
+          }),
         systemDesign: new LoopSystemDesignAgent({
           createLoop: loopFor(run, "systemDesign", TURNS.systemDesign),
         }),
@@ -486,6 +502,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
     escalations,
     gates,
     reviews,
+    screenshots,
     orchestrator,
     startRun: async (request) => {
       const [owner, name] = (request.targetRepo ?? "").split("/");

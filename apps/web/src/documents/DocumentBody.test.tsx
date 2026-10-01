@@ -177,7 +177,7 @@ describe("DocumentBody: the API Contract", () => {
   });
 });
 
-describe("DocumentBody: the UI Spec and the Penpot design", () => {
+describe("DocumentBody: the UI Spec and the UI design", () => {
   it("reads the UI Spec as its tokens and screens, each with a wireframe", () => {
     render(<DocumentBody kind="uiSpec" content={UI_SPEC} />);
 
@@ -192,13 +192,91 @@ describe("DocumentBody: the UI Spec and the Penpot design", () => {
     );
   });
 
-  it("reads the Penpot design as its page and screens", () => {
+  // Penpot is only the tool: what a person judges is each screen as drawn.
+  it("shows the UI design as its screens, as drawn", () => {
+    render(
+      <DocumentBody
+        kind="penpotDesign"
+        content={PENPOT_DESIGN}
+        screenshots={[
+          { screen: "Sign in", url: "/shots/1" },
+          { screen: "Calendar", url: "/shots/2" },
+        ]}
+        screenshotsKept
+      />,
+    );
+
+    expect(screen.queryByRole("status")).toBeNull();
+    const images = screen.getAllByRole("img");
+    expect(images.map((image) => image.getAttribute("alt"))).toEqual([
+      "Sign in, as drawn",
+      "Calendar, as drawn",
+    ]);
+    expect(images[0]).toHaveAttribute("src", "/shots/1");
+    expect(images[0]!.closest("a")).toHaveAttribute("href", "/shots/1");
+    expect(
+      screen.getByText(/Drawn in Penpot, on the page "#27f388 A calendar app"/),
+    ).toBeInTheDocument();
+  });
+
+  // Runs from before T24e kept none.
+  it("says so when a Run kept no screenshots, and names its screens", () => {
     render(<DocumentBody kind="penpotDesign" content={PENPOT_DESIGN} />);
 
-    expect(screen.getByText("#27f388 A calendar app")).toBeInTheDocument();
-    expect(
-      screen.getAllByRole("listitem").map((item) => item.textContent),
-    ).toEqual(["Screen: Sign in", "Screen: Calendar"]);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /it was designed before they were/,
+    );
+    expect(screen.getAllByText("No screenshot")).toHaveLength(2);
+    expect(screen.getByText("Calendar")).toBeInTheDocument();
+  });
+
+  // A screen whose export failed keeps its place, and says it has none.
+  it("shows which screens could not be exported", () => {
+    render(
+      <DocumentBody
+        kind="penpotDesign"
+        content={PENPOT_DESIGN}
+        screenshots={[{ screen: "Calendar", url: "/shots/2" }]}
+        screenshotsKept
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "1 of 2 screens could not be exported",
+    );
+    const figures = document.querySelectorAll("figure");
+    expect(figures[0]).toHaveTextContent("No screenshotSign in");
+    expect(figures[1]!.querySelector("img")).toHaveAttribute("src", "/shots/2");
+  });
+
+  it("says no screen could be exported, rather than calling the Run old", () => {
+    render(
+      <DocumentBody
+        kind="penpotDesign"
+        content={PENPOT_DESIGN}
+        screenshotsKept
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "No screen could be exported",
+    );
+  });
+
+  it("shows each UI Spec screen as drawn, and its layout only without one", () => {
+    render(
+      <DocumentBody
+        kind="uiSpec"
+        content={UI_SPEC}
+        screenshots={[{ screen: "Sign in", url: "/shots/1" }]}
+      />,
+    );
+
+    const signIn = screen.getByRole("region", { name: "Screen Sign in" });
+    expect(within(signIn).getByRole("img")).toHaveAccessibleName(
+      "Sign in, as drawn",
+    );
+    expect(signIn.querySelector(".wireframe")).toBeNull();
   });
 });
 

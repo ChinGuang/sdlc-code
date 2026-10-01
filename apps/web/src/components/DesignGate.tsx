@@ -17,7 +17,7 @@ import {
   type Draft,
   type DraftVerdict,
 } from "../run/gates.js";
-import { DocumentBody } from "../documents/DocumentBody.js";
+import { DocumentBody, type ScreenShot } from "../documents/DocumentBody.js";
 import { ROLE_NAMES } from "../run/view.js";
 
 /**
@@ -132,6 +132,11 @@ export function DesignGate({
               run.documents.find((one) => one.kind === "slicePlan")?.version ??
               null
             }
+            screenshots={run.screenshots.map((shot) => ({
+              screen: shot.screen,
+              url: api.screenshotUrl(run.id, shot.version, shot.order),
+            }))}
+            screenshotsKept={run.screenshotsVersion !== null}
           />
         )}
         {document && (
@@ -197,9 +202,9 @@ function DocumentList({
       <div className="cascade">
         <h3>Cascade</h3>
         <p className="muted">
-          UI Spec and Penpot design are built on the System Design documents.
-          They become Stale when one of those changes, and are redone before the
-          Gate re-opens.
+          UI Spec and UI design are built on the System Design documents. They
+          become Stale when one of those changes, and are redone before the Gate
+          re-opens.
         </p>
       </div>
     </section>
@@ -212,12 +217,18 @@ function DocumentContent({
   runId,
   document,
   slicePlanVersion,
+  screenshots,
+  screenshotsKept,
 }: {
   api: RunsApi;
   runId: string;
   document: RunDocument;
   /** The API Contract's endpoints are placed in Slices by the Slice Plan. */
   slicePlanVersion: number | null;
+  /** The screens as drawn, for the UI design and the UI Spec. */
+  screenshots: ScreenShot[];
+  /** Whether any were kept for this design, even if every export failed. */
+  screenshotsKept: boolean;
 }) {
   const [read, setRead] = useState<{
     key: string;
@@ -276,6 +287,8 @@ function DocumentContent({
           kind={document.kind}
           content={current.view!.content}
           slicePlan={current.slicePlan}
+          screenshots={screenshots}
+          screenshotsKept={screenshotsKept}
         />
       )}
     </section>

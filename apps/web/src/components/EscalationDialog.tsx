@@ -290,7 +290,7 @@ export function EscalationDialog({
           <fieldset className="edits">
             <legend className="small muted">
               Documents to change
-              {unused && " (edit the UI Spec to change the Penpot design)"}
+              {unused && " (edit the UI Spec to change the UI design)"}
             </legend>
             {approved.map((document) => (
               <label key={document.kind} className="check">

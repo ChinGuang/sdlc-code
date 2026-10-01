@@ -12,6 +12,8 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Verdict** — A human's decision on one document at a Gate: Approve, or Request Changes with comments. Comments go to that document's owning agent.
 
+**Penpot design** — The screens as the UI Design Agent drew them from the UI Spec, in Penpot; shown to people as the "UI design", with each screen as drawn (a screenshot per UI Spec version). Penpot is the tool; another could draw them.
+
 **Stale** — A document built on another document that has since changed. The UI Spec and Penpot design become Stale whenever the System Design, Slice Plan or API Contract changes, and are redone before the Gate re-opens.
 
 **Task** — A unit of work the Orchestrator hands to exactly one agent.

@@ -3,8 +3,11 @@
  * Design Phase, with scripted design agents and a scripted Slice runner:
  * Design Gate verdicts, Slices, and each Escalation choice.
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { REACT_NODE } from "@sdlc-code/stack-profiles";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   RunStoppedError,
   type AgentLoopResult,
@@ -32,6 +35,10 @@ import {
   SqliteReviewStore,
   type ReviewStore,
 } from "../persistence/reviewStore.js";
+import {
+  FileScreenshotStore,
+  type ScreenshotStore,
+} from "../persistence/screenshotStore.js";
 import { SqliteGateStore } from "../persistence/gateStore.js";
 import { SqliteRunStore } from "../persistence/runStore.js";
 import { SqliteSliceStore } from "../persistence/sliceStore.js";
@@ -81,6 +88,12 @@ const approveAll = (kinds: readonly DocumentKind[] = DOCUMENT_KINDS) =>
     comments: "",
   }));
 
+const folders: string[] = [];
+afterEach(() => {
+  for (const folder of folders.splice(0))
+    rmSync(folder, { recursive: true, force: true });
+});
+
 function setup(options: {
   mode?: RunMode;
   /** What the Slice runner returns, call by call; passes when it runs out. */
@@ -103,6 +116,8 @@ function setup(options: {
   };
   /** Called per review: true once the Findings are meant to be gone. */
   reviewsClean?: () => boolean;
+  /** Where the screens as drawn are kept; a temporary folder unless given. */
+  screenshots?: ScreenshotStore;
   /** How often blocking Findings may send the code back. */
   reviewRetryBudget?: number;
   /**
@@ -129,6 +144,11 @@ function setup(options: {
   const escalations = new SqliteEscalationStore(store);
   const gates = new SqliteGateStore(store);
   const reviewRecords: ReviewStore = new SqliteReviewStore(store);
+  const screenshotsDir = mkdtempSync(join(tmpdir(), "sdlc-screens-"));
+  folders.push(screenshotsDir);
+  const screenshots: ScreenshotStore =
+    options.screenshots ?? new FileScreenshotStore({ dataDir: screenshotsDir });
+  const notKept: string[] = [];
   const gate = new DocumentDesignGate({ db, runs, documents, gates });
   const run = runs.createRun({
     projectRequest: "Build a todo app",
@@ -253,6 +273,7 @@ function setup(options: {
       delivery,
       codeReview,
       reviews: reviewRecords,
+      screenshots,
       onReviewProblem: (runId, problem) =>
         reviewProblems.push([runId, problem]),
       reviewRetryBudget: options.reviewRetryBudget,
@@ -265,6 +286,8 @@ function setup(options: {
           uiDesign,
           profile: () => REACT_NODE,
           pageName: () => "#1 Todo",
+          screenshots,
+          onScreenshotsNotKept: (reason) => notKept.push(reason),
         }),
       sliceRunner: async (_run, onCheckpoint) => ({
         runSlice: async (input) => {
@@ -329,6 +352,8 @@ function setup(options: {
     deliveries,
     reviews,
     reviewRecords,
+    screenshots,
+    notKept,
     reviewProblems,
     /** Reports a Checkpoint from inside a Slice, as the real runner does. */
     sliceCheckpoint: (checkpoint: SliceCheckpoint) =>
@@ -953,6 +978,82 @@ describe("AgentRunOrchestrator: design", () => {
       number: 7,
       draft: false,
     });
+  });
+});
+
+describe("AgentRunOrchestrator: the screens as drawn (T24e)", () => {
+  it("keeps each screenshot with the version of the design it shows", async () => {
+    const { orchestrator, runId, screenshots, documents } = setup({});
+
+    await orchestrator.advance(runId);
+
+    const version = documents.getLatest(runId, "penpotDesign")!.version;
+    expect(
+      screenshots
+        .list(runId)
+        .map(({ screen, order, version: v }) => [screen, order, v]),
+    ).toEqual([
+      ["Health", 1, version],
+      ["Todo list", 2, version],
+    ]);
+    expect(screenshots.read(runId, version, 2)?.bytes.toString()).toBe(
+      "Todo list",
+    );
+  });
+
+  // What a person approved stays as they saw it: a redraw from a changed UI
+  // Spec is kept beside it, not over it.
+  it("keeps the approved screens when the UI is redrawn from a new UI Spec", async () => {
+    const { orchestrator, runId, screenshots, documents } = setup({});
+    await orchestrator.advance(runId);
+
+    orchestrator.decideDesign(runId, [
+      ...approveAll([
+        "systemDesign",
+        "slicePlan",
+        "apiContract",
+        "penpotDesign",
+      ]),
+      { documentKind: "uiSpec", decision: "requestChanges", comments: "Red." },
+    ]);
+    await orchestrator.advance(runId);
+
+    expect(documents.getLatest(runId, "uiSpec")!.version).toBe(2);
+    expect(screenshots.list(runId, 1)).toHaveLength(2);
+    expect(screenshots.latestVersion(runId)).toBe(2);
+  });
+
+  // A full disk or a locked file loses the pictures, never the Run.
+  it("opens the Design Gate even when the screenshots cannot be kept", async () => {
+    const failing: ScreenshotStore = {
+      save: () => {
+        throw new Error("ENOSPC: no space left on device");
+      },
+      list: () => [],
+      latestVersion: () => null,
+      read: () => null,
+      images: () => new Map(),
+    };
+    const { orchestrator, runId, status, notKept } = setup({
+      screenshots: failing,
+    });
+
+    await orchestrator.advance(runId);
+
+    expect(status()).toBe("awaitingDesignGate");
+    expect(notKept).toEqual(["ENOSPC: no space left on device"]);
+  });
+
+  // A restart used to lose them: they lived only in memory.
+  it("gives a resumed Run's Coding Agents the screenshots again", async () => {
+    const context = await approved({});
+
+    await context.restart().advance(context.runId);
+
+    expect([...context.runnerCalls[0]!.screenImages.keys()]).toEqual([
+      "Health",
+      "Todo list",
+    ]);
   });
 });
 

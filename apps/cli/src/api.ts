@@ -99,6 +99,8 @@ export type RunDetail = RunSummary & {
     ownerAgent: AgentRole;
     wouldMakeStale: DocumentKind[];
   }>;
+  /** The screens as drawn, for the latest UI Spec version. */
+  screenshots: Array<{ screen: string; version: number; order: number }>;
   reviews: Array<{
     findings: Finding[];
     stopReason: string;
@@ -181,6 +183,8 @@ export interface ServerApi {
   listRuns: () => Promise<RunSummary[]>;
   getRun: (runId: string) => Promise<RunDetail>;
   getDocument: (runId: string, kind: DocumentKind) => Promise<DocumentView>;
+  /** Where a screen as drawn is served, to open in a browser. */
+  screenshotUrl: (runId: string, version: number, order: number) => string;
   startRun: (request: StartRunRequest) => Promise<RunSummary>;
   /** Designs a gated Run again after its design failed. */
   retryDesign: (runId: string) => Promise<RunDetail>;
@@ -234,6 +238,9 @@ export class HttpServerApi implements ServerApi {
 
   startRun = (request: StartRunRequest): Promise<RunSummary> =>
     this.#call("POST", "/runs", request);
+
+  screenshotUrl = (runId: string, version: number, order: number): string =>
+    `${this.#base}${runPath(runId)}/screenshots/${version}/${order}`;
 
   retryDesign = (runId: string): Promise<RunDetail> =>
     this.#call("POST", `${runPath(runId)}/retry-design`, {});
