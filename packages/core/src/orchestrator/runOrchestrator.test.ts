@@ -5,7 +5,10 @@
  */
 import { REACT_NODE } from "@sdlc-code/stack-profiles";
 import { describe, expect, it } from "vitest";
-import type { AgentLoopResult } from "../agentLoop/agentLoop.js";
+import {
+  RunStoppedError,
+  type AgentLoopResult,
+} from "../agentLoop/agentLoop.js";
 import type { Design } from "../agents/systemDesign/design.js";
 import { goodDesign } from "../agents/systemDesign/fixtures/goodDesign.js";
 import type {
@@ -107,6 +110,15 @@ function setup(options: {
    * as what the Slice had failed on so far.
    */
   killAfterRetry?: SliceHistory;
+  /**
+   * A person aborts the Run while this Slice runner call (from 1) is under
+   * way, and the runner stops as the real one does: its agent loop throws.
+   */
+  abortDuringSlice?: number;
+  /** A person aborts the Run while the review's last turn is under way. */
+  abortDuringReview?: boolean;
+  /** Delivering fails, as a push GitHub refuses would. */
+  failDelivery?: boolean;
 }) {
   const db = openDatabase(":memory:");
   const store = { db };
@@ -180,6 +192,7 @@ function setup(options: {
   const delivery: RunDelivery = {
     deliver: async (runId, reason) => {
       deliveries.push({ runId, reason });
+      if (options.failDelivery) throw new Error("GitHub refused the push");
       const outcome: DeliveryOutcome = options.delivery ?? {
         status: "opened",
         pullRequest: {
@@ -204,6 +217,8 @@ function setup(options: {
   const codeReview: RunReview | undefined = options.review && {
     reviewRun: async (run) => {
       reviews.push({ runId: run.id, standard: BASELINE_RULES.length });
+      if (options.abortDuringReview)
+        orchestrator.abort(run.id, { openDraftPrOnAbort: false });
       const clean = options.reviewsClean?.() ?? false;
       return {
         findings: clean
@@ -257,6 +272,18 @@ function setup(options: {
           // The real runner reports each Checkpoint of diagram 6; a test says
           // which ones happened through `sliceCheckpoint` below.
           sliceCheckpoints.push(onCheckpoint);
+          if (options.abortDuringSlice === runnerCalls.length) {
+            // A Step under way when the person aborts.
+            tasks.startStep(
+              tasks.createTask({
+                runId: run.id,
+                sliceId: input.slice.id,
+                agentRole: "backendCoding",
+              }).id,
+            );
+            orchestrator.abort(run.id, { openDraftPrOnAbort: true });
+            throw new RunStoppedError();
+          }
           if (options.killAfterRetry && runnerCalls.length === 1) {
             slices.moveSlice(input.slice.id, "building");
             onCheckpoint({
@@ -926,6 +953,114 @@ describe("AgentRunOrchestrator: design", () => {
       number: 7,
       draft: false,
     });
+  });
+});
+
+describe("AgentRunOrchestrator: a person aborts the Run (T24g)", () => {
+  it("aborts a Run waiting at the Design Gate, offering a Draft PR as asked", async () => {
+    const { orchestrator, runId, status, deliveries, runs } = setup({});
+    await orchestrator.advance(runId);
+
+    orchestrator.abort(runId, { openDraftPrOnAbort: false });
+    const progress = await orchestrator.advance(runId);
+
+    expect(progress).toEqual({ finished: "aborted" });
+    expect(status()).toBe("aborted");
+    expect(runs.getRun(runId)!.openDraftPrOnAbort).toBe(false);
+    expect(deliveries.at(-1)?.reason).toMatchObject({
+      ended: "aborted",
+      openDraftPr: false,
+    });
+  });
+
+  // The turn under way finishes; the Step is discarded, the Slice's Tasks
+  // fail, and the Run settles as aborted with its Draft PR offered.
+  it("stops a Run mid-Slice, and leaves no Step running", async () => {
+    const { orchestrator, runId, status, deliveries, tasks } = await approved({
+      abortDuringSlice: 1,
+    });
+
+    const progress = await orchestrator.advance(runId);
+
+    expect(progress).toEqual({ finished: "aborted" });
+    expect(status()).toBe("aborted");
+    const steps = tasks
+      .listTasks(runId)
+      .flatMap((task) => tasks.listSteps(task.id));
+    expect(steps.some((step) => step.status === "running")).toBe(false);
+    expect(deliveries.at(-1)?.reason).toMatchObject({
+      ended: "aborted",
+      openDraftPr: true,
+    });
+  });
+
+  // At an Escalation abort is one of its four choices: it is made there.
+  it("aborts an escalated Run by resolving its Escalation", async () => {
+    const { orchestrator, runId, status, escalations } = await approved({
+      outcomes: [escalatedWith()],
+    });
+    await orchestrator.advance(runId);
+
+    orchestrator.abort(runId);
+
+    expect(status()).toBe("aborted");
+    expect(escalations.getOpenEscalation(runId)).toBeNull();
+    expect(escalations.listEscalations(runId).at(-1)?.choice).toBe("abort");
+  });
+
+  // A failed Draft PR push used to be taken for the stop, and tried for ever.
+  it("reports a delivery that fails after the abort, rather than trying again", async () => {
+    const { orchestrator, runId, deliveries } = setup({ failDelivery: true });
+    await orchestrator.advance(runId);
+    orchestrator.abort(runId);
+
+    await expect(orchestrator.advance(runId)).rejects.toThrow(
+      "GitHub refused the push",
+    );
+    expect(deliveries).toHaveLength(1);
+  });
+
+  // A Run waiting at a Gate, or whose loop stopped, is not being advanced:
+  // its Tasks are settled when it is.
+  it("settles the Tasks of a Run aborted while nothing advanced it", async () => {
+    const { orchestrator, runId, tasks, slices } = await approved({});
+    const [first] = slices.listSlices(runId);
+    const task = tasks.createTask({
+      runId,
+      sliceId: first!.id,
+      agentRole: "backendCoding",
+    });
+    tasks.startStep(task.id);
+
+    orchestrator.abort(runId);
+    await orchestrator.advance(runId);
+
+    const steps = tasks.listSteps(task.id);
+    expect(steps.every((step) => step.status !== "running")).toBe(true);
+  });
+
+  // The review's last turn may finish after the abort: no ready PR then.
+  it("opens no pull request when the Run is aborted during its review", async () => {
+    const { orchestrator, runId, status, deliveries } = await approved({
+      review: {},
+      abortDuringReview: true,
+    });
+
+    await expect(orchestrator.advance(runId)).resolves.toEqual({
+      finished: "aborted",
+    });
+    expect(status()).toBe("aborted");
+    expect(deliveries.map(({ reason }) => reason.ended)).toEqual(["aborted"]);
+    expect(deliveries[0]!.reason).toMatchObject({ openDraftPr: false });
+  });
+
+  it("refuses to abort a Run that has finished", async () => {
+    const { orchestrator, runId } = await approved({});
+    await orchestrator.advance(runId);
+    orchestrator.decidePullRequest(runId, { choice: "approve" });
+    await orchestrator.advance(runId);
+
+    expect(() => orchestrator.abort(runId)).toThrow(/is done already/);
   });
 });
 

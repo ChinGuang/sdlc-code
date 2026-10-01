@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RunsApi } from "../api/client.js";
 import type { RunDetail } from "../api/types.js";
 import { ActivityFeed } from "../components/ActivityFeed.js";
@@ -118,6 +118,9 @@ export function RunPage({
             >
               Decide…
             </button>
+          )}
+          {!FINISHED.has(detail.status) && (
+            <CancelRun run={detail} api={api} onDecided={accept} />
           )}
         </div>
       </div>
@@ -315,5 +318,117 @@ function DesignFailed({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * A person stops the Run, whatever it is doing (T24g). Asked first, because it
+ * cannot be undone; work under way stops at its next model turn.
+ */
+function CancelRun({
+  run,
+  api,
+  onDecided,
+}: {
+  run: RunDetail;
+  api: RunsApi;
+  onDecided: (detail: RunDetail) => void;
+}) {
+  const [asking, setAsking] = useState(false);
+  const [draftPr, setDraftPr] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const keep = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (asking) keep.current?.focus();
+  }, [asking]);
+
+  const close = () => {
+    setAsking(false);
+    // The trigger comes back on the next render; give it the focus then.
+    setTimeout(() => trigger.current?.focus());
+  };
+  const cancel = async () => {
+    setSending(true);
+    setError(null);
+    try {
+      onDecided(await api.abortRun(run.id, draftPr));
+      setAsking(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSending(false);
+    }
+  };
+  if (!asking)
+    return (
+      <button
+        ref={trigger}
+        type="button"
+        className="button small-button danger-text"
+        onClick={() => setAsking(true)}
+      >
+        Cancel run…
+      </button>
+    );
+  return (
+    <div
+      className="card cancel-run"
+      role="group"
+      aria-label="Cancel run"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !sending) close();
+      }}
+    >
+      <strong>Cancel this Run?</strong>
+      <p className="small muted">
+        {run.advancing
+          ? "It stops at its next step: a model turn, Test Run or push already under way finishes first, and nothing new starts."
+          : "It stops now."}{" "}
+        This cannot be undone.
+      </p>
+      {run.pullRequest ? (
+        // Its pull request is open already, ready for review: abort leaves it.
+        <p className="small">
+          Pull request #{run.pullRequest.number} stays open on GitHub; close it
+          there if you no longer want it.
+        </p>
+      ) : (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={draftPr}
+            onChange={(event) => setDraftPr(event.target.checked)}
+          />
+          <span>Open a Draft PR with the passed slices</span>
+        </label>
+      )}
+      {error && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="dialog-actions">
+        <button
+          ref={keep}
+          type="button"
+          className="button"
+          disabled={sending}
+          onClick={close}
+        >
+          Keep running
+        </button>
+        <button
+          type="button"
+          className="button danger-fill"
+          disabled={sending}
+          onClick={cancel}
+        >
+          {sending ? "Cancelling…" : "Cancel run"}
+        </button>
+      </div>
+    </div>
   );
 }

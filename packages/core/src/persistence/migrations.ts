@@ -155,4 +155,8 @@ export const MIGRATIONS: readonly string[] = [
     created_at TEXT NOT NULL
   );
   `,
+
+  /* 6: a person may abort a Run at any time; their Draft PR choice (T24g) */ `
+  ALTER TABLE runs ADD COLUMN open_draft_pr_on_abort INTEGER;
+  `,
 ];

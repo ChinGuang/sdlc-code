@@ -134,14 +134,17 @@ export class RuntimeRunService implements RunService, RunLifecycle {
     );
 
   abortRun = (runId: string, openDraftPrOnAbort: boolean): RunDetail => {
-    if (this.#waiting(this.#run(runId)).for !== "escalation")
-      throw new RunConflictError(
-        `Run ${runId} is not at an Escalation, and a Run is aborted from one.`,
-      );
-    return this.resolveEscalation(runId, {
-      choice: "abort",
-      openDraftPrOnAbort,
-    });
+    this.#run(runId);
+    try {
+      this.#runtime().orchestrator.abort(runId, { openDraftPrOnAbort });
+    } catch (error) {
+      if (isRefusal(error)) throw new RunConflictError(error.message);
+      throw error;
+    }
+    // A Run under way stops at its next model turn and settles in the loop
+    // already advancing it; one that was waiting settles now.
+    if (!this.#advancing.has(runId)) this.#advance(runId);
+    return this.#detail(this.#run(runId));
   };
 
   events = (runId: string, after?: number): Observable<StreamedEvent> => {
@@ -164,8 +167,22 @@ export class RuntimeRunService implements RunService, RunLifecycle {
         failed.push({ runId: run.id, problem: this.#describe(error) });
       }
     }
+    // Not resumed, settled: a Run aborted while a Step ran, by a server that
+    // stopped before the Step ended, still owes its Draft PR (T24g).
+    for (const run of runtime.runs.listRuns())
+      if (run.status === "aborted" && this.#hasRunningStep(run.id))
+        this.#advance(run.id);
     return { resumed, failed };
   };
+
+  #hasRunningStep(runId: string): boolean {
+    const { tasks } = this.#runtime();
+    return tasks
+      .listTasks(runId)
+      .some((task) =>
+        tasks.listSteps(task.id).some((step) => step.status === "running"),
+      );
+  }
 
   /**
    * Closes what the runtime opened. It does not wait for Runs being advanced:

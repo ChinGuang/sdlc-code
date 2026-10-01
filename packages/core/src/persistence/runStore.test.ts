@@ -44,6 +44,7 @@ describe("SqliteRunStore runs", () => {
       tokensUsed: 0,
       pullRequest: null,
       failure: null,
+      openDraftPrOnAbort: null,
       createdAt: "2026-09-20T00:00:00.000Z",
       updatedAt: "2026-09-20T00:00:00.000Z",
     });
@@ -175,6 +176,21 @@ describe("SqliteRunStore runs", () => {
     );
     expect(() => store.addTokensUsed("nope", 1)).toThrow(/not found/);
     expect(() => store.saveCheckpoint("nope", {})).toThrow(/not found/);
+  });
+});
+
+describe("SqliteRunStore abort choice (T24g)", () => {
+  it("keeps what a person who aborts asked for, and nothing until they do", () => {
+    const store = makeStore();
+    const run = store.createRun(newRun);
+    expect(run.openDraftPrOnAbort).toBeNull();
+
+    expect(store.setOpenDraftPrOnAbort(run.id, false).openDraftPrOnAbort).toBe(
+      false,
+    );
+    expect(store.setOpenDraftPrOnAbort(run.id, true).openDraftPrOnAbort).toBe(
+      true,
+    );
   });
 });
 

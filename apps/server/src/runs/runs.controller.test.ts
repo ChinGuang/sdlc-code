@@ -415,10 +415,10 @@ describe("POST /runs/:id/abort", () => {
     ]);
   });
 
-  it("answers 409 for a Run that is not at an Escalation", async () => {
+  it("answers 409 for a Run that has finished", async () => {
     const { service } = fakeService({
       abortRun: () => {
-        throw new RunConflictError("Run run-1 is not at an Escalation.");
+        throw new RunConflictError("Run run-1 is done already.");
       },
     });
     const url = await start(service);

@@ -196,3 +196,78 @@ describe("RunPage: a design that failed", () => {
     expect(fake.calls.decisions).toEqual([{ retryDesign: true }]);
   });
 });
+
+describe("RunPage: cancelling a Run (T24g)", () => {
+  it("asks first, then stops the Run with the Draft PR choice", async () => {
+    const fake = await open(DETAIL);
+    fake.setDetail({ ...DETAIL, status: "aborted", advancing: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run…" }));
+    const ask = screen.getByRole("group", { name: "Cancel run" });
+    expect(ask).toHaveTextContent("It stops at its next step");
+    expect(
+      within(ask).getByRole("button", { name: "Keep running" }),
+    ).toHaveFocus();
+    fireEvent.click(within(ask).getByRole("checkbox", { name: /Draft PR/ }));
+    fireEvent.click(within(ask).getByRole("button", { name: "Cancel run" }));
+
+    await vi.waitFor(() =>
+      expect(fake.calls.decisions).toEqual([{ abort: false }]),
+    );
+    expect(
+      await screen.findByText("Aborted", { selector: ".badge" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel run…" })).toBeNull();
+  });
+
+  // Abort leaves a pull request that is open already; it does not pretend.
+  it("says an open pull request stays open, and offers no Draft PR", async () => {
+    await open({
+      ...DETAIL,
+      status: "awaitingPrGate",
+      advancing: false,
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/o/r/pull/7",
+        draft: false,
+      },
+      waiting: {
+        for: "prGate",
+        pullRequest: {
+          number: 7,
+          url: "https://github.com/o/r/pull/7",
+          draft: false,
+        },
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run…" }));
+
+    const ask = screen.getByRole("group", { name: "Cancel run" });
+    expect(ask).toHaveTextContent("It stops now.");
+    expect(ask).toHaveTextContent("Pull request #7 stays open on GitHub");
+    expect(within(ask).queryByRole("checkbox")).toBeNull();
+  });
+
+  it("closes on Escape without cancelling", async () => {
+    const fake = await open(DETAIL);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run…" }));
+    fireEvent.keyDown(screen.getByRole("group", { name: "Cancel run" }), {
+      key: "Escape",
+    });
+
+    expect(screen.queryByRole("group", { name: "Cancel run" })).toBeNull();
+    expect(fake.calls.decisions).toEqual([]);
+  });
+
+  it("keeps the Run going when the person changes their mind", async () => {
+    const fake = await open(DETAIL);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep running" }));
+
+    expect(screen.queryByRole("group", { name: "Cancel run" })).toBeNull();
+    expect(fake.calls.decisions).toEqual([]);
+  });
+});

@@ -83,6 +83,20 @@ function setup(
       });
       return progress;
     },
+    // As the real one: a finished Run cannot be aborted.
+    abort: (runId, choice) => {
+      const run = runs.getRun(runId)!;
+      if (["done", "failed", "aborted"].includes(run.status))
+        throw new Error(`Run ${runId} is ${run.status} already.`);
+      decisions.push(`abort:${choice?.openDraftPrOnAbort}`);
+      runs.setOpenDraftPrOnAbort(runId, choice?.openDraftPrOnAbort ?? true);
+      if (run.status === "escalated")
+        runs.applyEvent(runId, {
+          type: "escalationResolved",
+          choice: "abort",
+        });
+      else runs.applyEvent(runId, { type: "aborted" });
+    },
     retryDesign: (runId) => {
       if (runs.getRun(runId)?.failure?.trigger !== "design")
         throw new Error(`Run ${runId} has no failed design to try again.`);
@@ -585,18 +599,76 @@ describe("RuntimeRunService.abortRun", () => {
 
     api.abortRun(run.id, false);
 
-    expect(decisions).toEqual(["escalation:abort"]);
+    expect(decisions).toEqual(["abort:false"]);
   });
 
-  // Aborting is an Escalation's choice (CONTEXT.md); a Run that is building
-  // has no way out yet but to be stopped.
-  it("refuses a Run that is not at an Escalation", async () => {
-    const { api, settled, decisions } = setup();
+  // A person may stop a Run whatever it is doing (T24g).
+  it("aborts a Run waiting at a Gate, and settles it", async () => {
+    const { api, settled, decisions, advanced } = setup([
+      () => ({ waitingFor: "designGate" }),
+      () => ({ finished: "aborted" }),
+    ]);
     const run = await api.startRun(request);
     await settled();
 
-    expect(() => api.abortRun(run.id, true)).toThrow(/not at an Escalation/);
-    expect(decisions).toEqual([]);
+    const detail = api.abortRun(run.id, true);
+    await settled();
+
+    expect(detail.status).toBe("aborted");
+    expect(decisions).toEqual(["abort:true"]);
+    // Settled by one more advance: its Draft PR, if one is owed.
+    expect(advanced).toHaveLength(2);
+  });
+
+  // The loop advancing it settles it, at its next model turn.
+  it("does not advance a Run already being advanced", async () => {
+    let finish: () => void = () => {};
+    const { api, settled, advanced } = setup([
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ finished: "aborted" });
+        }),
+    ]);
+    const run = await api.startRun(request);
+
+    api.abortRun(run.id, true);
+    finish();
+    await settled();
+
+    expect(advanced).toHaveLength(1);
+  });
+
+  // Aborted while a Step ran, by a server that stopped before it ended.
+  it("settles on start a Run aborted before its loop could, and resumes none", async () => {
+    const { api, settled, runs, tasks, lifecycle, advanced } = setup([
+      () => ({ waitingFor: "designGate" }),
+      () => ({ finished: "aborted" }),
+    ]);
+    const run = await api.startRun(request);
+    await settled();
+    tasks.startStep(
+      tasks.createTask({
+        runId: run.id,
+        sliceId: null,
+        agentRole: "systemDesign",
+      }).id,
+    );
+    runs.applyEvent(run.id, { type: "aborted" });
+
+    const { resumed } = await lifecycle.resumeUnfinished();
+    await settled();
+
+    expect(resumed).toEqual([]);
+    expect(advanced).toHaveLength(2);
+  });
+
+  it("answers a conflict for a Run that has finished", async () => {
+    const { api, settled, runs } = setup();
+    const run = await api.startRun(request);
+    await settled();
+    runs.applyEvent(run.id, { type: "aborted" });
+
+    expect(() => api.abortRun(run.id, true)).toThrow(RunConflictError);
   });
 });
 
