@@ -55,13 +55,26 @@ export async function mermaidProblem(source: string): Promise<string | null> {
  * other things (`<|--` in a classDiagram).
  */
 export function repairMermaid(source: string): string {
-  if (!/^\s*(flowchart|graph)\b/.test(source)) return source;
+  if (!/^(flowchart|graph)\b/.test(firstStatement(source))) return source;
   return source.replace(
-    /((?:--|==|-\.)[-=.]*>?)\s*\|([^|\n]*)\|/g,
+    // An arrow (-->, ---, ==>, -.->, --o, --x), then its |label|; a label
+    // already in quotes may hold a | of its own.
+    /((?:--|==|-\.)[-=.]*[>ox]?)\s*\|\s*("[^"\n]*"|[^|\n]*?)\s*\|/g,
     (_whole, arrow: string, label: string) => {
-      const text = label.trim().replace(/^"(.*)"$/, "$1");
-      const plain = /^[\w ]*$/.test(text);
-      return `${arrow}|${plain ? text : `"${text.replace(/"/g, "#quot;")}"`}|`;
+      if (/^".*"$/.test(label)) return `${arrow}|${label}|`;
+      const plain = /^[\w ]*$/.test(label);
+      return `${arrow}|${plain ? label : `"${label.replace(/"/g, "#quot;")}"`}|`;
     },
+  );
+}
+
+/** A diagram's first statement, past front-matter, %% directives and comments. */
+function firstStatement(source: string): string {
+  const body = source.replace(/^\s*---\r?\n[\s\S]*?\r?\n---\s*\r?\n/, "");
+  return (
+    body
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line !== "" && !line.startsWith("%%")) ?? ""
   );
 }

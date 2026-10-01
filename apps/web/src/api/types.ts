@@ -48,6 +48,8 @@ export type RunSummary = {
   pullRequest: PullRequest | null;
   createdAt: string;
   updatedAt: string;
+  /** What it waits for a person to do, if anything. */
+  waitingFor?: Waiting["for"];
 };
 
 export type Waiting =

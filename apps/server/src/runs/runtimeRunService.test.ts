@@ -514,7 +514,7 @@ describe("issueSummary", () => {
 describe("RuntimeRunService: a failed design", () => {
   // It stays designing, so without a word a follower would wait for ever.
   it("says the design failed, waits for a person, and designs again when asked", async () => {
-    const { api, settled, runs, log, decisions, advanced } = setup([
+    const { api, settled, runs, log, decisions, advanced, lifecycle } = setup([
       (run) => {
         runs.recordFailure(run.id, {
           trigger: "design",
@@ -546,6 +546,12 @@ describe("RuntimeRunService: a failed design", () => {
       problem:
         "The design failed: The System Design Agent produced no valid design.",
     });
+
+    // The list says a person is needed, and a restart does not ask again.
+    expect(api.listRuns()[0]).toMatchObject({ waitingFor: "designRetry" });
+    const before = advanced.length;
+    await lifecycle.resumeUnfinished();
+    expect(advanced).toHaveLength(before);
 
     api.retryDesign(run.id);
     await settled();

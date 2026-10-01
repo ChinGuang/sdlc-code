@@ -259,6 +259,8 @@ classDiagram
 stateDiagram-v2
   [*] --> Designing
   Designing --> AwaitingDesignGate : documents ready (gated)
+  Designing --> Failed : no valid design (auto)
+  Designing --> Designing : no valid design (gated), waits for Retry design
   Designing --> Building : documents ready (auto)
   AwaitingDesignGate --> Designing : changes requested
   AwaitingDesignGate --> Building : all documents approved

@@ -39,6 +39,8 @@ export type RunSummary = {
   pullRequest: { number: number; url: string; draft: boolean } | null;
   createdAt: string;
   updatedAt: string;
+  /** What it waits for a person to do, if anything: the list says so. */
+  waitingFor: Waiting["for"];
 };
 
 /**

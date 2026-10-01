@@ -156,7 +156,9 @@ export class RuntimeRunService implements RunService, RunLifecycle {
     for (const run of runtime.runs.listUnfinishedRuns()) {
       try {
         await runtime.resume(run.id);
-        this.#advance(run.id);
+        // It waits for a person, and said so when it failed: advancing it
+        // would only say it again.
+        if (this.#waiting(run).for !== "designRetry") this.#advance(run.id);
         resumed.push(run.id);
       } catch (error) {
         failed.push({ runId: run.id, problem: this.#describe(error) });
@@ -386,7 +388,26 @@ function summary(run: Run): RunSummary {
     pullRequest: run.pullRequest,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
+    waitingFor: waitingFor(run),
   };
+}
+
+/** What a Run waits for a person to do, from the Run alone: for the list. */
+function waitingFor(run: Run): Waiting["for"] {
+  switch (run.status) {
+    case "designing":
+      return run.mode === "gated" && run.failure?.trigger === "design"
+        ? "designRetry"
+        : "nothing";
+    case "awaitingDesignGate":
+      return "designGate";
+    case "escalated":
+      return "escalation";
+    case "awaitingPrGate":
+      return "prGate";
+    default:
+      return "nothing";
+  }
 }
 
 const SIDE = { backendCoding: "backend", frontendCoding: "frontend" } as const;

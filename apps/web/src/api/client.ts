@@ -35,9 +35,9 @@ export interface RunsApi {
   startRun: (request: StartRunRequest) => Promise<RunSummary>;
   /** A document in full; the Run's detail only lists them. */
   getDocument: (runId: string, kind: DocumentKind) => Promise<DocumentView>;
-  /** Each answers with the Run as the decision left it. */
   /** Designs a gated Run again after its design failed. */
   retryDesign: (runId: string) => Promise<RunDetail>;
+  /** Each answers with the Run as the decision left it. */
   decideDesign: (
     runId: string,
     verdicts: DesignVerdict[],

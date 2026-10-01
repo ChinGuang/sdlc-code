@@ -86,6 +86,8 @@ function setup(options: {
   revisedPlan?: Design["slicePlan"];
   /** Design calls that fail (no valid design), by call number from 1. */
   failDesign?: number[];
+  /** UI Design calls that fail (no valid UI Spec), by call number from 1. */
+  failUiDesign?: number[];
   /** What delivering the pull request does; it opens one by default. */
   delivery?: DeliveryOutcome;
   /** What the review finds; without it a Run is delivered unreviewed. */
@@ -152,6 +154,8 @@ function setup(options: {
   const uiDesign: UiDesignAgent = {
     design: async (input) => {
       uiCalls.push(input);
+      if (options.failUiDesign?.includes(uiCalls.length))
+        return { spec: null, screens: [], page: null, loop };
       const spec = goodUiSpec();
       if (input.revision) spec.tokens.accent = "#DC2626";
       return {
@@ -1430,6 +1434,22 @@ describe("AgentRunOrchestrator: a design agent fails", () => {
     });
     expect(runs.getRun(runId)!.failure).toBeNull();
     expect(designCalls.at(-1)!.revision?.comments).toEqual(["Add paging."]);
+  });
+
+  // Retrying used to redo the System Design, skip the UI Design that had
+  // failed, and stop with nothing to press.
+  it("draws the UI on a retry after the first UI Design failed", async () => {
+    const { orchestrator, runId, uiCalls } = setup({ failUiDesign: [1] });
+
+    await expect(orchestrator.advance(runId)).resolves.toMatchObject({
+      waitingFor: "designRetry",
+    });
+    orchestrator.retryDesign(runId);
+
+    await expect(orchestrator.advance(runId)).resolves.toEqual({
+      waitingFor: "designGate",
+    });
+    expect(uiCalls).toHaveLength(2);
   });
 
   it("refuses to retry a design that did not fail", async () => {

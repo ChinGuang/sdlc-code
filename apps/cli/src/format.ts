@@ -88,7 +88,10 @@ export function statusText(status: RunDetail["status"], paint: Paint): string {
 
 /** One line per Run: `27f388  escalated  1.3M / 2.0M  A calendar app…`. */
 export function runLine(run: RunSummary, paint: Paint): string {
-  const [label, tone] = STATUS[run.status] ?? [run.status, "muted"];
+  const [label, tone]: [string, keyof Paint] =
+    run.waitingFor === "designRetry"
+      ? ["design failed", "amber"]
+      : (STATUS[run.status] ?? [run.status, "muted"]);
   return [
     paint.bold(shortId(run.id)),
     paint[tone](label.padEnd(20)),

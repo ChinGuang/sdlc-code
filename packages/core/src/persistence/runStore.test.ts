@@ -178,6 +178,25 @@ describe("SqliteRunStore runs", () => {
   });
 });
 
+describe("SqliteRunStore failure", () => {
+  // A gated Run whose design failed is tried again when a person asks (T24f).
+  it("forgets why a Run stopped once a person asks for another try", () => {
+    const store = makeStore();
+    const run = store.createRun(newRun);
+    store.recordFailure(run.id, {
+      trigger: "design",
+      summary: "No valid design.",
+      slice: null,
+      reports: [],
+    });
+
+    const cleared = store.clearFailure(run.id);
+
+    expect(cleared.failure).toBeNull();
+    expect(store.getRun(run.id)!.failure).toBeNull();
+  });
+});
+
 describe("SqliteRunStore checkpoints", () => {
   it("returns the latest Checkpoint with its payload intact", () => {
     const store = makeStore();

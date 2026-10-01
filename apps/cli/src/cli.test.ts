@@ -528,17 +528,31 @@ describe("sdlccode: a design that failed", () => {
     );
   });
 
-  it("designs again when asked", async () => {
-    const { run, out, posted } = await cli(FAILED, (request) =>
-      request.path === `/runs/${ID}/retry-design`
-        ? { json: { ...FAILED, advancing: false, waiting: { for: "nothing" } } }
-        : undefined,
-    );
+  it("designs again when asked, and follows it to the Design Gate", async () => {
+    let retried = false;
+    const { run, out, posted } = await cli(FAILED, (request) => {
+      if (request.path === `/runs/${ID}/retry-design`) {
+        retried = true;
+        return {
+          json: { ...FAILED, advancing: true, waiting: { for: "nothing" } },
+        };
+      }
+      if (request.path.startsWith(`/runs/${ID}/events`))
+        return { events: [{ type: "status", status: "awaitingDesignGate" }] };
+      if (request.path === `/runs/${ID}`)
+        return {
+          json: retried ? { ...AT_DESIGN_GATE, advancing: false } : FAILED,
+        };
+      return undefined;
+    });
 
     expect(await run("retry-design", "27f388")).toBe(0);
 
     expect(posted()).toEqual([[`/runs/${ID}/retry-design`, {}]]);
-    expect(out[0]).toMatch(/✓ Designing #27f388 again\./);
+    const printed = out.join("\n");
+    expect(printed).toMatch(/✓ Designing #27f388 again\./);
+    expect(printed).toMatch(/Design Gate: 4 documents to judge/);
+    expect(printed).not.toMatch(/The design failed/);
   });
 });
 

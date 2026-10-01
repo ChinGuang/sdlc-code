@@ -22,7 +22,7 @@ import {
   slicePlanProblems,
   systemDesignProblems,
 } from "./validateDesign.js";
-import { repairMermaid } from "./mermaid.js";
+import { mermaidProblem, repairMermaid } from "./mermaid.js";
 
 export type SystemDesignInput = {
   projectRequest: string;
@@ -122,12 +122,16 @@ function designTools(
       input: SystemDesignPart,
       run: async (submitted) => {
         // What the model gets wrong every time is put right, not sent back.
+        // A diagram that already parses is left exactly as written.
         const systemDesign = {
           ...submitted,
-          diagrams: submitted.diagrams.map((diagram) => ({
-            ...diagram,
-            mermaid: repairMermaid(diagram.mermaid),
-          })),
+          diagrams: await Promise.all(
+            submitted.diagrams.map(async (diagram) =>
+              (await mermaidProblem(diagram.mermaid))
+                ? { ...diagram, mermaid: repairMermaid(diagram.mermaid) }
+                : diagram,
+            ),
+          ),
         };
         const problems = await systemDesignProblems(systemDesign);
         save("systemDesign", systemDesign, problems);

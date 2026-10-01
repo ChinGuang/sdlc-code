@@ -298,8 +298,8 @@ function DesignFailed({
       <strong className="text-red">The design failed.</strong>{" "}
       <span className="muted">{problem}</span>
       <p className="small faint">
-        Nothing runs until you try again; it designs from the start, with any
-        changes you asked for.
+        Nothing runs until you try again; it designs again what is missing, with
+        any changes you asked for.
       </p>
       <button
         type="button"

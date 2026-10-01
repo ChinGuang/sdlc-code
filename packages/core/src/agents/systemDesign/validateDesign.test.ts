@@ -56,6 +56,29 @@ describe("repairMermaid", () => {
     expect(await mermaidProblem(repaired)).toBeNull();
   });
 
+  it.each([
+    ["A -.->|PUT /e/{id}| B", 'A -.->|"PUT /e/{id}"| B'],
+    ["A ==>|PUT /e/{id}| B", 'A ==>|"PUT /e/{id}"| B'],
+    ["A ---|PUT /e/{id}| B", 'A ---|"PUT /e/{id}"| B'],
+    ["A <-->|PUT /e/{id}| B", 'A <-->|"PUT /e/{id}"| B'],
+    ["A --x|PUT /e/{id}| B", 'A --x|"PUT /e/{id}"| B'],
+    ["A --o|PUT /e/{id}| B", 'A --o|"PUT /e/{id}"| B'],
+    // Already quoted, with a | of its own: left as written.
+    ['A -->|"a|b"| B', 'A -->|"a|b"| B'],
+  ])("repairs %j", async (edge, repaired) => {
+    const fixed = repairMermaid(`flowchart LR\n  ${edge}`);
+
+    expect(fixed).toBe(`flowchart LR\n  ${repaired}`);
+    expect(await mermaidProblem(fixed)).toBeNull();
+  });
+
+  it("finds the flowchart past front-matter and comments", () => {
+    const source =
+      "---\ntitle: Parts\n---\n%% the parts\nflowchart LR\n  A -->|GET /a/{id}| B";
+
+    expect(repairMermaid(source)).toContain('A -->|"GET /a/{id}"| B');
+  });
+
   it("leaves diagrams other than flowcharts alone", () => {
     const classes = "classDiagram\n  Animal <|-- Duck\n  Duck : +swim()";
 

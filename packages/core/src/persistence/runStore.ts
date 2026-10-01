@@ -40,7 +40,11 @@ export interface RunStore {
    */
   setTokenBudget: (id: string, tokens: number) => Run;
   setPullRequest: (id: string, pullRequest: RunPullRequest) => Run;
-  /** Records why the Run failed; it is not a Checkpoint, nothing resumes from it. */
+  /**
+   * Records why the Run stopped: it failed (auto mode), or its design failed
+   * and it waits for a person to ask for another try (gated, T24f). Not a
+   * Checkpoint: nothing resumes from it.
+   */
   recordFailure: (id: string, failure: RunFailure) => Run;
   /** Forgets why it stopped: a person asked for another try. */
   clearFailure: (id: string) => Run;

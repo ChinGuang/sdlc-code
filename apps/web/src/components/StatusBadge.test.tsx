@@ -31,6 +31,24 @@ describe("StatusBadge", () => {
     expect(badge).toHaveClass(`tone-${tone}`);
   });
 
+  // Still designing, but nothing moves until a person asks (T24f).
+  it("shows a design that failed as needing a person", () => {
+    render(
+      <StatusBadge
+        run={{
+          status: "designing",
+          pullRequest: null,
+          waitingFor: "designRetry",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Design failed")).toHaveAttribute(
+      "data-tone",
+      "amber",
+    );
+  });
+
   // Board 02's pill: "Coding · Slice 2".
   it("adds where the Run is, when it is given", () => {
     render(

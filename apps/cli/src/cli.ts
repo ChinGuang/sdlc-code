@@ -236,7 +236,11 @@ async function follow(runId: string, io: CliIo, deps: CliDeps) {
       runId,
       detail.lastSeq,
       (event) => {
-        const line = eventLine(event, detail, paint);
+        // A failed design is said once, by the status below, not twice.
+        const failedDesign =
+          event.type === "problem" &&
+          String(event.problem).startsWith("The design failed:");
+        const line = failedDesign ? null : eventLine(event, detail, paint);
         if (line) io.out(line);
         // What a failed or aborted Run delivers comes just after its status.
         if (event.type === "delivery") return "stop";
