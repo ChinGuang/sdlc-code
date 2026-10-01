@@ -40,6 +40,8 @@ export type RunSummary = {
   pullRequest: PullRequest | null;
   createdAt: string;
   updatedAt: string;
+  /** What it waits for a person to do, if anything. */
+  waitingFor?: Waiting["for"];
 };
 
 export type IssueSummary = {
@@ -68,7 +70,9 @@ export type Waiting =
       workingMemory: Array<{ role: AgentRole; note: string }>;
       openDraftPrOnAbort: boolean;
     }
-  | { for: "prGate"; pullRequest: PullRequest | null };
+  | { for: "prGate"; pullRequest: PullRequest | null }
+  /** No valid design came out of a gated Run: a person asks for another try. */
+  | { for: "designRetry"; problem: string };
 
 export type Finding = {
   ruleId: string;
@@ -182,6 +186,8 @@ export interface ServerApi {
   /** Where a screen as drawn is served, to open in a browser. */
   screenshotUrl: (runId: string, version: number, order: number) => string;
   startRun: (request: StartRunRequest) => Promise<RunSummary>;
+  /** Designs a gated Run again after its design failed. */
+  retryDesign: (runId: string) => Promise<RunDetail>;
   decideDesign: (
     runId: string,
     verdicts: DesignVerdict[],
@@ -235,6 +241,9 @@ export class HttpServerApi implements ServerApi {
 
   screenshotUrl = (runId: string, version: number, order: number): string =>
     `${this.#base}${runPath(runId)}/screenshots/${version}/${order}`;
+
+  retryDesign = (runId: string): Promise<RunDetail> =>
+    this.#call("POST", `${runPath(runId)}/retry-design`, {});
 
   decideDesign = (
     runId: string,

@@ -15,6 +15,21 @@ const LEGAL: Array<[RunStatus, RunEvent, RunMode, RunStatus]> = [
   ["designing", { type: "documentsReady" }, "gated", "awaitingDesignGate"],
   ["designing", { type: "documentsReady" }, "auto", "building"],
   ["designing", { type: "designFailed" }, "auto", "failed"],
+
+  // A person may stop a Run at any time before it finishes (T24g); at an
+  // Escalation, abort is one of its choices instead.
+  ...(
+    [
+      "designing",
+      "awaitingDesignGate",
+      "building",
+      "reviewing",
+      "awaitingPrGate",
+    ] as const
+  ).flatMap((status): Array<[RunStatus, RunEvent, RunMode, RunStatus]> => [
+    [status, { type: "aborted" }, "gated", "aborted"],
+    [status, { type: "aborted" }, "auto", "aborted"],
+  ]),
   [
     "awaitingDesignGate",
     { type: "designChangesRequested" },
@@ -78,6 +93,7 @@ const LEGAL: Array<[RunStatus, RunEvent, RunMode, RunStatus]> = [
 
 /** One sample of every event shape, including every payload variant. */
 const ALL_EVENTS: RunEvent[] = [
+  { type: "aborted" },
   { type: "documentsReady" },
   { type: "designFailed" },
   { type: "designChangesRequested" },

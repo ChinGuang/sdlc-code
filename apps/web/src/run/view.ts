@@ -22,8 +22,12 @@ export type Tone = "green" | "blue" | "amber" | "red" | "purple" | "muted";
 export type Badge = { label: string; tone: Tone };
 
 export function statusBadge(
-  run: Pick<RunSummary, "status" | "pullRequest">,
+  run: Pick<RunSummary, "status" | "pullRequest"> &
+    Partial<Pick<RunSummary, "waitingFor">>,
 ): Badge {
+  // Still designing, but nothing moves until a person asks again (T24f).
+  if (run.waitingFor === "designRetry")
+    return { label: "Design failed", tone: "amber" };
   switch (run.status) {
     case "designing":
       return { label: "Designing", tone: "blue" };
@@ -83,7 +87,10 @@ export function phases(
 ): Phase[] {
   const at = run.status === "done" ? null : whereItIs(run);
   const atIndex = at === null ? PHASES.length : PHASES.indexOf(at);
-  const stopped = ["escalated", "failed", "aborted"].includes(run.status);
+  // A gated design that failed waits for a person: stopped, though designing.
+  const stopped =
+    ["escalated", "failed", "aborted"].includes(run.status) ||
+    (run.status === "designing" && run.failure?.trigger === "design");
   return PHASES.map((key, index) => {
     const gate = key === "designGate" || key === "prGate";
     let state: PhaseState =
@@ -139,6 +146,8 @@ const isThrough = (slice: RunSlice) =>
 
 /** The runs table's progress column: a phrase and how far along the bar is. */
 export function progress(run: RunSummary): { label: string; fraction: number } {
+  if (run.waitingFor === "designRetry")
+    return { label: "Design failed", fraction: 0.1 };
   const pr = run.pullRequest ? `PR #${run.pullRequest.number}` : null;
   switch (run.status) {
     case "designing":

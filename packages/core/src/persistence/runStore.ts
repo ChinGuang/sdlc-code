@@ -40,8 +40,16 @@ export interface RunStore {
    */
   setTokenBudget: (id: string, tokens: number) => Run;
   setPullRequest: (id: string, pullRequest: RunPullRequest) => Run;
-  /** Records why the Run failed; it is not a Checkpoint, nothing resumes from it. */
+  /**
+   * Records why the Run stopped: it failed (auto mode), or its design failed
+   * and it waits for a person to ask for another try (gated, T24f). Not a
+   * Checkpoint: nothing resumes from it.
+   */
   recordFailure: (id: string, failure: RunFailure) => Run;
+  /** Forgets why it stopped: a person asked for another try. */
+  clearFailure: (id: string) => Run;
+  /** What a person who aborts the Run asked for: a Draft PR of what passed, or not. */
+  setOpenDraftPrOnAbort: (id: string, open: boolean) => Run;
   saveCheckpoint: (runId: string, payload: unknown) => Checkpoint;
   latestCheckpoint: (runId: string) => Checkpoint | null;
 }
@@ -62,6 +70,7 @@ type RunRow = {
   pr_url: string | null;
   pr_draft: number | null;
   failure: string | null;
+  open_draft_pr_on_abort: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -180,6 +189,26 @@ export class SqliteRunStore implements RunStore {
       return this.#require(id);
     });
 
+  setOpenDraftPrOnAbort = (id: string, open: boolean): Run =>
+    inTransaction(this.#ctx.db, () => {
+      this.#require(id);
+      this.#ctx.db
+        .prepare(
+          "UPDATE runs SET open_draft_pr_on_abort = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(open ? 1 : 0, this.#ctx.now(), id);
+      return this.#require(id);
+    });
+
+  clearFailure = (id: string): Run =>
+    inTransaction(this.#ctx.db, () => {
+      this.#require(id);
+      this.#ctx.db
+        .prepare("UPDATE runs SET failure = NULL, updated_at = ? WHERE id = ?")
+        .run(this.#ctx.now(), id);
+      return this.#require(id);
+    });
+
   setPullRequest = (id: string, pullRequest: RunPullRequest): Run =>
     inTransaction(this.#ctx.db, () => {
       this.#require(id);
@@ -261,6 +290,10 @@ function toRun(row: RunRow): Run {
           },
     failure:
       row.failure === null ? null : (JSON.parse(row.failure) as RunFailure),
+    openDraftPrOnAbort:
+      row.open_draft_pr_on_abort === null
+        ? null
+        : row.open_draft_pr_on_abort === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { goodDesign } from "./fixtures/goodDesign.js";
 import { MERMAID_LOAD_TIMEOUT, warmMermaid } from "./fixtures/warmMermaid.js";
-import { mermaidProblem } from "./mermaid.js";
+import { mermaidProblem, repairMermaid } from "./mermaid.js";
 import { contractEndpoints, validateDesign } from "./validateDesign.js";
 
 beforeAll(warmMermaid, MERMAID_LOAD_TIMEOUT);
@@ -30,6 +30,74 @@ describe("mermaidProblem", () => {
 
     expect("window" in globalThis).toBe(false);
     expect("document" in globalThis).toBe(false);
+  });
+});
+
+// Run #d4f0e8's diagram was rejected four times for these labels.
+describe("repairMermaid", () => {
+  const RUN_D4F0E8 = [
+    "flowchart LR",
+    "  Browser[Web app] -->|PUT /events/{id}| API[Node API]",
+    '  Browser -->| "GET /events" | API',
+    "  API -- reads --> DB[(Database)]",
+    "  API -->|saves| DB",
+  ].join("\n");
+
+  it("quotes edge labels with punctuation, so the parser takes them", async () => {
+    expect(await mermaidProblem(RUN_D4F0E8)).toEqual(expect.any(String));
+
+    const repaired = repairMermaid(RUN_D4F0E8);
+
+    expect(repaired).toContain('-->|"PUT /events/{id}"| API');
+    expect(repaired).toContain('-->|"GET /events"| API');
+    // What parsed already is left as it was.
+    expect(repaired).toContain("-->|saves| DB");
+    expect(repaired).toContain("API -- reads --> DB");
+    expect(await mermaidProblem(repaired)).toBeNull();
+  });
+
+  it.each([
+    ["A -.->|PUT /e/{id}| B", 'A -.->|"PUT /e/{id}"| B'],
+    ["A ==>|PUT /e/{id}| B", 'A ==>|"PUT /e/{id}"| B'],
+    ["A ---|PUT /e/{id}| B", 'A ---|"PUT /e/{id}"| B'],
+    ["A <-->|PUT /e/{id}| B", 'A <-->|"PUT /e/{id}"| B'],
+    ["A --x|PUT /e/{id}| B", 'A --x|"PUT /e/{id}"| B'],
+    ["A --o|PUT /e/{id}| B", 'A --o|"PUT /e/{id}"| B'],
+    // Already quoted, with a | of its own: left as written.
+    ['A -->|"a|b"| B', 'A -->|"a|b"| B'],
+  ])("repairs %j", async (edge, repaired) => {
+    const fixed = repairMermaid(`flowchart LR\n  ${edge}`);
+
+    expect(fixed).toBe(`flowchart LR\n  ${repaired}`);
+    expect(await mermaidProblem(fixed)).toBeNull();
+  });
+
+  it("finds the flowchart past front-matter and comments", () => {
+    const source =
+      "---\ntitle: Parts\n---\n%% the parts\nflowchart LR\n  A -->|GET /a/{id}| B";
+
+    expect(repairMermaid(source)).toContain('A -->|"GET /a/{id}"| B');
+  });
+
+  it("leaves diagrams other than flowcharts alone", () => {
+    const classes = "classDiagram\n  Animal <|-- Duck\n  Duck : +swim()";
+
+    expect(repairMermaid(classes)).toBe(classes);
+  });
+
+  it("says how to quote a label when a diagram is still rejected", async () => {
+    const [problem] = await validateDesign({
+      ...goodDesign(),
+      systemDesign: {
+        ...goodDesign().systemDesign,
+        diagrams: [
+          ...goodDesign().systemDesign.diagrams,
+          { title: "Broken", mermaid: "flowchart TD\n  A -->" },
+        ],
+      },
+    });
+
+    expect(problem).toMatch(/Quote any label with punctuation/);
   });
 });
 

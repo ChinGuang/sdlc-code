@@ -114,6 +114,21 @@ describe("PhaseStepper", () => {
     ).toEqual(["done", "done", "done", "done", "skipped"]);
   });
 
+  it("marks a gated design that failed as stopped in Design", () => {
+    expect(
+      states({
+        status: "designing",
+        mode: "gated",
+        slices: [],
+        failure: {
+          trigger: "design",
+          summary: "No valid design.",
+          slice: null,
+        },
+      })[0],
+    ).toBe("stopped");
+  });
+
   it("says which phase is current to a screen reader", () => {
     render(
       <PhaseStepper

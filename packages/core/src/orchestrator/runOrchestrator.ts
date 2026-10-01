@@ -31,7 +31,12 @@ import type {
   RunPullRequest,
   Slice,
 } from "../domain/entities.js";
-import type { EscalationTrigger, RunStatus } from "../domain/runLifecycle.js";
+import { RunStoppedError } from "../agentLoop/agentLoop.js";
+import {
+  isFinished,
+  type EscalationTrigger,
+  type RunStatus,
+} from "../domain/runLifecycle.js";
 import type { EscalationStore } from "../persistence/escalationStore.js";
 import type { ReviewStore } from "../persistence/reviewStore.js";
 import type { ScreenshotStore } from "../persistence/screenshotStore.js";
@@ -68,6 +73,8 @@ import type { GateStore } from "../persistence/gateStore.js";
 /** Where a Run stopped, and why. */
 export type RunProgress =
   | { waitingFor: "designGate" }
+  /** No valid design came out of a gated Run: a person asks for another try. */
+  | { waitingFor: "designRetry"; problem: string }
   | { waitingFor: "escalation"; escalation: Escalation }
   | { waitingFor: "prGate"; pullRequest: RunPullRequest | null }
   | { finished: Extract<RunStatus, "done" | "failed" | "aborted"> };
@@ -95,6 +102,14 @@ export type EscalationResolution =
 export interface RunOrchestrator {
   /** Runs until a person must decide or the Run leaves building. */
   advance: (runId: string) => Promise<RunProgress>;
+  /** Clears a gated Run's failed design so advance designs again. */
+  retryDesign: (runId: string) => void;
+  /**
+   * A person stops the Run, whatever it is doing (T24g): at an Escalation as
+   * its abort choice, otherwise at once. Work under way stops at the next
+   * model turn; call advance to settle it and deliver what is owed.
+   */
+  abort: (runId: string, options?: { openDraftPrOnAbort?: boolean }) => void;
   /** The human's Verdicts at the Design Gate; then call advance. */
   decideDesign: (runId: string, verdicts: DesignVerdict[]) => GateDecision;
   /** The human's choice at an Escalation; then call advance. */
@@ -168,41 +183,87 @@ export class AgentRunOrchestrator implements RunOrchestrator {
 
   advance = async (runId: string): Promise<RunProgress> => {
     for (;;) {
-      const run = this.#run(runId);
-      switch (run.status) {
-        case "designing":
-          await this.#design(run);
-          continue;
-        case "building":
-          await this.#build(run);
-          continue;
-        case "awaitingDesignGate":
-          return { waitingFor: "designGate" };
-        case "escalated": {
-          const escalation = this.#options.escalations.getOpenEscalation(runId);
-          if (!escalation)
-            throw new Error(
-              `Run ${runId} is escalated but has no open Escalation.`,
-            );
-          return { waitingFor: "escalation", escalation };
-        }
-        case "reviewing":
-          await this.#review(run);
-          continue;
-        case "awaitingPrGate": {
-          // A process that died between opening the pull request and opening
-          // the Gate would otherwise leave nothing for a person to answer.
-          if (!this.#options.gates.getOpenGate(run.id))
-            this.#options.gates.openGate(run.id, "pr");
-          return { waitingFor: "prGate", pullRequest: run.pullRequest };
-        }
-        case "done":
-        case "failed":
-        case "aborted":
-          await this.#deliverIfOwed(run);
-          return { finished: run.status };
+      // What a Run already aborted throws (a failed Draft PR push) is a
+      // fault like any other; only work the abort cut short is swallowed.
+      const abortedBefore = this.#run(runId).status === "aborted";
+      try {
+        const progress = await this.#next(runId);
+        if (progress) return progress;
+      } catch (error) {
+        if (abortedBefore || this.#run(runId).status !== "aborted") throw error;
+        this.#settleStopped(runId);
       }
     }
+  };
+
+  abort = (
+    runId: string,
+    { openDraftPrOnAbort = true }: { openDraftPrOnAbort?: boolean } = {},
+  ): void => {
+    const run = this.#run(runId);
+    if (run.status === "escalated") {
+      this.resolveEscalation(runId, { choice: "abort", openDraftPrOnAbort });
+      return;
+    }
+    if (isFinished(run.status))
+      throw new Error(`Run ${runId} is ${run.status} already.`);
+    this.#options.runs.setOpenDraftPrOnAbort(runId, openDraftPrOnAbort);
+    this.#options.runs.applyEvent(runId, { type: "aborted" });
+  };
+
+  /**
+   * One move of the Run, or what it waits for: null when it moved and should
+   * be looked at again.
+   */
+  async #next(runId: string): Promise<RunProgress | null> {
+    const run = this.#run(runId);
+    switch (run.status) {
+      case "designing":
+        // Tried again only when a person asks: not by itself, and not on
+        // a restart, which would spend tokens no one asked it to.
+        if (run.mode === "gated" && run.failure?.trigger === "design")
+          return { waitingFor: "designRetry", problem: run.failure.summary };
+        await this.#design(run);
+        return null;
+      case "building":
+        await this.#build(run);
+        return null;
+      case "awaitingDesignGate":
+        return { waitingFor: "designGate" };
+      case "escalated": {
+        const escalation = this.#options.escalations.getOpenEscalation(runId);
+        if (!escalation)
+          throw new Error(
+            `Run ${runId} is escalated but has no open Escalation.`,
+          );
+        return { waitingFor: "escalation", escalation };
+      }
+      case "reviewing":
+        await this.#review(run);
+        return null;
+      case "awaitingPrGate": {
+        // A process that died between opening the pull request and opening
+        // the Gate would otherwise leave nothing for a person to answer.
+        if (!this.#options.gates.getOpenGate(run.id))
+          this.#options.gates.openGate(run.id, "pr");
+        return { waitingFor: "prGate", pullRequest: run.pullRequest };
+      }
+      case "done":
+      case "failed":
+      case "aborted":
+        // An abort while nothing advanced it (a Gate, a Run whose loop
+        // stopped) leaves its Tasks as they were; settling twice is harmless.
+        if (run.status === "aborted") this.#settleStopped(runId);
+        await this.#deliverIfOwed(run);
+        return { finished: run.status };
+    }
+  }
+
+  retryDesign = (runId: string): void => {
+    const run = this.#run(runId);
+    if (run.status !== "designing" || run.failure?.trigger !== "design")
+      throw new Error(`Run ${runId} has no failed design to try again.`);
+    this.#options.runs.clearFailure(runId);
   };
 
   decideDesign = (runId: string, verdicts: DesignVerdict[]): GateDecision => {
@@ -293,7 +354,12 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     if (decision.choice === "requestChanges" && !decision.comments.trim())
       throw new Error("Say what to change, or approve the pull request.");
     const gate = gates.getOpenGate(runId);
-    if (!gate || gate.kind !== "pr")
+    // An aborted Run may keep its Gate row open: the status is what counts.
+    if (
+      !gate ||
+      gate.kind !== "pr" ||
+      this.#run(runId).status !== "awaitingPrGate"
+    )
       throw new Error(`Run ${runId} has no open PR Gate.`);
     gates.recordVerdict(gate.id, {
       // A PR Gate judges the whole pull request, not one document.
@@ -354,6 +420,9 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       );
       return;
     }
+    // The review's last turn may finish after a person aborted: nothing that
+    // would open a ready pull request happens then.
+    if (this.#run(run.id).status === "aborted") throw new RunStoppedError();
     const outcome = await delivery.deliver(run.id, {
       ended: "complete",
       findings: nonBlockingFindings(reviewed?.findings ?? []).map(
@@ -473,8 +542,16 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     } catch (error) {
       if (!(error instanceof DesignPhaseError)) throw error;
       // With a person, the Run waits in designing, its revisions kept, and
-      // advance tries again; with no one to ask, the Run fails.
-      if (run.mode === "gated") throw error;
+      // says why (retryDesign tries again); with no one to ask, it fails.
+      if (run.mode === "gated") {
+        this.#options.runs.recordFailure(run.id, {
+          trigger: "design",
+          summary: error.message,
+          slice: null,
+          reports: [],
+        });
+        return;
+      }
       this.#options.runs.applyEvent(run.id, { type: "designFailed" });
       this.#options.runs.recordFailure(run.id, {
         trigger: "design",
@@ -578,8 +655,24 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     });
   }
 
+  /**
+   * A Run a person stopped mid-work: the Step that was running is discarded
+   * (a Step is redone, never resumed, and this one never will be) and the
+   * Slice's Tasks fail. The Run is aborted already.
+   */
+  #settleStopped(runId: string): void {
+    const { tasks } = this.#options;
+    for (const task of tasks.listTasks(runId))
+      for (const step of tasks.listSteps(task.id))
+        if (step.status === "running") tasks.discardStep(step.id);
+    const current = this.#currentSlice(runId);
+    if (current) this.#failTasks(runId, current.id);
+  }
+
   /** What the person ticked when they aborted; the default is to offer one. */
   #abortedWithDraftPr(runId: string): boolean {
+    const asked = this.#run(runId).openDraftPrOnAbort;
+    if (asked !== null) return asked;
     const abort = this.#options.escalations
       .listEscalations(runId)
       .filter((escalation) => escalation.choice === "abort")

@@ -259,6 +259,8 @@ classDiagram
 stateDiagram-v2
   [*] --> Designing
   Designing --> AwaitingDesignGate : documents ready (gated)
+  Designing --> Failed : no valid design (auto)
+  Designing --> Designing : no valid design (gated), waits for Retry design
   Designing --> Building : documents ready (auto)
   AwaitingDesignGate --> Designing : changes requested
   AwaitingDesignGate --> Building : all documents approved
@@ -287,6 +289,11 @@ stateDiagram-v2
   Escalated --> Building : retry with hint / skip slice
   Escalated --> Designing : edit approved documents
   Escalated --> Aborted : abort
+  Designing --> Aborted : a person aborts (at any time)
+  AwaitingDesignGate --> Aborted : a person aborts
+  Building --> Aborted : a person aborts, after the step under way
+  Reviewing --> Aborted : a person aborts, after the step under way
+  AwaitingPRGate --> Aborted : a person aborts (the open PR stays open)
 
   Building --> Failed : limit hit in auto mode
   Reviewing --> Failed : limit hit in auto mode
@@ -297,7 +304,7 @@ stateDiagram-v2
 
 ## 3b. Stopping early — what goes into the Draft PR (sequence)
 
-Applies to an auto-mode failure and to an abort with "Open draft PR" ticked. Only Slice Commits are pushed; the unfinished Slice's worktrees are discarded and never merged into the run branch.
+Applies to an auto-mode failure and to an abort with "Open draft PR" ticked, whether at an Escalation or by Cancel run at any time. A pull request already open (at the PR Gate) stays open; nothing more is pushed. Only Slice Commits are pushed; the unfinished Slice's worktrees are discarded and never merged into the run branch.
 
 The run branch needs no repair: only a passing Test Run ever moves it, so it is already at the last Slice Commit. That is why the implementation discards the worktrees and pushes, without a reset.
 
@@ -313,6 +320,9 @@ sequenceDiagram
   alt gated: Escalation dialog
     Dev->>UI: Abort run, "Open draft PR with passed slices" ticked (default)
     UI->>O: abort(openDraftPr = true)
+  else any time: Cancel run (T24g)
+    Dev->>UI: Cancel run, the same checkbox (none if a PR is open already)
+    UI->>O: abort(openDraftPr); the step under way finishes first
   else auto: limit hit
     O->>O: fail(openDraftPr = true)
   end

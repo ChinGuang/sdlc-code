@@ -7,7 +7,8 @@ export function StatusBadge({
   run,
   detail,
 }: {
-  run: Pick<RunSummary, "status" | "pullRequest">;
+  run: Pick<RunSummary, "status" | "pullRequest"> &
+    Partial<Pick<RunSummary, "waitingFor">>;
   /** Appended after a dot, e.g. "Slice 2". */
   detail?: string | null;
 }) {

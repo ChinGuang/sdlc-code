@@ -97,6 +97,12 @@ export class RunsController {
     return this.#runs.getDocument(id, parse(DocumentKindParam, kind));
   }
 
+  @Post(":id/retry-design")
+  @HttpCode(200)
+  retryDesign(@Param("id") id: string): RunDetail {
+    return this.#runs.retryDesign(id);
+  }
+
   @Post(":id/design-gate")
   @HttpCode(200)
   designGate(@Param("id") id: string, @Body() body: unknown): RunDetail {
