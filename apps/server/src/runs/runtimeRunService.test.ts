@@ -638,6 +638,30 @@ describe("RuntimeRunService.abortRun", () => {
     expect(advanced).toHaveLength(1);
   });
 
+  // Aborted while a Step ran, by a server that stopped before it ended.
+  it("settles on start a Run aborted before its loop could, and resumes none", async () => {
+    const { api, settled, runs, tasks, lifecycle, advanced } = setup([
+      () => ({ waitingFor: "designGate" }),
+      () => ({ finished: "aborted" }),
+    ]);
+    const run = await api.startRun(request);
+    await settled();
+    tasks.startStep(
+      tasks.createTask({
+        runId: run.id,
+        sliceId: null,
+        agentRole: "systemDesign",
+      }).id,
+    );
+    runs.applyEvent(run.id, { type: "aborted" });
+
+    const { resumed } = await lifecycle.resumeUnfinished();
+    await settled();
+
+    expect(resumed).toEqual([]);
+    expect(advanced).toHaveLength(2);
+  });
+
   it("answers a conflict for a Run that has finished", async () => {
     const { api, settled, runs } = setup();
     const run = await api.startRun(request);

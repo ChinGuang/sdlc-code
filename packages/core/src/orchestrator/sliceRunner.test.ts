@@ -2,6 +2,7 @@
  * The Slice runner against real git Workspaces and a real database, with
  * scripted Coding and Testing Agents: pass, retry, Loop, budgets, Owners.
  */
+import { RunStoppedError } from "../agentLoop/agentLoop.js";
 import { REACT_NODE, templateFiles } from "@sdlc-code/stack-profiles";
 import type { CodingSide } from "@sdlc-code/stack-profiles";
 import {
@@ -118,6 +119,8 @@ async function setup(options: {
   retryBudget?: number;
   /** Per side, what each of its calls does, in order. */
   behave?: Partial<Record<CodingSide, Behaviour[]>>;
+  /** Whether a person stopped the Run (T24g), asked before each side effect. */
+  stopped?: () => boolean;
 }) {
   const root = mkdtempSync(join(tmpdir(), "sdlc-slice-"));
   folders.push(root);
@@ -226,6 +229,7 @@ async function setup(options: {
     codingAgent,
     retryBudget: options.retryBudget,
     checkpoint: (checkpoint) => checkpoints.push(checkpoint.at),
+    stopped: options.stopped,
   });
   const input = (overrides: Partial<SliceRunInput> = {}): SliceRunInput => ({
     runId,
@@ -262,6 +266,24 @@ async function setup(options: {
     testsLeft,
   };
 }
+
+describe("OrchestratedSliceRunner: a person aborts the Run (T24g)", () => {
+  // The agents' turn finished after the abort; what would follow does not.
+  it("merges, tests and commits nothing once the Run is stopped", async () => {
+    let aborted = false;
+    const { runner, input, workspaces, testsLeft, checkpoints } = await setup({
+      results: [passing()],
+      stopped: () => aborted,
+    });
+    const run = runner.runSlice(input());
+    aborted = true;
+
+    await expect(run).rejects.toThrow(RunStoppedError);
+    expect(checkpoints).not.toContain("merged");
+    expect(testsLeft()).toBe(1);
+    expect(await workspaces.sliceCommits()).toHaveLength(0);
+  });
+});
 
 describe("OrchestratedSliceRunner", () => {
   it("builds both sides, tests the merge, and commits the Slice", async () => {

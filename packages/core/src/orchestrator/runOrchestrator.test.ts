@@ -115,6 +115,10 @@ function setup(options: {
    * way, and the runner stops as the real one does: its agent loop throws.
    */
   abortDuringSlice?: number;
+  /** A person aborts the Run while the review's last turn is under way. */
+  abortDuringReview?: boolean;
+  /** Delivering fails, as a push GitHub refuses would. */
+  failDelivery?: boolean;
 }) {
   const db = openDatabase(":memory:");
   const store = { db };
@@ -188,6 +192,7 @@ function setup(options: {
   const delivery: RunDelivery = {
     deliver: async (runId, reason) => {
       deliveries.push({ runId, reason });
+      if (options.failDelivery) throw new Error("GitHub refused the push");
       const outcome: DeliveryOutcome = options.delivery ?? {
         status: "opened",
         pullRequest: {
@@ -212,6 +217,8 @@ function setup(options: {
   const codeReview: RunReview | undefined = options.review && {
     reviewRun: async (run) => {
       reviews.push({ runId: run.id, standard: BASELINE_RULES.length });
+      if (options.abortDuringReview)
+        orchestrator.abort(run.id, { openDraftPrOnAbort: false });
       const clean = options.reviewsClean?.() ?? false;
       return {
         findings: clean
@@ -999,6 +1006,52 @@ describe("AgentRunOrchestrator: a person aborts the Run (T24g)", () => {
     expect(status()).toBe("aborted");
     expect(escalations.getOpenEscalation(runId)).toBeNull();
     expect(escalations.listEscalations(runId).at(-1)?.choice).toBe("abort");
+  });
+
+  // A failed Draft PR push used to be taken for the stop, and tried for ever.
+  it("reports a delivery that fails after the abort, rather than trying again", async () => {
+    const { orchestrator, runId, deliveries } = setup({ failDelivery: true });
+    await orchestrator.advance(runId);
+    orchestrator.abort(runId);
+
+    await expect(orchestrator.advance(runId)).rejects.toThrow(
+      "GitHub refused the push",
+    );
+    expect(deliveries).toHaveLength(1);
+  });
+
+  // A Run waiting at a Gate, or whose loop stopped, is not being advanced:
+  // its Tasks are settled when it is.
+  it("settles the Tasks of a Run aborted while nothing advanced it", async () => {
+    const { orchestrator, runId, tasks, slices } = await approved({});
+    const [first] = slices.listSlices(runId);
+    const task = tasks.createTask({
+      runId,
+      sliceId: first!.id,
+      agentRole: "backendCoding",
+    });
+    tasks.startStep(task.id);
+
+    orchestrator.abort(runId);
+    await orchestrator.advance(runId);
+
+    const steps = tasks.listSteps(task.id);
+    expect(steps.every((step) => step.status !== "running")).toBe(true);
+  });
+
+  // The review's last turn may finish after the abort: no ready PR then.
+  it("opens no pull request when the Run is aborted during its review", async () => {
+    const { orchestrator, runId, status, deliveries } = await approved({
+      review: {},
+      abortDuringReview: true,
+    });
+
+    await expect(orchestrator.advance(runId)).resolves.toEqual({
+      finished: "aborted",
+    });
+    expect(status()).toBe("aborted");
+    expect(deliveries.map(({ reason }) => reason.ended)).toEqual(["aborted"]);
+    expect(deliveries[0]!.reason).toMatchObject({ openDraftPr: false });
   });
 
   it("refuses to abort a Run that has finished", async () => {

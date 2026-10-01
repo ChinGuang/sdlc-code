@@ -167,8 +167,22 @@ export class RuntimeRunService implements RunService, RunLifecycle {
         failed.push({ runId: run.id, problem: this.#describe(error) });
       }
     }
+    // Not resumed, settled: a Run aborted while a Step ran, by a server that
+    // stopped before the Step ended, still owes its Draft PR (T24g).
+    for (const run of runtime.runs.listRuns())
+      if (run.status === "aborted" && this.#hasRunningStep(run.id))
+        this.#advance(run.id);
     return { resumed, failed };
   };
+
+  #hasRunningStep(runId: string): boolean {
+    const { tasks } = this.#runtime();
+    return tasks
+      .listTasks(runId)
+      .some((task) =>
+        tasks.listSteps(task.id).some((step) => step.status === "running"),
+      );
+  }
 
   /**
    * Closes what the runtime opened. It does not wait for Runs being advanced:

@@ -31,6 +31,7 @@ import type {
   RunPullRequest,
   Slice,
 } from "../domain/entities.js";
+import { RunStoppedError } from "../agentLoop/agentLoop.js";
 import {
   isFinished,
   type EscalationTrigger,
@@ -179,13 +180,14 @@ export class AgentRunOrchestrator implements RunOrchestrator {
 
   advance = async (runId: string): Promise<RunProgress> => {
     for (;;) {
+      // What a Run already aborted throws (a failed Draft PR push) is a
+      // fault like any other; only work the abort cut short is swallowed.
+      const abortedBefore = this.#run(runId).status === "aborted";
       try {
         const progress = await this.#next(runId);
         if (progress) return progress;
       } catch (error) {
-        // Stopped by a person: whatever was under way ends here, and the
-        // aborted Run settles below like any other.
-        if (this.#run(runId).status !== "aborted") throw error;
+        if (abortedBefore || this.#run(runId).status !== "aborted") throw error;
         this.#settleStopped(runId);
       }
     }
@@ -246,6 +248,9 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       case "done":
       case "failed":
       case "aborted":
+        // An abort while nothing advanced it (a Gate, a Run whose loop
+        // stopped) leaves its Tasks as they were; settling twice is harmless.
+        if (run.status === "aborted") this.#settleStopped(runId);
         await this.#deliverIfOwed(run);
         return { finished: run.status };
     }
@@ -346,7 +351,12 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     if (decision.choice === "requestChanges" && !decision.comments.trim())
       throw new Error("Say what to change, or approve the pull request.");
     const gate = gates.getOpenGate(runId);
-    if (!gate || gate.kind !== "pr")
+    // An aborted Run may keep its Gate row open: the status is what counts.
+    if (
+      !gate ||
+      gate.kind !== "pr" ||
+      this.#run(runId).status !== "awaitingPrGate"
+    )
       throw new Error(`Run ${runId} has no open PR Gate.`);
     gates.recordVerdict(gate.id, {
       // A PR Gate judges the whole pull request, not one document.
@@ -407,6 +417,9 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       );
       return;
     }
+    // The review's last turn may finish after a person aborted: nothing that
+    // would open a ready pull request happens then.
+    if (this.#run(run.id).status === "aborted") throw new RunStoppedError();
     const outcome = await delivery.deliver(run.id, {
       ended: "complete",
       findings: nonBlockingFindings(reviewed?.findings ?? []).map(

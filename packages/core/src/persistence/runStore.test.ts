@@ -179,6 +179,21 @@ describe("SqliteRunStore runs", () => {
   });
 });
 
+describe("SqliteRunStore abort choice (T24g)", () => {
+  it("keeps what a person who aborts asked for, and nothing until they do", () => {
+    const store = makeStore();
+    const run = store.createRun(newRun);
+    expect(run.openDraftPrOnAbort).toBeNull();
+
+    expect(store.setOpenDraftPrOnAbort(run.id, false).openDraftPrOnAbort).toBe(
+      false,
+    );
+    expect(store.setOpenDraftPrOnAbort(run.id, true).openDraftPrOnAbort).toBe(
+      true,
+    );
+  });
+});
+
 describe("SqliteRunStore failure", () => {
   // A gated Run whose design failed is tried again when a person asks (T24f).
   it("forgets why a Run stopped once a person asks for another try", () => {

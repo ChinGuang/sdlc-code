@@ -455,6 +455,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
         tasks: reportingTaskStore(tasks, run.id, emit),
         slices,
         budget: budgetFor(run),
+        stopped: () => runs.getRun(run.id)?.status === "aborted",
         codingAgent: (side, stepId) =>
           new LoopCodingAgent({
             createLoop: loopFor(
