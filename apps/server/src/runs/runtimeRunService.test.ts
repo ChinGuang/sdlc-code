@@ -513,12 +513,40 @@ describe("RuntimeRunService: what a person decides on", () => {
           file: null,
           endpoint: "POST /api/bookings",
           error: "409 Conflict",
+          cause: null,
           suspectedOwner: "backendCoding",
           occurrences: 2,
         },
       ],
       workingMemory: [{ role: "backendCoding", note: "Tried UTC; still 409." }],
+      brief: null,
       openDraftPrOnAbort: true,
+    });
+  });
+
+  it("shows the Escalation's brief once it is written (T24c)", async () => {
+    const { api, settled, runs, escalations } = setup();
+    const run = await api.startRun(request);
+    await settled();
+    runs.applyEvent(run.id, { type: "documentsReady" });
+    runs.applyEvent(run.id, { type: "designApproved" });
+    runs.applyEvent(run.id, { type: "limitHit", trigger: "tokenBudget" });
+    const opened = escalations.openEscalation(run.id, {
+      trigger: "tokenBudget",
+      summary: "The Run's Token Budget is spent.",
+    });
+    const brief = {
+      facts: ["The Token Budget is spent: 5,002,759 of 5,000,000 tokens used."],
+      analysis: null,
+      withoutAnalysis:
+        "The Token Budget is spent, so no analysis was made: raise it to go on.",
+    };
+
+    escalations.setBrief(opened.id, brief);
+
+    expect(api.getRun(run.id).waiting).toMatchObject({
+      for: "escalation",
+      brief,
     });
   });
 });
@@ -578,9 +606,13 @@ describe("issueSummary", () => {
       file: null,
       endpoint: null,
       error: "boom",
+      cause: null,
       suspectedOwner: null,
       occurrences: 1,
     });
+    expect(issueSummary({ cause: "--> prisma/schema.prisma:19" }).cause).toBe(
+      "--> prisma/schema.prisma:19",
+    );
     expect(issueSummary(null).error).toBe("(no error recorded)");
     expect(issueSummary({ suspectedOwner: "someoneElse" }).suspectedOwner).toBe(
       null,

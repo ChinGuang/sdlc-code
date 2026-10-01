@@ -387,6 +387,7 @@ export class RuntimeRunService implements RunService, RunLifecycle {
               slice: escalation.slice,
               reports: escalation.reports.map(issueSummary),
               workingMemory: this.#workingMemory(run.id, escalation.slice),
+              brief: escalation.brief,
               openDraftPrOnAbort: escalation.openDraftPrOnAbort,
             }
           : { for: "nothing" };
@@ -507,6 +508,7 @@ export function issueSummary(stored: unknown): IssueSummary {
     file: text(report.file),
     endpoint: text(report.endpoint),
     error: text(report.error) ?? "(no error recorded)",
+    cause: text(report.cause),
     suspectedOwner: isAgentRole(text(report.suspectedOwner) ?? "")
       ? (report.suspectedOwner as AgentRole)
       : null,

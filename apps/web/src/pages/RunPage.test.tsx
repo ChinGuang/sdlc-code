@@ -342,6 +342,7 @@ describe("RunPage: a Run that needs a person or stopped", () => {
         slice: "Sign in",
         reports: [],
         workingMemory: [],
+        brief: null,
         openDraftPrOnAbort: true,
       },
     });

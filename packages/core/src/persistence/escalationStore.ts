@@ -1,4 +1,4 @@
-import type { Escalation } from "../domain/entities.js";
+import type { Escalation, EscalationBrief } from "../domain/entities.js";
 import type {
   EscalationChoice,
   EscalationTrigger,
@@ -36,6 +36,8 @@ export interface EscalationStore {
   openEscalation: (runId: string, escalation: NewEscalation) => Escalation;
   getOpenEscalation: (runId: string) => Escalation | null;
   resolveEscalation: (id: string, decision: EscalationDecision) => Escalation;
+  /** Keeps its brief (T24c), written after it opened; a later one replaces it. */
+  setBrief: (id: string, brief: EscalationBrief) => Escalation;
   listEscalations: (runId: string) => Escalation[];
 }
 
@@ -49,6 +51,7 @@ type EscalationRow = {
   open_draft_pr_on_abort: number;
   slice: string | null;
   reports: string;
+  brief: string | null;
   created_at: string;
   resolved_at: string | null;
 };
@@ -111,6 +114,14 @@ export class SqliteEscalationStore implements EscalationStore {
       return this.#require(id);
     });
 
+  setBrief = (id: string, brief: EscalationBrief): Escalation => {
+    this.#require(id);
+    this.#ctx.db
+      .prepare("UPDATE escalations SET brief = ? WHERE id = ?")
+      .run(JSON.stringify(brief), id);
+    return this.#require(id);
+  };
+
   listEscalations = (runId: string): Escalation[] =>
     this.#ctx.db
       .prepare("SELECT * FROM escalations WHERE run_id = ? ORDER BY rowid")
@@ -137,6 +148,7 @@ function toEscalation(row: EscalationRow): Escalation {
     openDraftPrOnAbort: fromFlag(row.open_draft_pr_on_abort),
     slice: row.slice,
     reports: JSON.parse(row.reports) as unknown[],
+    brief: row.brief ? (JSON.parse(row.brief) as EscalationBrief) : null,
     createdAt: row.created_at,
     resolvedAt: row.resolved_at,
   };

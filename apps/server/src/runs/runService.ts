@@ -8,6 +8,7 @@ import type {
   DesignVerdict,
   DocumentKind,
   DocumentStatus,
+  EscalationBrief,
   EscalationResolution,
   PullRequestDecision,
   RunMode,
@@ -53,6 +54,8 @@ export type IssueSummary = {
   file: string | null;
   endpoint: string | null;
   error: string;
+  /** The lines after the error that say why (T24c); null when none did. */
+  cause: string | null;
   suspectedOwner: AgentRole | null;
   /** How many failures shared it in one Test Run. */
   occurrences: number;
@@ -110,6 +113,11 @@ export type Waiting =
       reports: IssueSummary[];
       /** Each Coding Agent's last note on that Slice: what it tried. */
       workingMemory: WorkingMemoryNote[];
+      /**
+       * What went wrong in plain words (T24c): null while it is written, and
+       * for an Escalation from before it existed.
+       */
+      brief: EscalationBrief | null;
       /** The abort dialog's checkbox, ticked unless a person unticks it. */
       openDraftPrOnAbort: boolean;
     }

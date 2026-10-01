@@ -70,6 +70,8 @@ export type Waiting =
       reports: IssueSummary[];
       /** Each Coding Agent's last note on that Slice: what it tried. */
       workingMemory: Array<{ role: AgentRole; note: string }>;
+      /** What went wrong in plain words (T24c); null while it is written. */
+      brief: EscalationBrief | null;
       openDraftPrOnAbort: boolean;
     }
   | { for: "prGate"; pullRequest: PullRequest | null }
@@ -83,8 +85,26 @@ export type IssueSummary = {
   file: string | null;
   endpoint: string | null;
   error: string;
+  /** The lines after the error that say why (T24c). */
+  cause: string | null;
   suspectedOwner: AgentRole | null;
   occurrences: number;
+};
+
+/** What a person reads before deciding at an Escalation (T24c). */
+export type EscalationBrief = {
+  /** Found in code, without a model. */
+  facts: string[];
+  analysis: {
+    failing: string;
+    tried: string;
+    cause: string;
+    choice: EscalationResolution["choice"];
+    /** Ready for "retry with hint"; null for the other choices. */
+    hint: string | null;
+  } | null;
+  /** Why there is no analysis, when there is none. */
+  withoutAnalysis: string | null;
 };
 
 export type RunDocument = {

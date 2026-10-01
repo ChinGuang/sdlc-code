@@ -6,6 +6,7 @@
 import {
   ApiError,
   type DocumentKind,
+  type EscalationBrief,
   type EscalationResolution,
   type RunDetail,
   type ServerApi,
@@ -511,11 +512,25 @@ async function escalationShow(parsed: Parsed, io: CliIo, deps: CliDeps) {
       `  trigger ${waiting.trigger}${waiting.slice ? `  ·  Slice "${waiting.slice}"` : "  ·  in review"}${retries === null ? "" : `  ·  retries ${retries}/3`}  ·  tokens ${formatTokens(run.tokensUsed)} / ${formatTokens(run.tokenBudget)}`,
     ),
   );
+  const { brief } = waiting;
+  if (brief?.analysis) {
+    const { analysis } = brief;
+    io.out("  What went wrong:");
+    io.out(`    Failing    ${analysis.failing}`);
+    io.out(`    Tried      ${analysis.tried}`);
+    io.out(`    Cause      ${analysis.cause}`);
+    io.out(`    Suggested  ${paint.bold(CHOICE_NAMES[analysis.choice])}`);
+  }
+  if (brief?.withoutAnalysis) io.out(paint.muted(`  ${brief.withoutAnalysis}`));
+  if (brief && brief.facts.length > 0) io.out("  Facts:");
+  for (const fact of brief?.facts ?? []) io.out(`    - ${fact}`);
   if (waiting.reports.length > 0) io.out("  What kept failing:");
-  for (const report of waiting.reports)
+  for (const report of waiting.reports) {
     io.out(
       `    ${paint.red(`${report.step} › ${report.failingTest ?? report.endpoint ?? ""} → ${report.error}`)}${report.file ? paint.muted(`  ${report.file}`) : ""}`,
     );
+    if (report.cause) io.out(paint.muted(`      ${report.cause}`));
+  }
   if (waiting.workingMemory.length > 0) io.out("  What the agents tried:");
   for (const note of waiting.workingMemory) {
     io.out(`    ${paint.bold(roleName(note.role))}`);
@@ -524,7 +539,18 @@ async function escalationShow(parsed: Parsed, io: CliIo, deps: CliDeps) {
   const spent = run.tokensUsed >= run.tokenBudget;
   const budget = spent ? ` --budget ${suggestedBudget(run)}` : "";
   io.out("  Ways on:");
-  io.out(paint.muted(`    sdlccode escalation retry ${id} "<hint>"${budget}`));
+  const hint = brief?.analysis?.hint;
+  // The brief's hint, quoted, ready to send as it is or changed first.
+  if (hint)
+    io.out(
+      paint.muted(
+        `    sdlccode escalation retry ${id} ${JSON.stringify(hint)}${budget}`,
+      ),
+    );
+  else
+    io.out(
+      paint.muted(`    sdlccode escalation retry ${id} "<hint>"${budget}`),
+    );
   io.out(
     paint.muted(
       `    sdlccode escalation edit ${id} <document> "<comments>"${budget}`,
@@ -540,6 +566,16 @@ async function escalationShow(parsed: Parsed, io: CliIo, deps: CliDeps) {
       ),
     );
 }
+
+const CHOICE_NAMES: Record<
+  NonNullable<EscalationBrief["analysis"]>["choice"],
+  string
+> = {
+  retryWithHint: "Retry with a hint",
+  editDocuments: "Edit approved documents",
+  skipSlice: "Skip this slice",
+  abort: "Abort run",
+};
 
 async function escalationGoOn(
   choice: "retry" | "edit" | "skip",

@@ -13,6 +13,7 @@ const report = (overrides: Partial<IssueReport> = {}): IssueReport => ({
   file: "server/todos.test.ts",
   endpoint: "POST /todos",
   error: "expected 400, got 500",
+  cause: null,
   evidence: "AssertionError: expected 400 got 500",
   suspectedOwner: "backendCoding",
   signature: "unit:POST /todos:400",
@@ -158,5 +159,14 @@ describe("checkpointPayload and memoryFromCheckpoint", () => {
     const back = memoryFromCheckpoint(checkpointPayload(memory()))!;
 
     expect(back.histories.get("slice-2")!.earlier.backend[0]).toEqual(report());
+  });
+
+  it("reads an Issue Report written before it had a cause (T24c)", () => {
+    const saved = JSON.parse(JSON.stringify(checkpointPayload(memory())));
+    delete saved.histories["slice-2"].earlier.backend[0].cause;
+
+    const back = memoryFromCheckpoint(saved)!;
+
+    expect(back.histories.get("slice-2")!.earlier.backend[0]!.cause).toBeNull();
   });
 });

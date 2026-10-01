@@ -235,6 +235,21 @@ describe("GitWorkspaceManager Workspaces", () => {
   });
 });
 
+describe("GitWorkspaceManager.mergedFiles (T24c)", () => {
+  it("reads the Slice's merged code as last tested, and nothing before a merge", async () => {
+    const { manager } = await setup();
+    const { backend, frontend } = await builtSlice(manager);
+    expect(await manager.mergedFiles("slice-1")).toEqual([]);
+
+    const merged = await manager.mergeSlice("slice-1", [backend, frontend]);
+    if (merged.status !== "merged") throw new Error("expected a merge");
+
+    expect(await manager.mergedFiles("slice-1")).toEqual(
+      await manager.readFiles(merged.commit),
+    );
+  });
+});
+
 describe("GitWorkspaceManager.mergeSlice", () => {
   it("merges backend and frontend without touching the run branch", async () => {
     const { manager, scaffold } = await setup();

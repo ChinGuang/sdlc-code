@@ -136,6 +136,7 @@ export const ESCALATED: RunDetail = {
         file: "src/server/bookings.ts",
         endpoint: "POST /api/bookings",
         error: "409 Conflict",
+        cause: null,
         suspectedOwner: "backendCoding",
         occurrences: 2,
       },
@@ -143,6 +144,7 @@ export const ESCALATED: RunDetail = {
     workingMemory: [
       { role: "backendCoding", note: "Tried normalising to UTC; still 409." },
     ],
+    brief: null,
     openDraftPrOnAbort: true,
   },
 };

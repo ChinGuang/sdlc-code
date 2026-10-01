@@ -4,7 +4,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { RunDetail } from "../api/types.js";
+import type { EscalationBrief, RunDetail } from "../api/types.js";
 import { fakeApi } from "../testing/fakeApi.js";
 import { ESCALATED } from "../testing/gateFixtures.js";
 import { EscalationDialog } from "./EscalationDialog.js";
@@ -26,6 +26,12 @@ function openKeeping(run: RunDetail = ESCALATED) {
 
 const open = openKeeping;
 
+/** The fixture's Escalation, with its brief written. */
+const escalatedWith = (brief: EscalationBrief): RunDetail => ({
+  ...ESCALATED,
+  waiting: { ...ESCALATED.waiting, brief } as RunDetail["waiting"],
+});
+
 const pick = (name: RegExp) =>
   fireEvent.click(screen.getByRole("radio", { name }));
 const confirm = (name: string) =>
@@ -46,6 +52,97 @@ describe("EscalationDialog", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText("Tried normalising to UTC; still 409."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the brief, and its hint fills the box ready to send (T24c)", async () => {
+    const { calls } = open(
+      escalatedWith({
+        facts: ["server/app.ts no longer exports createApp, route."],
+        analysis: {
+          failing: "Every backend test fails to load.",
+          tried: "The backend rewrote server/app.ts.",
+          cause: "server/app.ts dropped the template's createApp.",
+          choice: "retryWithHint",
+          hint: "Restore createApp and route in server/app.ts.",
+        },
+        withoutAnalysis: null,
+      }),
+    );
+
+    const brief = screen.getByRole("region", { name: "What went wrong" });
+    expect(brief).toHaveTextContent("Every backend test fails to load.");
+    expect(brief).toHaveTextContent(
+      "server/app.ts dropped the template's createApp.",
+    );
+    expect(brief).toHaveTextContent(
+      "server/app.ts no longer exports createApp, route.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use this hint" }));
+
+    expect(
+      screen.getByRole("radio", { name: /Retry with a hint/ }),
+    ).toBeChecked();
+    expect(screen.getByLabelText("Hint for the agents")).toHaveValue(
+      "Restore createApp and route in server/app.ts.",
+    );
+    confirm("Retry with hint");
+    await vi.waitFor(() => expect(calls.decisions).toHaveLength(1));
+    expect(calls.decisions[0]).toMatchObject({
+      escalation: {
+        choice: "retryWithHint",
+        hint: "Restore createApp and route in server/app.ts.",
+      },
+    });
+  });
+
+  it("says why a brief has no analysis, and still shows its facts", () => {
+    open(
+      escalatedWith({
+        facts: [
+          "The Token Budget is spent: 5,002,759 of 5,000,000 tokens used.",
+        ],
+        analysis: null,
+        withoutAnalysis:
+          "The Token Budget is spent, so no analysis was made: raise it to go on.",
+      }),
+    );
+
+    const brief = screen.getByRole("region", { name: "What went wrong" });
+    expect(brief).toHaveTextContent("no analysis was made");
+    expect(brief).toHaveTextContent("5,002,759 of 5,000,000");
+    expect(screen.queryByRole("button", { name: "Use this hint" })).toBeNull();
+  });
+
+  it("says a brief is on its way while the Run is still advancing", () => {
+    open({ ...ESCALATED, advancing: true });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Writing a brief");
+  });
+
+  it("shows the cause a report carries under its error", () => {
+    open({
+      ...ESCALATED,
+      waiting: {
+        ...ESCALATED.waiting,
+        reports: [
+          {
+            step: "unit",
+            failingTest: null,
+            file: "prisma/schema.prisma",
+            endpoint: null,
+            error: "Error: Prisma schema validation - (get-dmmf wasm)",
+            cause:
+              "error: Native type VarChar is not supported for sqlite connector. / --> prisma/schema.prisma:19",
+            suspectedOwner: "backendCoding",
+            occurrences: 1,
+          },
+        ],
+      } as RunDetail["waiting"],
+    });
+
+    expect(
+      screen.getByText(/Native type VarChar is not supported/),
     ).toBeInTheDocument();
   });
 

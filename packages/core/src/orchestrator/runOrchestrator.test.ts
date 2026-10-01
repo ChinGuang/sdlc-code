@@ -45,6 +45,8 @@ import { SqliteSliceStore } from "../persistence/sliceStore.js";
 import { SqliteTaskStore } from "../persistence/taskStore.js";
 import { DocumentDesignGate } from "./designGate.js";
 import { AgentDesignPhase } from "./designPhase.js";
+import type { EscalationBrief } from "../domain/entities.js";
+import type { BriefInput, EscalationBriefer } from "./escalationBrief.js";
 import { issueReport } from "./fixtures/issueReport.js";
 import { BASELINE_RULES } from "@sdlc-code/stack-profiles";
 import type { Finding } from "../agents/codeReview/findings.js";
@@ -134,6 +136,8 @@ function setup(options: {
   abortDuringReview?: boolean;
   /** Delivering fails, as a push GitHub refuses would. */
   failDelivery?: boolean;
+  /** Writes each Escalation's brief (T24c); none is written without it. */
+  briefer?: EscalationBriefer;
 }) {
   const db = openDatabase(":memory:");
   const store = { db };
@@ -255,6 +259,7 @@ function setup(options: {
     },
   };
   const reviewProblems: Array<[string, string]> = [];
+  const briefProblems: string[] = [];
 
   const runnerCalls: SliceRunInput[] = [];
   const sliceCheckpoints: Array<(checkpoint: SliceCheckpoint) => void> = [];
@@ -277,6 +282,8 @@ function setup(options: {
       onReviewProblem: (runId, problem) =>
         reviewProblems.push([runId, problem]),
       reviewRetryBudget: options.reviewRetryBudget,
+      briefer: options.briefer ? () => options.briefer! : undefined,
+      onBriefProblem: (_runId, problem) => briefProblems.push(problem),
       designPhase: () =>
         new AgentDesignPhase({
           documents,
@@ -355,6 +362,7 @@ function setup(options: {
     screenshots,
     notKept,
     reviewProblems,
+    briefProblems,
     /** Reports a Checkpoint from inside a Slice, as the real runner does. */
     sliceCheckpoint: (checkpoint: SliceCheckpoint) =>
       sliceCheckpoints.at(-1)!(checkpoint),
@@ -774,6 +782,121 @@ describe("AgentRunOrchestrator: the Draft PR of a Run that stopped (T20)", () =>
     await context.orchestrator.advance(context.runId);
 
     expect(context.deliveries).toHaveLength(1);
+  });
+});
+
+describe("AgentRunOrchestrator: the Escalation Brief (T24c)", () => {
+  const BRIEF: EscalationBrief = {
+    facts: ["server/app.ts no longer exports createApp."],
+    analysis: {
+      failing: "Every backend test fails to load.",
+      tried: "The backend rewrote server/app.ts.",
+      cause: "server/app.ts dropped the template's createApp.",
+      choice: "retryWithHint",
+      hint: "Restore createApp in server/app.ts.",
+    },
+    withoutAnalysis: null,
+  };
+
+  /** Answers BRIEF and keeps what it was asked. */
+  function recordingBriefer(answer: () => Promise<EscalationBrief>) {
+    const asked: BriefInput[] = [];
+    const briefer: EscalationBriefer = {
+      brief: async (input) => {
+        asked.push(input);
+        return answer();
+      },
+    };
+    return { briefer, asked };
+  }
+
+  it("writes the brief of a new Escalation before it waits for a person", async () => {
+    const { briefer, asked } = recordingBriefer(async () => BRIEF);
+    const context = await approved({ outcomes: [escalatedWith()], briefer });
+    context.tasks.completeStep(
+      context.tasks.startStep(
+        context.tasks.createTask({
+          runId: context.runId,
+          sliceId: context.slices.listSlices(context.runId)[0]!.id,
+          agentRole: "backendCoding",
+        }).id,
+      ).id,
+      "Rewrote server/app.ts.",
+    );
+
+    const progress = await context.orchestrator.advance(context.runId);
+
+    expect(progress).toMatchObject({
+      waitingFor: "escalation",
+      escalation: { brief: BRIEF },
+    });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({
+      sliceId: context.slices.listSlices(context.runId)[0]!.id,
+      reports: [issueReport()],
+      escalation: { trigger: "retryBudget" },
+      workingMemory: [
+        { role: "backendCoding", note: "Rewrote server/app.ts." },
+      ],
+    });
+    expect(asked[0]!.documents).not.toBeNull();
+  });
+
+  // A restart must not spend tokens on an Escalation already opened.
+  it("writes it once, and never for an Escalation a restarted process finds", async () => {
+    const { briefer, asked } = recordingBriefer(async () => BRIEF);
+    const context = await approved({ outcomes: [escalatedWith()], briefer });
+    await context.orchestrator.advance(context.runId);
+    await context.orchestrator.advance(context.runId);
+    await context.restart().advance(context.runId);
+
+    expect(asked).toHaveLength(1);
+  });
+
+  it("leaves the Escalation standing without one when it cannot be written", async () => {
+    const { briefer } = recordingBriefer(async () => {
+      throw new Error("git: no such branch");
+    });
+    const context = await approved({ outcomes: [escalatedWith()], briefer });
+
+    const progress = await context.orchestrator.advance(context.runId);
+
+    expect(progress).toMatchObject({
+      waitingFor: "escalation",
+      escalation: { brief: null },
+    });
+    expect(context.briefProblems).toEqual([
+      "The Escalation's brief could not be written: git: no such branch",
+    ]);
+  });
+
+  // The person may decide while the brief is written; their choice stands.
+  it("goes on with a decision made while the brief was being written", async () => {
+    let decide: () => void = () => {};
+    const { briefer } = recordingBriefer(async () => {
+      decide();
+      return BRIEF;
+    });
+    const context = await approved({ outcomes: [escalatedWith()], briefer });
+    decide = () =>
+      context.orchestrator.resolveEscalation(context.runId, {
+        choice: "skipSlice",
+      });
+
+    await context.orchestrator.advance(context.runId);
+
+    expect(context.escalations.listEscalations(context.runId)[0]).toMatchObject(
+      { choice: "skipSlice", brief: BRIEF },
+    );
+    expect(context.status()).not.toBe("escalated");
+  });
+
+  it("has none without a briefer, as before T24c", async () => {
+    const context = await approved({ outcomes: [escalatedWith()] });
+
+    expect(await context.orchestrator.advance(context.runId)).toMatchObject({
+      escalation: { brief: null },
+    });
   });
 });
 

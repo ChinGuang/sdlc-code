@@ -8,6 +8,7 @@ export function issueReport(fields: Partial<IssueReport> = {}): IssueReport {
     file: "server/todos.test.ts",
     endpoint: "POST /todos",
     error: "AssertionError: expected 404 to be 400",
+    cause: null,
     evidence: "AssertionError: expected 404 to be 400",
     suspectedOwner: "backendCoding",
     signature: "sig-post-todos",

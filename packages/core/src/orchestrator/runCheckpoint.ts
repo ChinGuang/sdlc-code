@@ -27,6 +27,8 @@ const IssueReportSchema = z.strictObject({
   file: z.string().nullable(),
   endpoint: z.string().nullable(),
   error: z.string(),
+  // Checkpoints from before T24c have none.
+  cause: z.string().nullable().default(null),
   evidence: z.string(),
   suspectedOwner: z.enum(["backendCoding", "frontendCoding"]).nullable(),
   signature: z.string(),
