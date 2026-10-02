@@ -1450,29 +1450,26 @@ describe("AgentRunOrchestrator: Escalations", () => {
 
   // T24i: a retry goes to the side at fault, or where the person says.
   it.each([
-    [undefined, ["backend"]],
-    ["frontend", ["frontend"]],
-    ["both", undefined],
-  ] as const)(
-    "retry with hint for side %s: the Slice codes %s",
-    async (side, sides) => {
-      const { orchestrator, runId, runnerCalls } = await approved({
-        // The report suspects the Backend Coding Agent.
-        outcomes: [escalatedWith()],
-      });
-      await orchestrator.advance(runId);
+    ["no side given: the side the report suspects", undefined, ["backend"]],
+    ["the frontend: only the frontend", "frontend", ["frontend"]],
+    ["both: every side", "both", undefined],
+  ] as const)("retry with a hint for %s codes", async (_label, side, sides) => {
+    const { orchestrator, runId, runnerCalls } = await approved({
+      // The report suspects the Backend Coding Agent.
+      outcomes: [escalatedWith()],
+    });
+    await orchestrator.advance(runId);
 
-      orchestrator.resolveEscalation(runId, {
-        choice: "retryWithHint",
-        hint: "Return 404 for a missing todo.",
-        ...(side ? { side } : {}),
-      });
-      await orchestrator.advance(runId);
+    orchestrator.resolveEscalation(runId, {
+      choice: "retryWithHint",
+      hint: "Return 404 for a missing todo.",
+      ...(side ? { side } : {}),
+    });
+    await orchestrator.advance(runId);
 
-      const retried = runnerCalls.find((call) => call.hint !== undefined)!;
-      expect(retried.hint!.sides).toEqual(sides);
-    },
-  );
+    const retried = runnerCalls.find((call) => call.hint !== undefined)!;
+    expect(retried.hint!.sides).toEqual(sides);
+  });
 
   it("skip Slice: marks it skipped, fails its Tasks, and builds on", async () => {
     const { orchestrator, runId, sliceStatuses, tasks, slices } =

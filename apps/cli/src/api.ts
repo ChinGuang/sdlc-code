@@ -44,6 +44,9 @@ export type RunSummary = {
   waitingFor?: Waiting["for"];
 };
 
+/** Who a retry's hint is for (T24i). */
+export type HintSide = "backend" | "frontend" | "both";
+
 export type IssueSummary = {
   step: string;
   failingTest: string | null;
@@ -383,6 +386,3 @@ async function refusal(response: Response): Promise<ApiError> {
 }
 
 const runPath = (runId: string) => `/runs/${encodeURIComponent(runId)}`;
-
-/** Who a retry's hint is for (T24i). */
-export type HintSide = "backend" | "frontend" | "both";

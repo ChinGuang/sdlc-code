@@ -10,6 +10,7 @@ import type {
   DocumentStatus,
   EscalationBrief,
   EscalationResolution,
+  HintSide,
   PullRequestDecision,
   RunMode,
   RunStatus,
@@ -117,7 +118,7 @@ export type Waiting =
        * The side the Issue Reports point at (T24i): where a retry's hint goes
        * unless a person sends it elsewhere.
        */
-      sideAtFault: "backend" | "frontend" | "both";
+      sideAtFault: HintSide;
       /**
        * What went wrong in plain words (T24c): null while it is written, and
        * for an Escalation from before it existed.

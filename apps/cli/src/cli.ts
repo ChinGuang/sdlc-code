@@ -579,7 +579,11 @@ async function escalationShow(parsed: Parsed, io: CliIo, deps: CliDeps) {
     );
 }
 
-const HINT_SIDES: readonly HintSide[] = ["backend", "frontend", "both"];
+const HINT_SIDES = [
+  "backend",
+  "frontend",
+  "both",
+] as const satisfies readonly HintSide[];
 
 const CHOICE_NAMES: Record<
   NonNullable<EscalationBrief["analysis"]>["choice"],
@@ -601,7 +605,7 @@ async function escalationGoOn(
   const { api, paint } = deps;
   const runId = await findRun(api, parsed.words[2]);
   const side = parsed.flags.get("side");
-  if (side !== undefined && !HINT_SIDES.includes(side as HintSide))
+  if (side !== undefined && !(HINT_SIDES as readonly unknown[]).includes(side))
     throw new UsageError(
       `--side is backend, frontend or both, not "${String(side)}".`,
     );

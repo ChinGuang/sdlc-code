@@ -35,6 +35,11 @@ export const IssueReportSchema = z.strictObject({
   occurrences: z.number().int().positive(),
 }) satisfies z.ZodType<IssueReport>;
 
+const CodingIssueSchema = z.strictObject({
+  summary: z.string(),
+  evidence: z.string(),
+});
+
 const SliceHistorySchema = z.strictObject({
   earlier: z.strictObject({
     backend: z.array(IssueReportSchema),
@@ -45,6 +50,13 @@ const SliceHistorySchema = z.strictObject({
     backend: z.number().int().nonnegative().optional(),
     frontend: z.number().int().nonnegative().optional(),
   }),
+  // Checkpoints from before T24i have none: every side codes.
+  pending: z
+    .strictObject({
+      backend: z.array(CodingIssueSchema).optional(),
+      frontend: z.array(CodingIssueSchema).optional(),
+    })
+    .optional(),
 });
 
 const RevisionSchema = z.strictObject({
@@ -128,6 +140,16 @@ export function checkpointPayload(memory: RunMemoryState): CheckpointPayload {
             design: [...history.earlier.design],
           },
           retryBaseline: { ...history.retryBaseline },
+          ...(history.pending
+            ? {
+                pending: Object.fromEntries(
+                  Object.entries(history.pending).map(([side, issues]) => [
+                    side,
+                    issues.map((issue) => ({ ...issue })),
+                  ]),
+                ),
+              }
+            : {}),
         },
       ]),
     ),
@@ -161,6 +183,7 @@ export function memoryFromCheckpoint(payload: unknown): RunMemoryState | null {
         {
           earlier: history.earlier,
           retryBaseline: history.retryBaseline,
+          ...(history.pending ? { pending: history.pending } : {}),
         },
       ]),
     ),

@@ -81,6 +81,9 @@ export type Waiting =
   | { for: "designRetry"; problem: string };
 
 /** An Issue Report (T16) as a person reads it; the evidence stays with the agents. */
+/** Who a retry's hint is for (T24i). */
+export type HintSide = "backend" | "frontend" | "both";
+
 export type IssueSummary = {
   step: string;
   failingTest: string | null;
@@ -251,6 +254,3 @@ export type EscalationResolution =
 
 export type PullRequestDecision =
   { choice: "approve" } | { choice: "requestChanges"; comments: string };
-
-/** Who a retry's hint is for (T24i). */
-export type HintSide = "backend" | "frontend" | "both";

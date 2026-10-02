@@ -3,7 +3,7 @@
  * that does not fit is a 400 naming every problem, so a client fixes it in one
  * go rather than one field at a time.
  */
-import { DOCUMENT_KINDS } from "@sdlc-code/core";
+import { DOCUMENT_KINDS, HINT_SIDES } from "@sdlc-code/core";
 import { z } from "zod";
 
 /** A model-sized request is not what this box is for; a book is a mistake. */
@@ -59,7 +59,7 @@ export const EscalationBody = z.discriminatedUnion("choice", [
     choice: z.literal("retryWithHint"),
     hint: z.string().trim().min(1),
     /** Who the hint is for (T24i); the side at fault when left out. */
-    side: z.enum(["backend", "frontend", "both"]).optional(),
+    side: z.enum(HINT_SIDES).optional(),
     tokenBudget: RaisedBudget,
   }),
   z.strictObject({

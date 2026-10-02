@@ -288,7 +288,7 @@ stateDiagram-v2
 
   Building --> Escalated : retry, token budget, loop or undecidable owner
   Reviewing --> Escalated : retry or token budget
-  Escalated --> Building : retry with hint / skip slice
+  Escalated --> Building : retry with hint (to the side at fault) / skip slice
   Escalated --> Designing : edit approved documents
   Escalated --> Aborted : abort
   Designing --> Aborted : a person aborts (at any time)

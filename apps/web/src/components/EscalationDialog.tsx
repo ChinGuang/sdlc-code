@@ -309,7 +309,7 @@ export function EscalationDialog({
           </label>
         )}
         {choice === "retryWithHint" && !inReview && (
-          <fieldset className="hint-side">
+          <fieldset className="hint-side" aria-describedby="hint-side-note">
             <legend className="small muted">Send the hint to</legend>
             {HINT_SIDES.map((option) => (
               <label key={option.side} className="check">
@@ -329,7 +329,7 @@ export function EscalationDialog({
                 )}
               </label>
             ))}
-            <span className="hint">
+            <span id="hint-side-note" className="hint" aria-live="polite">
               {side === "both"
                 ? "Both Coding Agents work on the next attempt."
                 : `Only the ${side} codes; the other side's saved code is tested with it.`}
