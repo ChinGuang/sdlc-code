@@ -29,6 +29,22 @@ export type StackProfile = {
    * is one file. Both may read everything; the test script is the profile's.
    */
   writablePaths: Record<CodingSide, readonly string[]>;
+  /**
+   * The template's contract (T24d): what it already is, so a design does not
+   * contradict it and a Slice extends it rather than replacing it. Kept here,
+   * beside the template, and checked against it by the tests.
+   */
+  templateFacts: TemplateFacts;
+};
+
+export type TemplateFacts = {
+  /** For the System Design Agent: what the API already serves. */
+  serves: readonly string[];
+  /**
+   * For the Coding Agents: how the template works, and what to keep. Both
+   * are told `both`, and each its own side's.
+   */
+  builds: Record<"both" | CodingSide, readonly string[]>;
 };
 
 const TEMPLATES = fileURLToPath(new URL("../templates/", import.meta.url));
@@ -54,6 +70,32 @@ export const REACT_NODE: StackProfile = {
       "postcss.config.js",
     ],
   },
+  templateFacts: {
+    serves: [
+      'GET /health answers exactly { "status": "ok" | "degraded", "database": "up" | "down" }: 200, or 503 when the database is down. The template\'s own test checks this exact body, so the API Contract keeps it as it is and adds no field to it.',
+      'A path no route serves answers 404, and a route that throws answers 500 with { "error": "Internal Server Error" } and no detail (SEC-03).',
+      "The screens call the API under /api, which the dev server proxies to the API without the prefix: the API Contract's paths have no /api prefix.",
+      "Data lives in SQLite through Prisma.",
+    ],
+    builds: {
+      both: [
+        "Stack: React 19, react-router-dom 7, Vite 6, Tailwind 3; Express 4, Prisma 6 on SQLite, zod 3; TypeScript 5 as ES modules, so a relative import ends in .js.",
+        'Tests run on Vitest 3 without globals: every test file imports what it uses (describe, it, expect, vi, beforeEach, afterEach) from "vitest". Never Jest: no jest.mock, jest.fn or jest.Mock.',
+        "server/app.test.ts, src/App.test.tsx and src/screens/HealthScreen.test.tsx are the template's tests: add to them, and keep what they check passing.",
+      ],
+      backend: [
+        "API tests (server/**/*.test.ts) run in Node with supertest against createApp().",
+        "SQLite has no Prisma native types: never write @db.VarChar, @db.Text or any @db.* attribute; use String, Int, Float, Boolean and DateTime.",
+        "server/app.ts is the template's: extend it, never replace it. It exports createApp(register?), which mounts GET /health, calls register(app) for a Slice's routes and then the error handler, and route(handler), which hands a rejected promise to that handler. Keep both exports as they are; put a Slice's routes in their own file and pass them to createApp in server/main.ts.",
+        "server/prisma.ts exports the one PrismaClient (prisma): import it, never create another.",
+      ],
+      frontend: [
+        'Screen tests (src/**/*.test.tsx) run in jsdom with Testing Library, its matchers loaded by src/testSetup.ts. Stub the API with vi.stubGlobal("fetch", …) as src/screens/HealthScreen.test.tsx does, and render a routed screen inside a MemoryRouter as src/App.test.tsx does.',
+        "src/api.ts is the only way the screens talk to the API: add functions beside getJson and getHealth, and keep both.",
+        "src/App.tsx holds every screen as a <Route>; the Router is in src/main.tsx, so a test renders App inside a MemoryRouter.",
+      ],
+    },
+  },
 };
 
 export const STACK_PROFILES: readonly StackProfile[] = [REACT_NODE];
@@ -68,6 +110,11 @@ export function stackProfile(id: string): StackProfile {
 }
 
 export type TemplateFile = { path: string; contents: string };
+
+/** The facts as a prompt section: one fact per line. */
+export function factLines(facts: readonly string[]): string {
+  return facts.map((fact) => `- ${fact}`).join("\n");
+}
 
 /** Never shipped to a generated application, and never built into a Snapshot. */
 const SKIPPED = new Set(["node_modules", "dist", ".git", "prisma/dev.db"]);

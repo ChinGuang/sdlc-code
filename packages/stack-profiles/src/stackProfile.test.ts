@@ -133,6 +133,72 @@ describe("templateFiles", () => {
   });
 });
 
+// The facts are prompts; these tests are what keeps them true of the template.
+describe("templateFacts (T24d)", () => {
+  const files = templateFiles(REACT_NODE);
+  const file = (path: string) =>
+    files.find((one) => one.path === path)?.contents ?? "";
+  const facts = [
+    ...REACT_NODE.templateFacts.serves,
+    ...Object.values(REACT_NODE.templateFacts.builds).flat(),
+  ].join("\n");
+
+  it("gives the /health body the template's own test checks, and no other", () => {
+    expect(file("server/app.test.ts")).toContain(
+      'toEqual({ status: "ok", database: "up" })',
+    );
+    expect(REACT_NODE.templateFacts.serves[0]).toContain(
+      '{ "status": "ok" | "degraded", "database": "up" | "down" }',
+    );
+    expect(facts).not.toMatch(/timestamp/);
+  });
+
+  it("names exports the template has, in the files it says", () => {
+    const exported = (path: string, name: string) =>
+      new RegExp(`^export (async )?(function|const) ${name}\\b`, "m").test(
+        file(path),
+      );
+
+    expect(exported("server/app.ts", "createApp")).toBe(true);
+    expect(exported("server/app.ts", "route")).toBe(true);
+    expect(exported("server/prisma.ts", "prisma")).toBe(true);
+    expect(exported("src/api.ts", "getJson")).toBe(true);
+    expect(exported("src/api.ts", "getHealth")).toBe(true);
+  });
+
+  it("names files and tests the template ships", () => {
+    for (const path of facts.match(/\b(?:server|src)\/[\w./]+\.tsx?\b/g) ?? [])
+      expect(files.map((one) => one.path)).toContain(path);
+  });
+
+  it("gives the versions and the test runner the template declares", () => {
+    const manifest = JSON.parse(file("package.json")) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    const major = (name: string) =>
+      (manifest.dependencies[name] ?? manifest.devDependencies[name])!.match(
+        /\d+/,
+      )![0];
+    const versions: Array<[string, string]> = [
+      ["React", "react"],
+      ["react-router-dom", "react-router-dom"],
+      ["Vite", "vite"],
+      ["Tailwind", "tailwindcss"],
+      ["Express", "express"],
+      ["Prisma", "prisma"],
+      ["zod", "zod"],
+      ["TypeScript", "typescript"],
+      ["Vitest", "vitest"],
+    ];
+
+    for (const [label, name] of versions)
+      expect(facts).toContain(`${label} ${major(name)}`);
+    expect(file("vite.config.ts")).not.toMatch(/globals:\s*true/);
+    expect(file("prisma/schema.prisma")).toMatch(/provider = "sqlite"/);
+  });
+});
+
 describe("BASELINE_RULES", () => {
   it("is a usable standard: unique, well-formed ids and descriptions", () => {
     expect(ruleProblems(BASELINE_RULES)).toEqual([]);

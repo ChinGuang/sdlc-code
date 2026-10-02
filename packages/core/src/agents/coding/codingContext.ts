@@ -5,7 +5,11 @@
  * with `vision`, and live Penpot tools with `penpotMcp`.
  */
 import type { ExportedImage } from "@sdlc-code/clients";
-import type { CodingSide, StackProfile } from "@sdlc-code/stack-profiles";
+import {
+  factLines,
+  type CodingSide,
+  type StackProfile,
+} from "@sdlc-code/stack-profiles";
 import { stringify } from "yaml";
 import type { AgentTask } from "../../agentLoop/agentLoop.js";
 import type { ModelCapabilities } from "../../config/agentConfig.js";
@@ -188,6 +192,9 @@ How to work:
 - Your turns are limited: read what you need, make the changes, then reply. Finish the code you started before you run out, because a half-written screen or route fails the Test Run. Do not re-read a file you have already read.
 
 ${SIDE_RULES[side]}
+
+The template every Slice builds on (its facts; code that contradicts them fails the Test Run):
+${factLines([...profile.templateFacts.builds.both, ...profile.templateFacts.builds[side]])}
 
 Your tools: ${tools}.
 

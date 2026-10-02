@@ -1027,6 +1027,19 @@ describe("AgentRunOrchestrator: design", () => {
     ).toEqual(Array(5).fill("inReview"));
   });
 
+  // Run #27f388: a Contract without /health's database field failed the
+  // template's own test three times.
+  it("tells the System Design Agent what the template already serves (T24d)", async () => {
+    const { orchestrator, runId, designCalls } = setup({});
+
+    await orchestrator.advance(runId);
+
+    const stack = designCalls[0]!.stackProfile;
+    expect(stack).toContain(REACT_NODE.summary);
+    for (const fact of REACT_NODE.templateFacts.serves)
+      expect(stack).toContain(`- ${fact}`);
+  });
+
   it("builds every Slice once the design is approved, then waits for review", async () => {
     const { orchestrator, runId, status, runnerCalls, sliceStatuses } =
       await approved({});

@@ -183,6 +183,24 @@ describe("codingSides", () => {
   });
 });
 
+// Run #e29ca700: five of seven Escalations were the template's facts.
+describe("codingContext: the template's facts (T24d)", () => {
+  it("tells each side the template they build on: the shared facts and its own", () => {
+    const { builds } = REACT_NODE.templateFacts;
+    for (const [side, other] of [
+      ["backend", "frontend"],
+      ["frontend", "backend"],
+    ] as const) {
+      const { system } = codingContext(input({ side })).task;
+
+      expect(system).toContain("The template every Slice builds on");
+      for (const fact of [...builds.both, ...builds[side]])
+        expect(system).toContain(`- ${fact}`);
+      for (const fact of builds[other]) expect(system).not.toContain(fact);
+    }
+  });
+});
+
 describe("codingContext inputs", () => {
   it("gives the Task and every Approved Document", () => {
     const { user } = codingContext(input({ side: "backend" })).task;

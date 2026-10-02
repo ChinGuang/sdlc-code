@@ -176,6 +176,7 @@ classDiagram
   class StackProfile {
     name
     template
+    templateFacts: what it serves, and what Slices keep
     testScript
     lintScript
     reviewStandard
