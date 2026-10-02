@@ -54,7 +54,7 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Loop** — An Issue Report matching an earlier one in the same Task (same failing test and error). Escalates immediately, without spending the remaining Retry Budget.
 
-**Escalation** — Pausing a Run for a human, with a failure summary and Working Memory. The human chooses: retry with a hint, edit Approved Documents, skip the Slice, or abort. Aborting offers to open a Draft PR (on by default). In auto mode there is no human: the Run ends and always opens a Draft PR.
+**Escalation** — Pausing a Run for a human, with a failure summary and Working Memory. The human chooses: retry with a hint (for the side the Issue Reports point at, or the one they name), edit Approved Documents, skip the Slice, or abort. Aborting offers to open a Draft PR (on by default). In auto mode there is no human: the Run ends and always opens a Draft PR.
 
 **Escalation Brief** — What went wrong at an Escalation, in plain words, for the person deciding: facts found in code, and the Orchestrator's one read-only look at the failure (what is failing, what was tried, the likely cause, a suggested choice with a ready hint). A Token Budget Escalation gets the facts only. A brief never decides: the person does.
 

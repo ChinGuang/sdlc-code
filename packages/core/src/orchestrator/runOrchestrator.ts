@@ -96,8 +96,24 @@ export type PullRequestDecision =
  */
 type GoingOn = { tokenBudget?: number };
 
+/** Who a retry's hint is for (T24i): one Coding Agent, or both. */
+export const HINT_SIDES = [
+  "backend",
+  "frontend",
+  "both",
+] as const satisfies readonly (CodingSide | "both")[];
+export type HintSide = (typeof HINT_SIDES)[number];
+
 export type EscalationResolution =
-  | ({ choice: "retryWithHint"; hint: string } & GoingOn)
+  | ({
+      choice: "retryWithHint";
+      hint: string;
+      /**
+       * Who the hint is for (T24i). Without one, the side the Issue Reports
+       * point at, or both when they point at neither.
+       */
+      side?: HintSide;
+    } & GoingOn)
   | ({
       choice: "editDocuments";
       /** What to change in each document; its owning agent revises it. */
@@ -350,6 +366,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
           memory.hints.set(current.id, {
             from: "person",
             issues: [{ summary: resolution.hint, evidence: resolution.hint }],
+            ...hintedSides(resolution.side ?? sideAtFault(escalation.reports)),
           });
         // A person chose to try again, so the review gets its attempts back too.
         memory.reviewRetries = 0;
@@ -615,8 +632,9 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       return;
     }
     const memory = this.#memoryOf(run.id);
+    // Kept until the Slice's first retry or its end, so a restart before
+    // then gives the attempt the same hint for the same sides (T24i).
     const hint = memory.hints.get(current.id);
-    memory.hints.delete(current.id);
     const runner = await this.#options.sliceRunner(run, (checkpoint) =>
       this.#sliceCheckpoint(run.id, checkpoint),
     );
@@ -633,6 +651,7 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       history: memory.histories.get(current.id),
       hint,
     });
+    memory.hints.delete(current.id);
     switch (outcome.status) {
       case "passed":
         memory.histories.delete(current.id);
@@ -840,8 +859,11 @@ export class AgentRunOrchestrator implements RunOrchestrator {
    */
   #sliceCheckpoint(runId: string, checkpoint: SliceCheckpoint): void {
     const memory = this.#memoryOf(runId);
-    if (checkpoint.at === "retrying")
+    if (checkpoint.at === "retrying") {
       memory.histories.set(checkpoint.sliceId, checkpoint.history);
+      // The hint was for the first attempt; its history now says who codes.
+      memory.hints.delete(checkpoint.sliceId);
+    }
     if (checkpoint.at === "committed")
       memory.histories.delete(checkpoint.sliceId);
     this.#checkpoint(runId);
@@ -853,4 +875,30 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       checkpointPayload(this.#memoryOf(runId)),
     );
   }
+}
+
+/**
+ * The side Issue Reports point at (T24i): the one Coding Agent every report
+ * suspects, or "both" when they suspect both, or any report suspects no one.
+ * Stored reports are JSON, so each is read rather than trusted.
+ */
+export function sideAtFault(reports: readonly unknown[]): HintSide {
+  const owners = new Set(
+    reports.map((report) => {
+      const owner = (report as { suspectedOwner?: unknown } | null)
+        ?.suspectedOwner;
+      return owner === "backendCoding"
+        ? "backend"
+        : owner === "frontendCoding"
+          ? "frontend"
+          : null;
+    }),
+  );
+  const [only] = owners;
+  return owners.size === 1 && only ? only : "both";
+}
+
+/** A hint for both sides names none: every side of the Slice codes. */
+function hintedSides(side: HintSide): Pick<SliceHint, "sides"> {
+  return side === "both" ? {} : { sides: [side] };
 }

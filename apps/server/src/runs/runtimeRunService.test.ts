@@ -520,6 +520,8 @@ describe("RuntimeRunService: what a person decides on", () => {
       ],
       workingMemory: [{ role: "backendCoding", note: "Tried UTC; still 409." }],
       brief: null,
+      // The one report suspects the backend (T24i).
+      sideAtFault: "backend",
       openDraftPrOnAbort: true,
     });
   });

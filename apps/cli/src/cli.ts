@@ -8,6 +8,7 @@ import {
   type DocumentKind,
   type EscalationBrief,
   type EscalationResolution,
+  type HintSide,
   type RunDetail,
   type ServerApi,
 } from "./api.js";
@@ -64,7 +65,7 @@ Commands:
                                             Send documents back; the rest are approved
   gate request-changes <run> "<comments>"   At the PR Gate: build the last Slice again
   escalation show <run>                     What stopped the Run, and the ways on
-  escalation retry <run> "<hint>" [--budget 3M]
+  escalation retry <run> "<hint>" [--side backend|frontend|both] [--budget 3M]
   escalation edit <run> <document> "<comments>" [--budget 3M]
   escalation skip <run> [--budget 3M]
   retry-design <run>                        Design again after a gated Run's design failed
@@ -73,6 +74,8 @@ Commands:
 <run> is a Run's id or its first characters, e.g. 27f388.
 <document> is system-design, slice-plan, api-contract, ui-spec or penpot.
 --budget raises a spent Token Budget: every way on but abort needs tokens.
+--side sends a retry's hint to one Coding Agent; without it, to the side
+  the Issue Reports point at, which escalation show names.
 
 Options:
   --help       Show this help
@@ -83,7 +86,7 @@ Environment:
   SDLC_DASHBOARD_URL  The dashboard (default http://localhost:5173)`;
 
 /** Flags that take a value; every other flag is a switch. */
-const VALUED = new Set(["repo", "budget"]);
+const VALUED = new Set(["repo", "budget", "side"]);
 
 /** Parses argv and runs a command; resolves to the process exit code. */
 export async function runCli(
@@ -538,6 +541,14 @@ async function escalationShow(parsed: Parsed, io: CliIo, deps: CliDeps) {
   }
   const spent = run.tokensUsed >= run.tokenBudget;
   const budget = spent ? ` --budget ${suggestedBudget(run)}` : "";
+  if (waiting.slice)
+    io.out(
+      paint.muted(
+        waiting.sideAtFault === "both"
+          ? "  A retry's hint goes to both Coding Agents unless --side names one."
+          : `  A retry's hint goes to the ${waiting.sideAtFault}, where the evidence points, unless --side says otherwise.`,
+      ),
+    );
   io.out("  Ways on:");
   const hint = brief?.analysis?.hint;
   // The hint came from a model that read the application's output, so it is
@@ -568,6 +579,12 @@ async function escalationShow(parsed: Parsed, io: CliIo, deps: CliDeps) {
     );
 }
 
+const HINT_SIDES = [
+  "backend",
+  "frontend",
+  "both",
+] as const satisfies readonly HintSide[];
+
 const CHOICE_NAMES: Record<
   NonNullable<EscalationBrief["analysis"]>["choice"],
   string
@@ -584,9 +601,14 @@ async function escalationGoOn(
   io: CliIo,
   deps: CliDeps,
 ) {
-  onlyFlags(parsed, ["budget"]);
+  onlyFlags(parsed, choice === "retry" ? ["budget", "side"] : ["budget"]);
   const { api, paint } = deps;
   const runId = await findRun(api, parsed.words[2]);
+  const side = parsed.flags.get("side");
+  if (side !== undefined && !(HINT_SIDES as readonly unknown[]).includes(side))
+    throw new UsageError(
+      `--side is backend, frontend or both, not "${String(side)}".`,
+    );
   const rest = parsed.words.slice(3);
   const budget = parsed.flags.get("budget");
   const more: { tokenBudget?: number } =
@@ -598,7 +620,13 @@ async function escalationGoOn(
       throw new UsageError(
         'escalation retry needs one hint, in quotes: sdlccode escalation retry <run> "<hint>"',
       );
-    resolution = { choice: "retryWithHint", hint: hint.trim(), ...more };
+    resolution = {
+      choice: "retryWithHint",
+      hint: hint.trim(),
+      // Without --side, the side the Issue Reports point at (T24i).
+      ...(side ? { side: side as HintSide } : {}),
+      ...more,
+    };
   } else if (choice === "edit") {
     const [document, comments, ...extra] = rest;
     if (!document || !comments?.trim() || extra.length > 0)
@@ -621,7 +649,7 @@ async function escalationGoOn(
   io.out(
     `${paint.green("✓")} ${
       choice === "retry"
-        ? "Retrying with your hint."
+        ? `Retrying with your hint${side && side !== "both" ? ` for the ${side}` : ""}.`
         : choice === "edit"
           ? "Sent to the document's owner; the Design Gate re-opens after."
           : "Skipped the Slice."

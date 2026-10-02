@@ -35,6 +35,11 @@ export const IssueReportSchema = z.strictObject({
   occurrences: z.number().int().positive(),
 }) satisfies z.ZodType<IssueReport>;
 
+const CodingIssueSchema = z.strictObject({
+  summary: z.string(),
+  evidence: z.string(),
+});
+
 const SliceHistorySchema = z.strictObject({
   earlier: z.strictObject({
     backend: z.array(IssueReportSchema),
@@ -45,6 +50,13 @@ const SliceHistorySchema = z.strictObject({
     backend: z.number().int().nonnegative().optional(),
     frontend: z.number().int().nonnegative().optional(),
   }),
+  // Checkpoints from before T24i have none: every side codes.
+  pending: z
+    .strictObject({
+      backend: z.array(CodingIssueSchema).optional(),
+      frontend: z.array(CodingIssueSchema).optional(),
+    })
+    .optional(),
 });
 
 const RevisionSchema = z.strictObject({
@@ -82,6 +94,8 @@ export const CheckpointPayloadSchema = z.strictObject({
         issues: z.array(
           z.strictObject({ summary: z.string(), evidence: z.string() }),
         ),
+        // Checkpoints from before T24i have none: every side.
+        sides: z.array(z.enum(["backend", "frontend"])).optional(),
       }),
     ]),
   ),
@@ -126,13 +140,27 @@ export function checkpointPayload(memory: RunMemoryState): CheckpointPayload {
             design: [...history.earlier.design],
           },
           retryBaseline: { ...history.retryBaseline },
+          ...(history.pending
+            ? {
+                pending: Object.fromEntries(
+                  Object.entries(history.pending).map(([side, issues]) => [
+                    side,
+                    issues.map((issue) => ({ ...issue })),
+                  ]),
+                ),
+              }
+            : {}),
         },
       ]),
     ),
     hints: Object.fromEntries(
       [...memory.hints].map(([sliceId, hint]) => [
         sliceId,
-        { from: hint.from, issues: hint.issues.map((issue) => ({ ...issue })) },
+        {
+          from: hint.from,
+          issues: hint.issues.map((issue) => ({ ...issue })),
+          ...(hint.sides ? { sides: [...hint.sides] } : {}),
+        },
       ]),
     ),
     reviewRetries: memory.reviewRetries,
@@ -155,6 +183,7 @@ export function memoryFromCheckpoint(payload: unknown): RunMemoryState | null {
         {
           earlier: history.earlier,
           retryBaseline: history.retryBaseline,
+          ...(history.pending ? { pending: history.pending } : {}),
         },
       ]),
     ),
@@ -166,7 +195,11 @@ export function memoryFromCheckpoint(payload: unknown): RunMemoryState | null {
               from: "person" as const,
               issues: [{ summary: hint, evidence: hint }],
             }
-          : { from: hint.from, issues: hint.issues },
+          : {
+              from: hint.from,
+              issues: hint.issues,
+              ...(hint.sides ? { sides: hint.sides } : {}),
+            },
       ]),
     ),
     reviewRetries: parsed.data.reviewRetries,

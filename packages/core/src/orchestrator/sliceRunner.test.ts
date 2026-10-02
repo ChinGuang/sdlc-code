@@ -32,6 +32,7 @@ import { issueReport } from "./fixtures/issueReport.js";
 import { RuleOwnerResolver } from "./ownerResolution.js";
 import {
   OrchestratedSliceRunner,
+  type SliceCheckpoint,
   type SliceRunInput,
   type SliceRunner,
 } from "./sliceRunner.js";
@@ -148,6 +149,7 @@ async function setup(options: {
   }> = [];
   let tokens = options.tokens ?? 1_000_000;
   const checkpoints: string[] = [];
+  const saved: SliceCheckpoint[] = [];
   const results = [...options.results];
   const testing: TestingAgent = {
     testSlice: async () => {
@@ -228,7 +230,10 @@ async function setup(options: {
     },
     codingAgent,
     retryBudget: options.retryBudget,
-    checkpoint: (checkpoint) => checkpoints.push(checkpoint.at),
+    checkpoint: (checkpoint) => {
+      checkpoints.push(checkpoint.at);
+      saved.push(checkpoint);
+    },
     stopped: options.stopped,
   });
   const input = (overrides: Partial<SliceRunInput> = {}): SliceRunInput => ({
@@ -263,6 +268,7 @@ async function setup(options: {
     workspaces,
     sliceStatus,
     checkpoints,
+    saved,
     testsLeft,
   };
 }
@@ -393,6 +399,86 @@ describe("OrchestratedSliceRunner", () => {
     expect(calls.at(-1)!.issues).toEqual([
       "A person reviewed the last attempt and says: Make the list render before the fetch resolves.",
     ]);
+  });
+
+  // Run #e29ca700: each frontend retry also ran the backend, which spent its
+  // turns on nothing and was confused by a hint meant for the frontend.
+  describe("a hint for one side (T24i)", () => {
+    const hint = (sides?: Array<"backend" | "frontend">) => ({
+      from: "person" as const,
+      issues: [{ summary: "Use getJson.", evidence: "Use getJson." }],
+      ...(sides ? { sides } : {}),
+    });
+
+    it("codes only that side, and tests the other side's saved code with it", async () => {
+      const { runner, input, calls } = await setup({
+        results: [failing(frontendFailure("a")), passing()],
+        retryBudget: 0,
+      });
+      const first = await runner.runSlice(input());
+      if (first.status !== "escalated")
+        throw new Error("expected an Escalation");
+      const before = calls.length;
+
+      const again = await runner.runSlice(
+        input({ history: first.history, hint: hint(["frontend"]) }),
+      );
+
+      expect(again.status).toBe("passed");
+      expect(calls.slice(before).map((call) => call.side)).toEqual([
+        "frontend",
+      ]);
+    });
+
+    it("codes every side for a hint to both", async () => {
+      const { runner, input, calls } = await setup({ results: [passing()] });
+
+      await runner.runSlice(input({ hint: hint() }));
+
+      expect(calls.map((call) => call.side).sort()).toEqual([
+        "backend",
+        "frontend",
+      ]);
+    });
+
+    // Nothing of the other side would be there to merge.
+    it("codes a side that never built anything, without the other side's hint", async () => {
+      const { runner, input, calls } = await setup({ results: [passing()] });
+
+      await runner.runSlice(input({ hint: hint(["frontend"]) }));
+
+      expect(calls.find((call) => call.side === "frontend")!.issues).toEqual([
+        "A person reviewed the last attempt and says: Use getJson.",
+      ]);
+      expect(calls.find((call) => call.side === "backend")!.issues).toEqual([]);
+    });
+
+    // The T24i review: a restart mid-retry widened it back to both sides.
+    it("records who codes on a retry, and a restart picks that attempt up", async () => {
+      const { runner, input, calls, saved } = await setup({
+        results: [failing(frontendFailure("a")), passing()],
+      });
+      await runner.runSlice(input());
+      const retrying = saved.find((one) => one.at === "retrying");
+      if (retrying?.at !== "retrying") throw new Error("expected a retry");
+      expect(Object.keys(retrying.history.pending!)).toEqual(["frontend"]);
+
+      const before = calls.length;
+      const resumed = await setup({ results: [passing()] });
+      await resumed.runner.runSlice(
+        resumed.input({ history: retrying.history }),
+      );
+
+      expect(before).toBe(3);
+      // Only the frontend was coding; this fresh database's backend never
+      // built anything, so it codes too, told nothing.
+      const resumedSide = (side: CodingSide) =>
+        resumed.calls.find((call) => call.side === side)!;
+      expect(resumedSide("frontend").issues).toEqual(
+        retrying.history.pending!.frontend!.map((issue) => issue.summary),
+      );
+      expect(resumedSide("backend").issues).toEqual([]);
+    });
   });
 
   // A Coding Agent told "a person says" about a machine's Finding would be

@@ -1403,6 +1403,16 @@ table.endpoints tr.selected td {
   font-size: 13px;
 }
 
+/* Who a retry's hint is for (T24i) */
+.hint-side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  margin: 0 0 12px;
+}
+
 /* Escalation Brief (T24c) */
 .brief {
   display: flex;

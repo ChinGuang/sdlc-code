@@ -4,6 +4,7 @@ import type {
   DocumentKind,
   EscalationBrief,
   EscalationResolution,
+  HintSide,
   RunDetail,
 } from "../api/types.js";
 import { DOCUMENT_NAMES, escalationTitle } from "../run/gates.js";
@@ -69,6 +70,8 @@ export function EscalationDialog({
   const waiting = run.waiting.for === "escalation" ? run.waiting : null;
   const [choice, setChoice] = useState<Choice | null>(null);
   const [hint, setHint] = useState("");
+  // Where the evidence points, unless the person sends it elsewhere (T24i).
+  const [side, setSide] = useState<HintSide>(waiting?.sideAtFault ?? "both");
   const [edited, setEdited] = useState<DocumentKind[]>([]);
   const [comments, setComments] = useState("");
   const [draftPr, setDraftPr] = useState(waiting?.openDraftPrOnAbort ?? true);
@@ -121,7 +124,13 @@ export function EscalationDialog({
     switch (choice) {
       case "retryWithHint":
         return hint.trim() && more
-          ? { choice, hint: hint.trim(), ...more }
+          ? {
+              choice,
+              hint: hint.trim(),
+              // In review there is no Slice, so no side to send it to.
+              ...(inReview ? {} : { side }),
+              ...more,
+            }
           : null;
       case "editDocuments":
         return edited.length > 0 && comments.trim() && more
@@ -299,6 +308,34 @@ export function EscalationDialog({
             />
           </label>
         )}
+        {choice === "retryWithHint" && !inReview && (
+          <fieldset className="hint-side" aria-describedby="hint-side-note">
+            <legend className="small muted">Send the hint to</legend>
+            {HINT_SIDES.map((option) => (
+              <label key={option.side} className="check">
+                <input
+                  type="radio"
+                  name="hint-side"
+                  value={option.side}
+                  checked={side === option.side}
+                  onChange={() => setSide(option.side)}
+                />
+                {option.label}
+                {option.side === waiting.sideAtFault && (
+                  <span className="small faint">
+                    {" "}
+                    (where the evidence points)
+                  </span>
+                )}
+              </label>
+            ))}
+            <span id="hint-side-note" className="hint" aria-live="polite">
+              {side === "both"
+                ? "Both Coding Agents work on the next attempt."
+                : `Only the ${side} codes; the other side's saved code is tested with it.`}
+            </span>
+          </fieldset>
+        )}
         {choice === "editDocuments" && (
           <fieldset className="edits">
             <legend className="small muted">
@@ -385,6 +422,12 @@ export function EscalationDialog({
     </div>
   );
 }
+
+const HINT_SIDES: Array<{ side: HintSide; label: string }> = [
+  { side: "backend", label: "Backend Coding Agent" },
+  { side: "frontend", label: "Frontend Coding Agent" },
+  { side: "both", label: "Both" },
+];
 
 const CHOICE_LABELS: Record<Choice, string> = Object.fromEntries(
   CHOICES.map(({ choice, label }) => [choice, label]),

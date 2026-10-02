@@ -161,6 +161,28 @@ describe("checkpointPayload and memoryFromCheckpoint", () => {
     expect(back.histories.get("slice-2")!.earlier.backend[0]).toEqual(report());
   });
 
+  // A restart goes on with the attempt under way, not a wider one.
+  it("keeps who codes on the attempt under way, and a hint's sides (T24i)", () => {
+    const state = memory();
+    state.histories.get("slice-2")!.pending = {
+      frontend: [{ summary: "Use getJson.", evidence: "Use getJson." }],
+    };
+    state.hints.set("slice-3", {
+      from: "person",
+      issues: [{ summary: "Return 404.", evidence: "Return 404." }],
+      sides: ["backend"],
+    });
+
+    const back = memoryFromCheckpoint(
+      JSON.parse(JSON.stringify(checkpointPayload(state))),
+    )!;
+
+    expect(back.histories.get("slice-2")!.pending).toEqual({
+      frontend: [{ summary: "Use getJson.", evidence: "Use getJson." }],
+    });
+    expect(back.hints.get("slice-3")!.sides).toEqual(["backend"]);
+  });
+
   it("reads an Issue Report written before it had a cause (T24c)", () => {
     const saved = JSON.parse(JSON.stringify(checkpointPayload(memory())));
     delete saved.histories["slice-2"].earlier.backend[0].cause;

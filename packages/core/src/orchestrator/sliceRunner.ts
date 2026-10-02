@@ -64,12 +64,24 @@ export type SliceHistory = {
   earlier: Record<CodingSide | "design", IssueReport[]>;
   /** Each Task's retries when its current Retry Budget began. */
   retryBaseline: Partial<Record<CodingSide, number>>;
+  /**
+   * The sides coding on the attempt under way, and what each was told: a
+   * Slice picked up after a restart goes on with exactly that attempt, not a
+   * wider one (T24i). Only while the Slice runs; none once it returns.
+   */
+  pending?: Partial<Record<CodingSide, CodingIssue[]>>;
 };
 
 /** Something to fix on the next attempt, and who asked for it. */
 export type SliceHint = {
   from: "person" | "codeReview";
   issues: readonly CodingIssue[];
+  /**
+   * The sides it is for (T24i): only they code on the next attempt, while
+   * the other side's saved code is merged and tested as it is. Absent, every
+   * side of the Slice is.
+   */
+  sides?: readonly CodingSide[];
 };
 
 export type SliceRunInput = {
@@ -206,14 +218,7 @@ export class OrchestratedSliceRunner implements SliceRunner {
     // Slice picked up again with no hint (a restart mid-retry) is told what
     // it failed on: its saved code is kept now (T24h), and an agent told
     // nothing would hand it back unchanged and fail the same way.
-    let pending = new Map<CodingSide, CodingIssue[]>(
-      sides.map((side) => [
-        side,
-        input.hint
-          ? hintIssues(input.hint)
-          : codingIssues(latestOf(history.earlier[side])),
-      ]),
-    );
+    let pending = this.#firstAttempt(input, sides, tasks, history);
     let lastReports: IssueReport[] = [];
     for (let attempt = 1; ; attempt++) {
       if (budget.remaining() <= 0)
@@ -365,6 +370,7 @@ export class OrchestratedSliceRunner implements SliceRunner {
           );
         history.earlier.design.push(...revised);
         this.#move(input, "building");
+        delete history.pending;
         return {
           status: "designIssue",
           revisions: route.revisions.map(({ owner, reports: owned }) => ({
@@ -418,6 +424,7 @@ export class OrchestratedSliceRunner implements SliceRunner {
         history.earlier[side].push(...own);
       pending = this.#retry(decisions, tasks);
       this.#move(input, "building");
+      history.pending = Object.fromEntries(pending);
       this.#options.checkpoint?.({
         at: "retrying",
         sliceId: input.slice.id,
@@ -523,6 +530,57 @@ export class OrchestratedSliceRunner implements SliceRunner {
     return { side, outcome: saved ? "changed" : "unchanged" };
   }
 
+  /**
+   * Who codes on the first attempt of this call, and what each is told:
+   * - with a hint, the sides it names (T24i), each told the hint; a side
+   *   that never built anything in this Slice codes too, told nothing of a
+   *   hint that is not for it;
+   * - picked up after a restart, the attempt under way, as the last
+   *   Checkpoint recorded it (and a side that never built anything);
+   * - otherwise every side, told what it failed on before (T24h).
+   */
+  #firstAttempt(
+    input: SliceRunInput,
+    sides: readonly CodingSide[],
+    tasks: ReadonlyMap<CodingSide, Task>,
+    history: SliceHistory,
+  ): Map<CodingSide, CodingIssue[]> {
+    const { hint } = input;
+    if (hint) {
+      const named = hint.sides?.filter((side) => tasks.has(side)) ?? [];
+      const forIt = (side: CodingSide) =>
+        named.length === 0 || named.includes(side);
+      return new Map(
+        sides
+          .filter((side) => forIt(side) || !this.#hasBuilt(tasks.get(side)!))
+          .map((side) => [side, forIt(side) ? hintIssues(hint) : []]),
+      );
+    }
+    const resumed = input.history?.pending;
+    if (resumed && sides.some((side) => resumed[side] !== undefined))
+      return new Map(
+        sides
+          .filter(
+            (side) =>
+              resumed[side] !== undefined || !this.#hasBuilt(tasks.get(side)!),
+          )
+          .map((side) => [side, [...(resumed[side] ?? [])]]),
+      );
+    return new Map(
+      sides.map((side) => [
+        side,
+        codingIssues(latestOf(history.earlier[side])),
+      ]),
+    );
+  }
+
+  /** Whether a side completed a Step in this Slice, so has code to merge. */
+  #hasBuilt(task: Task): boolean {
+    return this.#options.tasks
+      .listSteps(task.id)
+      .some((step) => step.status === "completed");
+  }
+
   /** The side's Task in this Slice, created the first time it is needed. */
   #task(input: SliceRunInput, side: CodingSide): Task {
     const existing = this.#options.tasks
@@ -555,6 +613,7 @@ export class OrchestratedSliceRunner implements SliceRunner {
     history: SliceHistory,
   ): SliceOutcome {
     this.#move(input, "building");
+    delete history.pending;
     return { status: "escalated", trigger, summary, reports, history };
   }
 

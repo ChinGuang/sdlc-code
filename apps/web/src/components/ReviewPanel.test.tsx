@@ -116,6 +116,7 @@ describe("ReviewPanel", () => {
         reports: [],
         workingMemory: [],
         brief: null,
+        sideAtFault: "both",
         openDraftPrOnAbort: true,
       },
     });

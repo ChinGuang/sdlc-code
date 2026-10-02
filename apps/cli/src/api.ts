@@ -44,6 +44,9 @@ export type RunSummary = {
   waitingFor?: Waiting["for"];
 };
 
+/** Who a retry's hint is for (T24i). */
+export type HintSide = "backend" | "frontend" | "both";
+
 export type IssueSummary = {
   step: string;
   failingTest: string | null;
@@ -85,6 +88,8 @@ export type Waiting =
       workingMemory: Array<{ role: AgentRole; note: string }>;
       /** Null while it is written, and for an Escalation from before T24c. */
       brief: EscalationBrief | null;
+      /** Where a retry's hint goes unless a person says otherwise (T24i). */
+      sideAtFault: HintSide;
       openDraftPrOnAbort: boolean;
     }
   | { for: "prGate"; pullRequest: PullRequest | null }
@@ -171,7 +176,7 @@ export type DesignVerdict = {
 type GoingOn = { tokenBudget?: number };
 
 export type EscalationResolution =
-  | ({ choice: "retryWithHint"; hint: string } & GoingOn)
+  | ({ choice: "retryWithHint"; hint: string; side?: HintSide } & GoingOn)
   | ({
       choice: "editDocuments";
       edits: Array<{ documentKind: DocumentKind; comments: string }>;

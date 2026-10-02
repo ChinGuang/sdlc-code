@@ -145,6 +145,7 @@ export const ESCALATED: RunDetail = {
       { role: "backendCoding", note: "Tried normalising to UTC; still 409." },
     ],
     brief: null,
+    sideAtFault: "backend",
     openDraftPrOnAbort: true,
   },
 };

@@ -13,6 +13,7 @@ import {
   IllegalTransitionError,
   isAgentRole,
   lastWorkingMemory,
+  sideAtFault,
   memoryFromCheckpoint,
   MissingKeyError,
   type RunMemoryState,
@@ -368,6 +369,7 @@ export class RuntimeRunService implements RunService, RunLifecycle {
                 escalation.slice,
               ),
               brief: escalation.brief,
+              sideAtFault: sideAtFault(escalation.reports),
               openDraftPrOnAbort: escalation.openDraftPrOnAbort,
             }
           : { for: "nothing" };

@@ -385,6 +385,34 @@ describe("the Gates and the Escalation", () => {
     ]);
   });
 
+  it("passes the side a hint is for, and refuses a side that is not one (T24i)", async () => {
+    const { service, calls } = fakeService();
+    const url = await start(service);
+
+    const sent = await post(`${url}/runs/${RUN_ID}/escalation`, {
+      choice: "retryWithHint",
+      hint: "Use getJson.",
+      side: "frontend",
+    });
+    const wrong = await post(`${url}/runs/${RUN_ID}/escalation`, {
+      choice: "retryWithHint",
+      hint: "Use getJson.",
+      side: "database",
+    });
+
+    expect(sent.status).toBe(200);
+    expect(wrong.status).toBe(400);
+    expect(calls).toEqual([
+      [
+        "resolveEscalation",
+        [
+          RUN_ID,
+          { choice: "retryWithHint", hint: "Use getJson.", side: "frontend" },
+        ],
+      ],
+    ]);
+  });
+
   // A Token Budget Escalation goes on only with more to spend.
   it("passes a raised Token Budget on with the choice", async () => {
     const { service, calls } = fakeService();
