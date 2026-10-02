@@ -115,6 +115,7 @@ describe("ReviewPanel", () => {
         slice: null,
         reports: [],
         workingMemory: [],
+        brief: null,
         openDraftPrOnAbort: true,
       },
     });

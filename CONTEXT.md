@@ -34,7 +34,7 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Design Phase** — System Design, then UI Design (which builds on the System Design), then the Design Gate reviewing both together. Rejection may send work back to either agent.
 
-**Issue Report** — A structured failure found by the Testing Agent: symptoms, evidence and a *suspected* owner. Always sent to the Orchestrator, never directly to another agent.
+**Issue Report** — A structured failure found by the Testing Agent: symptoms, the cause the tools printed, evidence and a *suspected* owner. Always sent to the Orchestrator, never directly to another agent.
 
 **Owner** — The agent the Orchestrator assigns to fix an Issue Report, decided by comparing evidence against the Approved Documents in a fixed order: code deviates from a document → that side's Coding Agent; documents contradict each other → the deviating design agent; requirement missing or wrong → System Design Agent; undecidable → human.
 
@@ -55,6 +55,8 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 **Loop** — An Issue Report matching an earlier one in the same Task (same failing test and error). Escalates immediately, without spending the remaining Retry Budget.
 
 **Escalation** — Pausing a Run for a human, with a failure summary and Working Memory. The human chooses: retry with a hint, edit Approved Documents, skip the Slice, or abort. Aborting offers to open a Draft PR (on by default). In auto mode there is no human: the Run ends and always opens a Draft PR.
+
+**Escalation Brief** — What went wrong at an Escalation, in plain words, for the person deciding: facts found in code, and the Orchestrator's one read-only look at the failure (what is failing, what was tried, the likely cause, a suggested choice with a ready hint). A Token Budget Escalation gets the facts only. A brief never decides: the person does.
 
 **Abort** — A person stopping a Run before it finishes. They may abort at any time, whatever the Run is doing; at an Escalation it is one of the four choices. Work under way stops at its next step: a model turn, Test Run or push already under way finishes, nothing new starts, and the Step under way is discarded. The Run ends Aborted, offering a Draft PR of the Slices that passed (on by default); a pull request already open stays open. An aborted Run is never resumed.
 

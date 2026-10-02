@@ -206,6 +206,7 @@ classDiagram
     openDraftPrOnAbort: boolean = true
     slice: the Slice it stopped in, or none in review
     reports: the Issue Reports behind it
+    brief: facts, and an analysis with a ready hint (T24c)
   }
   class Review {
     stopReason
@@ -457,6 +458,7 @@ sequenceDiagram
       O->>O: revise document, re-open Design Gate
     else budget exhausted, Loop or undecidable
       O->>O: Escalation
+      O->>O: Escalation Brief: facts from code, then one read-only look<br/>(none for a spent Token Budget)
     end
   end
 ```

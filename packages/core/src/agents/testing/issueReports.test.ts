@@ -236,6 +236,115 @@ const step = (
   failures: TestStep["failures"] = [],
 ): TestStep => ({ name, ok: false, durationMs: 1, output, failures });
 
+// Found in Run #e29ca700: the report said only "Prisma schema validation".
+describe("issueReports: the cause after the error (T24c)", () => {
+  const prisma = [
+    "Prisma schema loaded from prisma/schema.prisma",
+    "Error: Prisma schema validation - (get-dmmf wasm)",
+    "Error code: P1012",
+    "\u001b[1;91merror\u001b[0m: Native type VarChar is not supported for sqlite connector.",
+    "  -->  prisma/schema.prisma:19",
+    "   | ",
+    "18 |   id        String   @id @default(uuid())",
+    "19 |   title     String   @db.VarChar(200)",
+    "   | ",
+    "",
+    "Validation Error Count: 1",
+    "[Context: getDmmf]",
+  ].join("\n");
+
+  it("keeps the lines that name the cause: message, file and line, the code", () => {
+    const [report] = issueReports(failedWith(step("unit", prisma)), REACT_NODE);
+
+    expect(report).toMatchObject({
+      error: "Error: Prisma schema validation - (get-dmmf wasm)",
+      cause:
+        "Error code: P1012 / error: Native type VarChar is not supported for sqlite connector. / --> prisma/schema.prisma:19 / 18 | id String @id @default(uuid()) / 19 | title String @db.VarChar(200)",
+      file: "prisma/schema.prisma",
+    });
+  });
+
+  it("tells the Coding Agent the cause, not only the error", () => {
+    const [report] = issueReports(failedWith(step("unit", prisma)), REACT_NODE);
+
+    expect(toCodingIssue(report!).summary).toContain(
+      "Cause: Error code: P1012 / error: Native type VarChar",
+    );
+  });
+
+  it("has no cause when the error stood alone or only a stack frame followed", () => {
+    const [alone] = issueReports(
+      failedWith(step("unit", "TypeError: x is not a function")),
+      REACT_NODE,
+    );
+    const [framed] = issueReports(
+      failedWith(
+        step("unit", "", [
+          {
+            test: "GET /health > answers",
+            file: "/app/server/app.test.ts",
+            message:
+              "AssertionError: expected 500 to be 200\n    at /app/server/app.test.ts:9:29",
+          },
+        ]),
+      ),
+      REACT_NODE,
+    );
+
+    expect(alone!.cause).toBeNull();
+    expect(framed!.cause).toBeNull();
+  });
+
+  // Found in the T24c review: a field added above line 19 moved the code
+  // frame, and the same VarChar error no longer counted as a Loop.
+  it("keeps a Loop a Loop when only the cause's line numbers moved", () => {
+    const moved = prisma.replaceAll("19", "20").replace("18 |", "19 |");
+    const [first] = issueReports(failedWith(step("unit", prisma)), REACT_NODE);
+    const [again] = issueReports(failedWith(step("unit", moved)), REACT_NODE);
+
+    expect(again!.cause).not.toBe(first!.cause);
+    expect(again!.signature).toBe(first!.signature);
+  });
+
+  it("stops at the next compiler error and at a dumped DOM", () => {
+    const [compiler] = issueReports(
+      failedWith(
+        step(
+          "unit",
+          [
+            "server/app.ts(3,10): error TS2305: Module has no exported member 'route'.",
+            "  Did you mean 'routes'?",
+            "server/todos.ts(40,1): error TS2322: Type 'string' is not assignable.",
+          ].join("\n"),
+        ),
+      ),
+      REACT_NODE,
+    );
+    const [screen] = issueReports(
+      failedWith(
+        step("unit", "", [
+          {
+            test: "TodoList > shows the empty state",
+            file: "/app/src/TodoList.test.tsx",
+            message: [
+              "TestingLibraryElementError: Unable to find an element with the text: No todos yet",
+              "",
+              "Ignored nodes: comments, script, style",
+              "<body>",
+              "  <div />",
+              "</body>",
+            ].join("\n"),
+          },
+        ]),
+      ),
+      REACT_NODE,
+    );
+
+    expect(compiler!.cause).toBe("Did you mean 'routes'?");
+    expect(screen!.cause).toBeNull();
+  });
+});
+
 // Inputs from the T16 standards review, each wrong in the first version.
 describe("issueReports heuristics", () => {
   it("blames a crashed unit run on the file in the error, not on a warning before it", () => {

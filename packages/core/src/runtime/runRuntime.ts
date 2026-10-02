@@ -75,6 +75,7 @@ import { SqliteSnapshotStore } from "../persistence/snapshotStore.js";
 import { SqliteTaskStore, type TaskStore } from "../persistence/taskStore.js";
 import { DocumentDesignGate } from "../orchestrator/designGate.js";
 import { AgentDesignPhase } from "../orchestrator/designPhase.js";
+import { ModelEscalationBriefer } from "../orchestrator/escalationBrief.js";
 import { ModelOwnerJudge } from "../orchestrator/ownerJudge.js";
 import { RuleOwnerResolver } from "../orchestrator/ownerResolution.js";
 import { resumeRun, type ResumedRun } from "../orchestrator/resumeRun.js";
@@ -456,6 +457,16 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
     codeReview: { reviewRun: (run) => reviewFor(run).reviewRun(run) },
     onReviewProblem: (runId, problem) =>
       emit({ runId, type: "reviewProblem", problem }),
+    briefer: (run) =>
+      new ModelEscalationBriefer({
+        client,
+        request: requestOptionsFor(config.roles.orchestrator),
+        budget: budgetFor(run),
+        template: templateFiles(profile),
+        mergedFiles: (sliceId) => workspacesFor(run).mergedFiles(sliceId),
+      }),
+    onBriefProblem: (runId, problem) =>
+      emit({ runId, type: "problem", problem: problem.slice(0, 300) }),
     sliceRunner: async (run, onCheckpoint) =>
       new OrchestratedSliceRunner({
         workspaces: workspacesFor(run),

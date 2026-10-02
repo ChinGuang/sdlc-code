@@ -50,8 +50,23 @@ export type IssueSummary = {
   file: string | null;
   endpoint: string | null;
   error: string;
+  /** The lines after the error that say why (T24c). */
+  cause: string | null;
   suspectedOwner: AgentRole | null;
   occurrences: number;
+};
+
+/** What a person reads before deciding at an Escalation (T24c). */
+export type EscalationBrief = {
+  facts: string[];
+  analysis: {
+    failing: string;
+    tried: string;
+    cause: string;
+    choice: "retryWithHint" | "editDocuments" | "skipSlice" | "abort";
+    hint: string | null;
+  } | null;
+  withoutAnalysis: string | null;
 };
 
 export type Waiting =
@@ -68,6 +83,8 @@ export type Waiting =
       slice: string | null;
       reports: IssueSummary[];
       workingMemory: Array<{ role: AgentRole; note: string }>;
+      /** Null while it is written, and for an Escalation from before T24c. */
+      brief: EscalationBrief | null;
       openDraftPrOnAbort: boolean;
     }
   | { for: "prGate"; pullRequest: PullRequest | null }

@@ -32,6 +32,30 @@ describe("SqliteEscalationStore", () => {
     expect(store.getOpenEscalation(runId)).toEqual(escalation);
   });
 
+  it("keeps the brief written after it opened, and none before (T24c)", () => {
+    const { store, runId } = setup();
+    const opened = store.openEscalation(runId, {
+      trigger: "loop",
+      summary: "The same failure came back",
+    });
+    expect(opened.brief).toBeNull();
+
+    const brief = {
+      facts: ["server/app.ts no longer exports createApp."],
+      analysis: {
+        failing: "Every backend test fails to load.",
+        tried: "The backend rewrote server/app.ts.",
+        cause: "server/app.ts dropped the template's createApp export.",
+        choice: "retryWithHint" as const,
+        hint: "Restore createApp in server/app.ts.",
+      },
+      withoutAnalysis: null,
+    };
+    store.setBrief(opened.id, brief);
+
+    expect(store.getOpenEscalation(runId)?.brief).toEqual(brief);
+  });
+
   it("has no Slice and no Issue Reports unless it is given them", () => {
     const { store, runId } = setup();
 

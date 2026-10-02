@@ -13,6 +13,7 @@ import { stringify } from "yaml";
 import { z } from "zod";
 import type { CompletionClient, TokenBudget } from "../agentLoop/agentLoop.js";
 import type { IssueReport } from "../agents/testing/issueReports.js";
+import { fenced } from "./fence.js";
 import {
   OWNER_RULES,
   OWNERS,
@@ -139,10 +140,7 @@ function judgeMessage(report: IssueReport, context: OwnerContext): string {
       endpoint: report.endpoint,
       error: report.error,
       suspectedOwner: report.suspectedOwner,
-    }).trim()}\n\n<evidence>\n${report.evidence
-      .slice(0, MAX_JUDGE_EVIDENCE_CHARS)
-      // The evidence cannot close its own fence.
-      .replaceAll("</evidence>", "</ evidence>")}\n</evidence>`,
+    }).trim()}\n\n${fenced("evidence", report.evidence.slice(0, MAX_JUDGE_EVIDENCE_CHARS))}`,
     `Slice being built: ${context.slice.title}: ${context.slice.goal} (endpoints: ${context.slice.endpoints.join(", ") || "none"})`,
     `API Contract (OpenAPI):\n${stringify(context.documents.apiContract).trim()}`,
     `UI Spec screens of this Slice:\n${stringify(

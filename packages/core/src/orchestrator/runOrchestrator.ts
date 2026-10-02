@@ -45,7 +45,13 @@ import { NotFoundError } from "../persistence/storeOptions.js";
 import type { DocumentStore } from "../persistence/documentStore.js";
 import type { SliceStore } from "../persistence/sliceStore.js";
 import type { TaskStore } from "../persistence/taskStore.js";
-import { loadApprovedDocuments } from "./approvedDocuments.js";
+import {
+  loadApprovedDocuments,
+  MissingDocumentError,
+} from "./approvedDocuments.js";
+import type { EscalationBriefer } from "./escalationBrief.js";
+import { lastWorkingMemory } from "./workingMemory.js";
+import type { ApprovedDocuments } from "../agents/coding/codingContext.js";
 import type {
   DesignGate,
   DesignVerdict,
@@ -55,6 +61,7 @@ import type {
 import { DesignPhaseError, type DesignPhase } from "./designPhase.js";
 import {
   checkpointPayload,
+  IssueReportSchema,
   memoryFromCheckpoint,
   type RunMemoryState,
 } from "./runCheckpoint.js";
@@ -139,6 +146,13 @@ export type RunOrchestratorOptions = {
   screenshots?: ScreenshotStore;
   /** Told when a review could not be trusted, e.g. an invented Rule ID. */
   onReviewProblem?: (runId: string, problem: string) => void;
+  /**
+   * Writes each new Escalation's brief (T24c), spending that Run's Token
+   * Budget. Without it an Escalation has none, as before T24c.
+   */
+  briefer?: (run: Run) => EscalationBriefer;
+  /** Told when a brief could not be written; the Escalation stands without one. */
+  onBriefProblem?: (runId: string, problem: string) => void;
   /** How often blocking Findings may send the code back. Defaults to 3. */
   reviewRetryBudget?: number;
   /**
@@ -176,6 +190,12 @@ const REVISED_DOCUMENT: Record<"systemDesign" | "uiDesign", DocumentKind> = {
 export class AgentRunOrchestrator implements RunOrchestrator {
   #options: RunOrchestratorOptions;
   #memory = new Map<string, RunMemory>();
+  /**
+   * Escalations this process opened and has not briefed yet. Kept in memory
+   * on purpose: a restart never spends tokens on an Escalation no one is
+   * looking at for the first time.
+   */
+  #briefsOwed = new Set<string>();
 
   constructor(options: RunOrchestratorOptions) {
     this.#options = options;
@@ -236,6 +256,11 @@ export class AgentRunOrchestrator implements RunOrchestrator {
           throw new Error(
             `Run ${runId} is escalated but has no open Escalation.`,
           );
+        if (this.#briefsOwed.delete(escalation.id)) {
+          await this.#writeBrief(run, escalation);
+          // A person may have decided while it was written: look again.
+          return null;
+        }
         return { waitingFor: "escalation", escalation };
       }
       case "reviewing":
@@ -694,12 +719,13 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     const next = runs.applyEvent(run.id, { type: "limitHit", trigger });
     const current = this.#currentSlice(run.id);
     if (next.status === "escalated") {
-      escalations.openEscalation(run.id, {
+      const escalation = escalations.openEscalation(run.id, {
         trigger,
         summary,
         slice: current?.title ?? null,
         reports: [...reports],
       });
+      if (this.#options.briefer) this.#briefsOwed.add(escalation.id);
       return;
     }
     if (current) this.#failTasks(run.id, current.id);
@@ -710,6 +736,53 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       slice: current?.title ?? null,
       reports: [...reports],
     });
+  }
+
+  /**
+   * The Escalation's brief (T24c). A brief helps the person; it is never
+   * worth stopping the Run for, so whatever goes wrong is reported and the
+   * Escalation stands without one.
+   */
+  async #writeBrief(run: Run, escalation: Escalation): Promise<void> {
+    const { slices, tasks, escalations } = this.#options;
+    const slice =
+      slices.listSlices(run.id).find((one) => one.title === escalation.slice) ??
+      null;
+    try {
+      const brief = await this.#options.briefer!(run).brief({
+        run,
+        escalation,
+        sliceId: slice?.id ?? null,
+        // Stored as JSON: a row this version cannot read is left out.
+        reports: escalation.reports.flatMap((stored) => {
+          const report = IssueReportSchema.safeParse(stored);
+          return report.success ? [report.data] : [];
+        }),
+        workingMemory: lastWorkingMemory(
+          { slices, tasks },
+          run.id,
+          escalation.slice,
+        ),
+        documents: this.#approvedDocumentsOrNull(run.id),
+      });
+      escalations.setBrief(escalation.id, brief);
+    } catch (error) {
+      if (error instanceof RunStoppedError) throw error;
+      this.#options.onBriefProblem?.(
+        run.id,
+        `The Escalation's brief could not be written: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /** None before the design is approved: an Escalation can come before it. */
+  #approvedDocumentsOrNull(runId: string): ApprovedDocuments | null {
+    try {
+      return loadApprovedDocuments(this.#options.documents, runId);
+    } catch (error) {
+      if (error instanceof MissingDocumentError) return null;
+      throw error;
+    }
   }
 
   /** The first Slice that has not passed or been skipped, in plan order. */

@@ -12,6 +12,7 @@ import {
   documentsMadeStale,
   IllegalTransitionError,
   isAgentRole,
+  lastWorkingMemory,
   memoryFromCheckpoint,
   MissingKeyError,
   type RunMemoryState,
@@ -39,7 +40,6 @@ import {
   type StartRunRequest,
   type StreamedEvent,
   type Waiting,
-  type WorkingMemoryNote,
 } from "./runService.js";
 
 /** The parts of the runtime this service uses. */
@@ -336,30 +336,6 @@ export class RuntimeRunService implements RunService, RunLifecycle {
     };
   }
 
-  /**
-   * What each agent working on the stopped Slice last wrote: what it tried,
-   * which is what a person needs to give a useful hint.
-   */
-  #workingMemory(
-    runId: string,
-    sliceTitle: string | null,
-  ): WorkingMemoryNote[] {
-    const runtime = this.#runtime();
-    const slice = runtime.slices
-      .listSlices(runId)
-      .find((one) => one.title === sliceTitle);
-    if (!slice) return [];
-    return runtime.tasks
-      .listTasks(runId)
-      .filter((task) => task.sliceId === slice.id)
-      .flatMap((task) => {
-        const note = runtime.tasks
-          .listSteps(task.id)
-          .findLast((step) => step.workingMemory !== null)?.workingMemory;
-        return note ? [{ role: task.agentRole, note }] : [];
-      });
-  }
-
   /** What a person is being asked, read from the Run's own state. */
   #waiting(run: Run): Waiting {
     const runtime = this.#runtime();
@@ -386,7 +362,12 @@ export class RuntimeRunService implements RunService, RunLifecycle {
               summary: escalation.summary,
               slice: escalation.slice,
               reports: escalation.reports.map(issueSummary),
-              workingMemory: this.#workingMemory(run.id, escalation.slice),
+              workingMemory: lastWorkingMemory(
+                runtime,
+                run.id,
+                escalation.slice,
+              ),
+              brief: escalation.brief,
               openDraftPrOnAbort: escalation.openDraftPrOnAbort,
             }
           : { for: "nothing" };
@@ -507,6 +488,7 @@ export function issueSummary(stored: unknown): IssueSummary {
     file: text(report.file),
     endpoint: text(report.endpoint),
     error: text(report.error) ?? "(no error recorded)",
+    cause: text(report.cause),
     suspectedOwner: isAgentRole(text(report.suspectedOwner) ?? "")
       ? (report.suspectedOwner as AgentRole)
       : null,

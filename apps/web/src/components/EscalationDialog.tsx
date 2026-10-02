@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { RunsApi } from "../api/client.js";
 import type {
   DocumentKind,
+  EscalationBrief,
   EscalationResolution,
   RunDetail,
 } from "../api/types.js";
@@ -200,6 +201,15 @@ export function EscalationDialog({
         )}
         <p>{waiting.summary}</p>
 
+        <Brief
+          brief={waiting.brief}
+          writing={run.advancing}
+          onUseHint={(text) => {
+            setChoice("retryWithHint");
+            setHint(text);
+          }}
+        />
+
         {waiting.reports.length > 0 && (
           <>
             <h3 className="eyebrow">
@@ -213,6 +223,9 @@ export function EscalationDialog({
                     {report.failingTest ?? report.endpoint ?? ""} →{" "}
                     {report.error}
                   </span>
+                  {report.cause && (
+                    <span className="mono small cause">{report.cause}</span>
+                  )}
                   <span className="faint small">
                     {[
                       report.file,
@@ -370,6 +383,82 @@ export function EscalationDialog({
         </div>
       </div>
     </div>
+  );
+}
+
+const CHOICE_LABELS: Record<Choice, string> = Object.fromEntries(
+  CHOICES.map(({ choice, label }) => [choice, label]),
+) as Record<Choice, string>;
+
+/**
+ * What went wrong in plain words (T24c): the Orchestrator's look at the
+ * failure, then the facts found in code. "Use this hint" fills the hint box,
+ * which the person can still change before sending.
+ */
+function Brief({
+  brief,
+  writing,
+  onUseHint,
+}: {
+  brief: EscalationBrief | null;
+  /** The Run is still being advanced: the brief may be on its way. */
+  writing: boolean;
+  onUseHint: (hint: string) => void;
+}) {
+  if (!brief)
+    return writing ? (
+      <p className="muted small" role="status">
+        Writing a brief of what went wrong…
+      </p>
+    ) : null;
+  const { analysis } = brief;
+  return (
+    <section className="card brief" aria-labelledby="brief-title">
+      <h3 id="brief-title" className="eyebrow">
+        What went wrong
+      </h3>
+      {analysis && (
+        <dl>
+          <dt>Failing</dt>
+          <dd>{analysis.failing}</dd>
+          <dt>Tried</dt>
+          <dd>{analysis.tried}</dd>
+          <dt>Likely cause</dt>
+          <dd>{analysis.cause}</dd>
+          <dt>Suggested</dt>
+          <dd>
+            <strong>{CHOICE_LABELS[analysis.choice]}</strong>
+            {analysis.hint && (
+              <>
+                <blockquote className="mono small">{analysis.hint}</blockquote>
+                <button
+                  type="button"
+                  className="button small-button"
+                  onClick={() => onUseHint(analysis.hint!)}
+                >
+                  Use this hint
+                </button>
+              </>
+            )}
+          </dd>
+        </dl>
+      )}
+      {brief.withoutAnalysis && (
+        <p className="muted small">{brief.withoutAnalysis}</p>
+      )}
+      {brief.facts.length > 0 && (
+        <>
+          <h4 className="small muted">Facts</h4>
+          <ul className="facts">
+            {brief.facts.map((fact) => (
+              <li key={fact} className="small">
+                {fact}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
   );
 }
 

@@ -159,4 +159,8 @@ export const MIGRATIONS: readonly string[] = [
   /* 6: a person may abort a Run at any time; their Draft PR choice (T24g) */ `
   ALTER TABLE runs ADD COLUMN open_draft_pr_on_abort INTEGER;
   `,
+
+  /* 7: what went wrong in plain words, for the person deciding (T24c) */ `
+  ALTER TABLE escalations ADD COLUMN brief TEXT;
+  `,
 ];

@@ -40,6 +40,13 @@ export type IssueReport = {
   endpoint: string | null;
   /** One line: what went wrong. */
   error: string;
+  /**
+   * The lines after the error that say why, when it printed them: the
+   * message, the file and line, the code there (T24c). "Prisma schema
+   * validation" says little; "Native type VarChar is not supported for
+   * sqlite connector. --> prisma/schema.prisma:19" is the fix.
+   */
+  cause: string | null;
   /** What the Coding Agent needs to see: the failure message or the step's output. */
   evidence: string;
   /** Null when the evidence does not point at one side. */
@@ -58,6 +65,9 @@ const OWNERS: Record<CodingSide, SuspectedOwner> = {
 /** Evidence is for a model to read; its context is not the place for full logs. */
 const MAX_EVIDENCE_CHARS = 1500;
 const MAX_ERROR_CHARS = 300;
+/** The cause is a few lines that name it, not the log. */
+const MAX_CAUSE_LINES = 6;
+const MAX_CAUSE_CHARS = 600;
 /** Most Issue Reports a Coding Agent is given at once; the rest follow on the next attempt. */
 export const MAX_CODING_ISSUES = 10;
 
@@ -83,6 +93,7 @@ export function issueReports(
         file: null,
         endpoint: null,
         error: oneLine(outcome.problem),
+        cause: null,
         evidence: tail(outcome.evidence.log),
         suspectedOwner: null,
       }),
@@ -111,8 +122,9 @@ export function toCodingIssue(report: IssueReport): CodingIssue {
   const file = report.file ? ` (${report.file})` : "";
   const more =
     report.occurrences > 1 ? ` [${report.occurrences} failures like this]` : "";
+  const cause = report.cause ? `\nCause: ${report.cause}` : "";
   return {
-    summary: `${where}${file}: ${report.error}${more}`,
+    summary: `${where}${file}: ${report.error}${more}${cause}`,
     evidence: report.evidence,
   };
 }
@@ -148,12 +160,17 @@ function fromFailure(
 ): Draft {
   const file =
     appPath(failure.file) ?? appFileIn(failure.message, profile).file;
+  const lines = stripAnsi(failure.message)
+    .split("\n")
+    .map((line) => line.trim());
+  const first = lines.findIndex(Boolean);
   return {
     step: step.name,
     failingTest: failure.test,
     file,
     endpoint: LEADING_ENDPOINT.exec(failure.test)?.[1] ?? null,
     error: oneLine(firstLine(failure.message) ?? `${failure.test} failed`),
+    cause: first >= 0 ? causeAfter(lines, first) : null,
     evidence: head(withoutLibraryFrames(failure.message)),
     suspectedOwner: file ? ownerOf(file, profile) : null,
   };
@@ -179,6 +196,8 @@ function fromStep(step: TestStep, profile: StackProfile): Draft {
           ? `Smoke test failed: ${failing.map((line) => line.slice("FAIL ".length)).join("; ")}`
           : "Smoke tests failed.",
       ),
+      // Each FAIL line is its own cause, and the error lists them all.
+      cause: null,
       evidence: tail(step.output),
       // The API's answers are the backend's.
       suspectedOwner: OWNERS.backend,
@@ -196,6 +215,7 @@ function fromStep(step: TestStep, profile: StackProfile): Draft {
         ? lines[errorAt]!
         : (lastMeaningfulLine(lines) ?? `The ${step.name} step failed.`),
     ),
+    cause: errorAt >= 0 ? causeAfter(lines, errorAt) : null,
     evidence: tail(withoutLibraryFrames(step.output)),
     suspectedOwner: stepOwner(step.name, file, profile),
   };
@@ -298,6 +318,48 @@ function appFileIn(
   return { file: null };
 }
 
+/**
+ * The lines that follow the error line and say why: up to the first blank
+ * line after them or the next thing that is not about this error, without
+ * stack frames, rulers ("   |") or the tool's own trailer. Null when the
+ * error stood alone.
+ */
+function causeAfter(lines: readonly string[], errorAt: number): string | null {
+  const kept: string[] = [];
+  for (const line of lines.slice(errorAt + 1)) {
+    if (!line) {
+      if (kept.length > 0) break;
+      continue;
+    }
+    if (ENDS_A_CAUSE.some((pattern) => pattern.test(line))) break;
+    if (NOT_A_CAUSE.some((pattern) => pattern.test(line))) continue;
+    kept.push(line);
+    if (kept.length === MAX_CAUSE_LINES) break;
+  }
+  if (kept.length === 0) return null;
+  const cause = kept.join(" / ").replace(/\s+/g, " ");
+  return cause.length <= MAX_CAUSE_CHARS
+    ? cause
+    : `${cause.slice(0, MAX_CAUSE_CHARS)}…`;
+}
+
+/** Lines between an error and its cause that say nothing about it. */
+const NOT_A_CAUSE = [
+  /^\d*\s*\|\s*$/,
+  // A stack frame says where, which the report's file already does.
+  /^(at |❯ )/,
+  /^\[Context: .*\]$/,
+  /^Prisma CLI Version/,
+  /^Node\.js v\d/,
+  /complete log of this run/i,
+];
+
+/**
+ * Where what follows is no longer this error's cause: the next compiler
+ * error, or the DOM a Testing Library failure prints after its message.
+ */
+const ENDS_A_CAUSE = [/error TS\d+/, /^Ignored nodes/, /^</];
+
 function firstLine(text: string): string | null {
   return (
     stripAnsi(text)
@@ -382,6 +444,8 @@ function report(draft: Draft): IssueReport {
         draft.step,
         draft.failingTest ?? "",
         draft.failingTest ? (draft.file ?? "") : "",
+        // Not the cause: its code frames and line numbers change with every
+        // edit, and a Loop is the same error coming back however it reads.
         normalizeError(draft.error),
       ].join("\n"),
     )

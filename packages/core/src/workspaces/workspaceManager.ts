@@ -121,6 +121,11 @@ export interface WorkspaceManager {
   /** The application's files at a commit, for a Test Run. Text files only. */
   readFiles: (commit: string) => Promise<TemplateFile[]>;
   /**
+   * The Slice's merged code as it was last tested, for an Escalation's brief
+   * (T24c); empty when the Slice never merged.
+   */
+  mergedFiles: (sliceId: string) => Promise<TemplateFile[]>;
+  /**
    * Everything the Run has changed since it started, as a unified diff, for the
    * Code Review Agent (T19). Cut at `maxBytes` with a line saying so, because a
    * diff has to fit in a model's context.
@@ -388,6 +393,12 @@ export class GitWorkspaceManager implements WorkspaceManager {
     return parseBatch(batch.bytes).flatMap((contents, index) =>
       contents === null ? [] : [{ path: blobs[index]!.path, contents }],
     );
+  };
+
+  mergedFiles = async (sliceId: string): Promise<TemplateFile[]> => {
+    const { branch } = this.#workspacePaths(sliceId, "merge");
+    const merged = await this.#resolve(`refs/heads/${branch}`);
+    return merged ? this.readFiles(merged) : [];
   };
 
   commitSlice = async (
