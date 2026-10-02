@@ -16,9 +16,23 @@ import type { ModelCapabilities } from "../../config/agentConfig.js";
 import { HEALTH_ENDPOINT, type DesignSlice } from "../systemDesign/design.js";
 import type { UiSpec } from "../uiDesign/uiSpec.js";
 import { FILE_TOOL_NAMES, INSPECT_SCREEN } from "./codingTools.js";
+import { mayWrite } from "./workspaceFiles.js";
 
 /** A problem to fix: from a Test Run (T16), a Code Review Finding or a human. */
 export type CodingIssue = { summary: string; evidence: string };
+
+/**
+ * Problems as a Coding Agent reads them, numbered, each with its evidence:
+ * one shape whether they came back from a Test Run or its own check (T24j).
+ */
+export function listIssues(issues: readonly CodingIssue[]): string {
+  return issues
+    .map(
+      (issue, index) =>
+        `${index + 1}. ${issue.summary}\n   Evidence: ${issue.evidence.trim().replaceAll("\n", "\n   ")}`,
+    )
+    .join("\n");
+}
 
 export type ApprovedDocuments = {
   /** Markdown, as the Design Gate approved it. */
@@ -218,14 +232,8 @@ function fileListSection(input: CodingTaskInput): string[] {
   const files = input.applicationFiles ?? [];
   if (files.length === 0) return [];
   const writable = input.profile.writablePaths[input.side];
-  const mayWrite = (path: string) =>
-    writable.some((allowed) =>
-      allowed.endsWith("/")
-        ? path.toLowerCase().startsWith(allowed.toLowerCase())
-        : path.toLowerCase() === allowed.toLowerCase(),
-    );
   const listed = files
-    .map((path) => `${mayWrite(path) ? "* " : "  "}${path}`)
+    .map((path) => `${mayWrite(writable, path) ? "* " : "  "}${path}`)
     .join("\n");
   return [
     `The application already has these files; * marks the ones you may write. Read only the ones you need, and do not list folders you can already see here:\n${listed}`,
@@ -234,14 +242,8 @@ function fileListSection(input: CodingTaskInput): string[] {
 
 function issueSection(issues: readonly CodingIssue[]): string[] {
   if (issues.length === 0) return [];
-  const listed = issues
-    .map(
-      (issue, index) =>
-        `${index + 1}. ${issue.summary}\n   Evidence: ${issue.evidence.trim().replaceAll("\n", "\n   ")}`,
-    )
-    .join("\n");
   return [
-    `Fix these problems first; the Slice was sent back because of them:\n${listed}`,
+    `Fix these problems first; the Slice was sent back because of them:\n${listIssues(issues)}`,
   ];
 }
 

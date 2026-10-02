@@ -200,10 +200,17 @@ export class ChatAgentLoop implements AgentLoop {
       lastCalls: [],
       lastPromptTokens: 0,
       checks: 0,
+      sentBack: null,
     };
 
     try {
       await this.#turns(state, messages, task.check);
+      // A check is never worse than none: an answer sent back, followed by
+      // no other before the turns ran out, still ends the Step answered.
+      if (state.stopReason === "maxIterations" && state.sentBack !== null) {
+        state.stopReason = "answered";
+        state.answer = state.sentBack;
+      }
     } catch (error) {
       // A failed call still ends the Step with a note, so its retry starts informed.
       if (!(error instanceof ChatApiError)) throw error;
@@ -267,6 +274,10 @@ export class ChatAgentLoop implements AgentLoop {
         const problems = await check(state.answer);
         if (problems === null) return;
         state.checks++;
+        // Not an answer yet: the Step goes on. If its turns run out before
+        // another answer, this one stands (see run), as it would have
+        // without a check; the Test Run then judges it.
+        state.sentBack = state.answer;
         state.stopReason = "maxIterations";
         state.answer = null;
         messages.push({ role: "assistant", content: answer });
@@ -422,6 +433,8 @@ type LoopState = Omit<AgentLoopResult, "workingMemory"> & {
   lastPromptTokens: number;
   /** How often the task's check sent an answer back (T24j). */
   checks: number;
+  /** The last answer the check sent back, until another one comes. */
+  sentBack: string | null;
 };
 
 const STOP_REASON_TEXT: Record<StopReason, string> = {

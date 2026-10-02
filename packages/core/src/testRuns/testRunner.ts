@@ -49,6 +49,8 @@ export type TestRunRequest = {
    * own check (StackProfile.checkCommand, T24j).
    */
   command?: string;
+  /** How long the sandbox may run it; a Test Run's own limit by default. */
+  timeoutSeconds?: number;
 };
 
 /** What the Test Run did, for its Issue Report and the dashboard. */
@@ -117,11 +119,12 @@ export class SandboxTestRunner implements TestRunner {
     profile,
     files,
     command = profile.testCommand,
+    timeoutSeconds = TEST_RUN_TIMEOUT_SECONDS,
   }: TestRunRequest): Promise<TestRunOutcome> => {
     const plan = planUpload(files, this.#files(profile));
     let result: RunResult;
     try {
-      result = await this.#run(profile, plan, command);
+      result = await this.#run(profile, plan, command, timeoutSeconds);
     } catch (error) {
       if (!isGone(error)) throw error;
       // The Snapshot's image (or an uploaded file) has expired: start over
@@ -129,7 +132,7 @@ export class SandboxTestRunner implements TestRunner {
       // sandbox reports an expired image is not yet observed live.
       this.#snapshots.discardSnapshot(profile);
       this.#uploaded.clear();
-      result = await this.#run(profile, plan, command);
+      result = await this.#run(profile, plan, command, timeoutSeconds);
     }
     return toOutcome(result, plan);
   };
@@ -138,6 +141,7 @@ export class SandboxTestRunner implements TestRunner {
     profile: StackProfile,
     plan: UploadPlan,
     script: string,
+    timeoutSeconds: number,
   ): Promise<RunResult> {
     const image = await this.#snapshots.snapshotImage(profile);
     return this.#sandbox.run(
@@ -146,10 +150,10 @@ export class SandboxTestRunner implements TestRunner {
         command: testCommand(plan.removed, script),
         shell: true,
         files: await uploadFiles(this.#sandbox, plan.changed, this.#uploaded),
-        timeout: TEST_RUN_TIMEOUT_SECONDS,
+        timeout: timeoutSeconds,
         disposable: true,
       },
-      { pollMs: POLL_MS, timeoutMs: (TEST_RUN_TIMEOUT_SECONDS + 120) * 1000 },
+      { pollMs: POLL_MS, timeoutMs: (timeoutSeconds + 120) * 1000 },
     );
   }
 }

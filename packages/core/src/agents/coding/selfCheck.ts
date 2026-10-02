@@ -13,9 +13,19 @@ import type {
   StackProfile,
   TemplateFile,
 } from "@sdlc-code/stack-profiles";
-import type { TestRunner } from "../../testRuns/testRunner.js";
-import { codingIssues, issueReports } from "../testing/issueReports.js";
-import type { CodingIssue } from "./codingContext.js";
+import type { TestRunner, TestRunOutcome } from "../../testRuns/testRunner.js";
+import {
+  codingIssues,
+  issueReports,
+  type SuspectedOwner,
+} from "../testing/issueReports.js";
+import { listIssues, type CodingIssue } from "./codingContext.js";
+import {
+  MAX_LISTED_FILES,
+  mayWrite,
+  WorkspaceFileError,
+  type WorkspaceFiles,
+} from "./workspaceFiles.js";
 
 export type SelfCheckInput = {
   profile: StackProfile;
@@ -35,9 +45,6 @@ export type SandboxSelfCheckOptions = {
   onProblem?: (problem: string) => void;
 };
 
-/** Evidence is for a model to read; the Test Run keeps the whole log. */
-const MAX_EVIDENCE_CHARS = 800;
-
 export class SandboxSelfCheck implements SelfCheck {
   #options: SandboxSelfCheckOptions;
 
@@ -53,12 +60,14 @@ export class SandboxSelfCheck implements SelfCheck {
     // Reading files costs nothing; a sandbox run costs a minute or more.
     const cheap = cheapFindings(files, profile, side);
     if (cheap.length > 0) return sendBack(cheap);
-    let outcome;
+    let outcome: TestRunOutcome;
     try {
       outcome = await this.#options.runner.runTests({
         profile,
         files,
         command: profile.checkCommand[side],
+        // A hung check must not hold a Step for a Test Run's half hour.
+        timeoutSeconds: CHECK_TIMEOUT_SECONDS,
       });
     } catch (error) {
       this.#options.onProblem?.(
@@ -68,9 +77,43 @@ export class SandboxSelfCheck implements SelfCheck {
     }
     // A run that never reported says nothing about the code.
     if (outcome.status !== "failed") return null;
-    const issues = codingIssues(issueReports(outcome, profile));
-    return issues.length > 0 ? sendBack(issues) : null;
+    // The whole project is typechecked: what the other side wrote is not
+    // this side's to fix, and the Test Run will route it there.
+    const own = issueReports(outcome, profile).filter(
+      (report) =>
+        report.suspectedOwner === null || report.suspectedOwner === OWNER[side],
+    );
+    return own.length > 0 ? sendBack(codingIssues(own)) : null;
   };
+}
+
+const OWNER: Record<CodingSide, SuspectedOwner> = {
+  backend: "backendCoding",
+  frontend: "frontendCoding",
+};
+
+/** Install, typecheck and one side's tests take minutes, not a half hour. */
+const CHECK_TIMEOUT_SECONDS = 600;
+
+/**
+ * Every file of a Workspace, as a check uploads it; null when it has more
+ * than can be listed. A file the agents cannot read (binary, or too big to
+ * read) is left out: none of the template's files is either, so leaving one
+ * out never removes a template file in the sandbox.
+ */
+export function wholeApplication(
+  files: Pick<WorkspaceFiles, "listFiles" | "readFile">,
+): TemplateFile[] | null {
+  const paths = files.listFiles();
+  if (paths.length >= MAX_LISTED_FILES) return null;
+  return paths.flatMap((path) => {
+    try {
+      return [{ path, contents: files.readFile(path) }];
+    } catch (error) {
+      if (error instanceof WorkspaceFileError) return [];
+      throw error;
+    }
+  });
 }
 
 /**
@@ -82,13 +125,8 @@ export function cheapFindings(
   profile: StackProfile,
   side: CodingSide,
 ): CodingIssue[] {
-  const writable = profile.writablePaths[side];
-  const mayWrite = (path: string) =>
-    writable.some((entry) =>
-      entry.endsWith("/") ? path.startsWith(entry) : path === entry,
-    );
   return files
-    .filter((file) => mayWrite(file.path))
+    .filter((file) => mayWrite(profile.writablePaths[side], file.path))
     .flatMap((file) =>
       profile.cheapChecks
         .filter((check) => check.files.test(file.path))
@@ -109,18 +147,10 @@ function findingsIn(file: TemplateFile, check: CheapCheck): CodingIssue[] {
   );
 }
 
-/** What the agent is told: its work is not done, and what to fix first. */
+/**
+ * What the agent is told: its work is not done, and what to fix first, in
+ * the shape a Test Run's problems take (its evidence is cut there already).
+ */
 function sendBack(issues: readonly CodingIssue[]): string {
-  const list = issues
-    .map(
-      (issue, index) =>
-        `${index + 1}. ${issue.summary}\n   Evidence: ${cut(issue.evidence).replaceAll("\n", "\n   ")}`,
-    )
-    .join("\n");
-  return `Your work does not pass its own check yet, so it is not done. Fix these, then reply again with your summary:\n${list}`;
+  return `Your work does not pass its own check yet, so it is not done. Fix these, then reply again with your summary:\n${listIssues(issues)}`;
 }
-
-const cut = (text: string): string =>
-  text.length <= MAX_EVIDENCE_CHARS
-    ? text.trim()
-    : `${text.slice(0, MAX_EVIDENCE_CHARS).trim()}…`;

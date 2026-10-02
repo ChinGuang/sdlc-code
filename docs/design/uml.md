@@ -14,7 +14,7 @@ Design-phase diagrams for review. Terms follow [CONTEXT.md](../../CONTEXT.md); t
 
 ## 1. Component diagram
 
-One local server owns every Run; the dashboard and CLI are thin clients. Agents run locally and call Nebius Token Factory for inference. The sandbox only executes Test Runs.
+One local server owns every Run; the dashboard and CLI are thin clients. Agents run locally and call Nebius Token Factory for inference. The sandbox only executes Test Runs, and each Coding Agent's own check before its Step ends (T24j).
 
 ```mermaid
 flowchart LR
@@ -433,10 +433,13 @@ sequenceDiagram
   par backend
     O->>BE: Task (Slice, API Contract, System Design, Working Memory)
     BE->>W: write files, unit tests
+    BE->>S: own check: cheap checks, typecheck, its own tests (T24j)
+    Note over BE,S: what fails goes back to the agent, by file and line,<br/>while it has turns left (at most twice a Step)
     BE-->>O: done + Working Memory
   and frontend
     O->>FE: Task (Slice, API Contract, UI Spec, extras per Model Capabilities)
     FE->>W: write files, unit tests
+    FE->>S: own check: cheap checks, typecheck, its own tests (T24j)
     FE-->>O: done + Working Memory
   end
   O->>W: merge workspaces

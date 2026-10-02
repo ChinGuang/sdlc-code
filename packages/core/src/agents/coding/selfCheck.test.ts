@@ -13,8 +13,10 @@ import type {
 import {
   cheapFindings,
   SandboxSelfCheck,
+  wholeApplication,
   type SelfCheck,
 } from "./selfCheck.js";
+import { MAX_LISTED_FILES, WorkspaceFileError } from "./workspaceFiles.js";
 
 const evidence = {
   operationId: "op",
@@ -128,20 +130,31 @@ describe("SandboxSelfCheck (T24j)", () => {
         profile: REACT_NODE,
         files: template,
         command: "node scripts/sdlcTest.mjs --check backend",
+        timeoutSeconds: 600,
       },
     ]);
   });
 
+  // As the template's script reports it: one failure per compiler error.
+  const typecheck = (
+    ...errors: Array<[file: string, at: string, message: string]>
+  ) =>
+    ran(step("install", true), {
+      ...step("typecheck", false, "tsc output"),
+      failures: errors.map(([file, at, message]) => ({
+        test: `${file}${at}`,
+        file,
+        message,
+      })),
+    });
+
   it("sends a failing typecheck back, by file and line", async () => {
     const { check } = checking(
-      ran(
-        step("install", true),
-        step(
-          "typecheck",
-          false,
-          "src/screens/DeleteConfirmation.tsx(12,3): error TS2304: Cannot find name 'useEffect'.",
-        ),
-      ),
+      typecheck([
+        "src/screens/DeleteConfirmation.tsx",
+        "(12,3)",
+        "error TS2304: Cannot find name 'useEffect'.",
+      ]),
     );
 
     const problems = await check.check({
@@ -152,8 +165,33 @@ describe("SandboxSelfCheck (T24j)", () => {
 
     expect(problems).toMatch(/^Your work does not pass its own check yet/);
     expect(problems).toContain(
-      "src/screens/DeleteConfirmation.tsx(12,3): error TS2304: Cannot find name 'useEffect'.",
+      "src/screens/DeleteConfirmation.tsx(12,3) (src/screens/DeleteConfirmation.tsx): error TS2304: Cannot find name 'useEffect'.",
     );
+  });
+
+  // The T24j review: the whole project is typechecked, so the other side's
+  // errors showed up in this side's check, where it cannot fix them.
+  it("sends back only what this side can fix", async () => {
+    const both = typecheck(
+      ["server/app.ts", "(9,3)", "error TS2304: Cannot find name 'route'."],
+      ["src/App.tsx", "(3,10)", "error TS2304: Cannot find name 'useEffect'."],
+    );
+    const backend = await checking(both).check.check({
+      profile: REACT_NODE,
+      side: "backend",
+      files: template,
+    });
+    const frontendOnlyTheirs = await checking(
+      typecheck([
+        "server/app.ts",
+        "(9,3)",
+        "error TS2304: Cannot find name 'route'.",
+      ]),
+    ).check.check({ profile: REACT_NODE, side: "frontend", files: template });
+
+    expect(backend).toContain("server/app.ts(9,3)");
+    expect(backend).not.toContain("src/App.tsx");
+    expect(frontendOnlyTheirs).toBeNull();
   });
 
   it("sends cheap findings back without a sandbox run", async () => {
@@ -188,5 +226,34 @@ describe("SandboxSelfCheck (T24j)", () => {
       "The backend could not check its work: sandbox API down",
     ]);
     expect(await broken.check.check(input)).toBeNull();
+  });
+});
+
+// The T24j review: one binary file made the check throw, and the Slice fail.
+describe("wholeApplication (T24j)", () => {
+  const listing = (paths: string[], unreadable: string[] = []) => ({
+    listFiles: () => paths,
+    readFile: (path: string) => {
+      if (unreadable.includes(path))
+        throw new WorkspaceFileError(`"${path}" is not text.`);
+      return `contents of ${path}`;
+    },
+  });
+
+  it("leaves out a file the agents cannot read, and keeps the rest", () => {
+    expect(
+      wholeApplication(
+        listing(["src/App.tsx", "public/logo.png"], ["public/logo.png"]),
+      ),
+    ).toEqual([{ path: "src/App.tsx", contents: "contents of src/App.tsx" }]);
+  });
+
+  it("is null for an application too big to list whole", () => {
+    const paths = Array.from(
+      { length: MAX_LISTED_FILES },
+      (_, index) => `src/file${index}.ts`,
+    );
+
+    expect(wholeApplication(listing(paths))).toBeNull();
   });
 });

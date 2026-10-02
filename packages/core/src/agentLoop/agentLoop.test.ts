@@ -277,6 +277,28 @@ describe("ChatAgentLoop: the task checks the answer (T24j)", () => {
     });
   });
 
+  // The T24j review: a check must never leave a Step worse off than none.
+  it("keeps an answer it sent back when the turns run out before another", async () => {
+    const { loop } = makeLoop(
+      [
+        { content: "Done." },
+        {
+          toolCalls: [toolCall("read_file", { path: "a.ts" })],
+          finishReason: "tool_calls",
+        },
+        memoryReply,
+      ],
+      { maxIterations: 2 },
+    );
+
+    const result = await loop.run({
+      ...task,
+      check: async () => "1. a.ts(1,1): error TS1005.",
+    });
+
+    expect(result).toMatchObject({ stopReason: "answered", answer: "Done." });
+  });
+
   it("does not check an answer given on the last turn: nothing is left to fix it in", async () => {
     const { loop } = makeLoop([{ content: "Done." }, memoryReply], {
       maxIterations: 1,

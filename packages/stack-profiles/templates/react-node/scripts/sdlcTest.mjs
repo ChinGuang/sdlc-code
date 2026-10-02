@@ -31,7 +31,7 @@ const PORT = Number(process.env.PORT ?? 3100);
 /** Tests and smoke checks share a database of their own, never the dev one. */
 const DATABASE_URL = process.env.DATABASE_URL ?? "file:./sdlc-test.db";
 const BOOT_TIMEOUT_MS = 30_000;
-const STEP_TIMEOUT_MS = { install: 600_000, unit: 600_000 };
+const STEP_TIMEOUT_MS = { install: 600_000, typecheck: 300_000, unit: 600_000 };
 const DEFAULT_STEP_TIMEOUT_MS = 120_000;
 const OUTPUT_TAIL = 2000;
 const VITEST_REPORT = ".sdlc/vitest.json";
@@ -42,8 +42,10 @@ const INSTALL_ONLY = process.argv.includes("--install-only");
  * `--check backend|frontend`: a Coding Agent's own check before its Step ends
  * (T24j). Install, typecheck, and that side's tests only: no API is booted.
  */
-const CHECK = process.argv[process.argv.indexOf("--check") + 1];
 const CHECKING = process.argv.includes("--check");
+const CHECK = CHECKING
+  ? process.argv[process.argv.indexOf("--check") + 1]
+  : undefined;
 if (CHECKING && CHECK !== "backend" && CHECK !== "frontend") {
   process.stderr.write("--check needs backend or frontend\n");
   process.exit(2);
@@ -177,6 +179,25 @@ async function waitForHealth(deadline) {
   return false;
 }
 
+/**
+ * One failure per compiler error, "src/App.tsx(3,10): error TS2304: …", so
+ * each names its own file and line and goes to the side that wrote it (T24j).
+ */
+function tscFailures(output) {
+  return output.split("\n").flatMap((line) => {
+    const match = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/.exec(line.trim());
+    return match
+      ? [
+          {
+            test: `${match[1]}(${match[2]},${match[3]})`,
+            file: match[1],
+            message: `error ${match[4]}: ${match[5]}`,
+          },
+        ]
+      : [];
+  });
+}
+
 /** The failing tests vitest reported, for an Issue Report (T16). */
 function vitestFailures() {
   if (!existsSync(VITEST_REPORT)) return [];
@@ -219,15 +240,21 @@ try {
     passed = await step("typecheck", async () => {
       const generated = await asStep("npx", ["prisma", "generate"]);
       if (!generated.ok) return generated;
-      return asStep("npx", ["tsc", "--noEmit", "-p", "tsconfig.json"]);
+      const checked = await asStep("npx", ["tsc", "--noEmit", "-p", "tsconfig.json"], {
+        timeoutMs: STEP_TIMEOUT_MS.typecheck,
+      });
+      return { ...checked, failures: tscFailures(checked.output) };
     });
 
   if (passed && !INSTALL_ONLY)
     passed = await step("unit", async () => {
-      // npm install leaves a stub client, so this always runs. It rewrites the
-      // query engine, which is why the script waits for the API to exit first.
-      const generated = await asStep("npx", ["prisma", "generate"]);
-      if (!generated.ok) return generated;
+      // npm install leaves a stub client, so this runs unless the typecheck
+      // just did. It rewrites the query engine, which is why the script waits
+      // for the API to exit first.
+      if (!CHECKING) {
+        const generated = await asStep("npx", ["prisma", "generate"]);
+        if (!generated.ok) return generated;
+      }
       const pushed = await asStep("npx", [
         "prisma",
         "db",

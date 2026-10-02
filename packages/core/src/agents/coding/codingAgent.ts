@@ -8,7 +8,7 @@ import type { AgentTool } from "../../agentLoop/tools.js";
 import type { UiCanvas } from "../uiDesign/uiCanvas.js";
 import { codingContext, type CodingTaskInput } from "./codingContext.js";
 import { fileTools, penpotTools } from "./codingTools.js";
-import type { SelfCheck } from "./selfCheck.js";
+import { wholeApplication, type SelfCheck } from "./selfCheck.js";
 import {
   LocalWorkspaceFiles,
   type FileChange,
@@ -101,16 +101,19 @@ export class LoopCodingAgent implements CodingAgent {
       // An answer with nothing written has nothing to check: it is judged
       // below as a Step without changes.
       check: selfCheck
-        ? () =>
-            files.changes().length === 0
-              ? Promise.resolve(null)
-              : selfCheck.check({
+        ? async () => {
+            if (files.changes().length === 0) return null;
+            // An application that cannot be read whole is the Test Run's to
+            // judge: a partial upload would fail for files it left out.
+            const app = wholeApplication(files);
+            return app
+              ? selfCheck.check({
                   profile: input.profile,
                   side: input.side,
-                  files: files
-                    .listFiles()
-                    .map((path) => ({ path, contents: files.readFile(path) })),
+                  files: app,
                 })
+              : null;
+          }
         : undefined,
     });
     const changes = files.changes();
