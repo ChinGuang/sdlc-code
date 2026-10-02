@@ -150,7 +150,7 @@ describe("SandboxBaseSnapshots", () => {
     await snapshots.snapshotImage(REACT_NODE);
 
     expect(sandbox.imports).toEqual([
-      "docker://docker.io/library/node:22-slim",
+      "docker://docker.io/library/node:22",
     ]);
   });
 
