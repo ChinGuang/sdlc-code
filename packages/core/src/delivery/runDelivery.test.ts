@@ -20,7 +20,9 @@ import { GitHubRunDelivery, type RunDelivery } from "./runDelivery.js";
 /** What happened to the repository, in order, including the push. */
 type Step = "discardUnfinished" | "push";
 
-function setup(options: { commits?: string[]; emptyRepo?: boolean } = {}) {
+function setup(
+  options: { commits?: string[]; emptyRepo?: 404 | 409 | false } = {},
+) {
   const db = openDatabase(":memory:");
   const store = { db };
   const runs = new SqliteRunStore(store);
@@ -62,8 +64,14 @@ function setup(options: { commits?: string[]; emptyRepo?: boolean } = {}) {
   const github = {
     // An empty repository has no base branch yet (T25).
     getBranchSha: async () => {
-      if (options.emptyRepo)
+      if (options.emptyRepo === 404)
         throw new GitHubApiError(404, null, "GitHub 404: Branch not found");
+      if (options.emptyRepo === 409)
+        throw new GitHubApiError(
+          409,
+          null,
+          "GitHub 409: Git Repository is empty.",
+        );
       return "base-sha";
     },
     findOpenPullRequest: async () => existing,
@@ -335,25 +343,30 @@ describe("GitHubRunDelivery: a Run it cannot deliver", () => {
 // Found in T25: the demo repository was empty, so there was no main to open a
 // pull request into, and none with any history in common with the Run.
 describe("GitHubRunDelivery: an empty Target Repo (T25)", () => {
-  it("begins its base branch at the Run's start commit, then pushes the Run", async () => {
-    const context = setup({ emptyRepo: true });
+  // GitHub answers a missing branch with 404 and a repository with no commits
+  // at all with 409 ("Git Repository is empty"), which is what T25 met live.
+  it.each([404, 409] as const)(
+    "begins its base branch at the Run's start commit, then pushes the Run (GitHub says %s)",
+    async (status) => {
+      const context = setup({ emptyRepo: status });
 
-    await context.delivery.deliver(context.run.id, {
-      ended: "complete",
-      findings: [],
-    });
+      await context.delivery.deliver(context.run.id, {
+        ended: "complete",
+        findings: [],
+      });
 
-    expect(context.pushes).toEqual([
-      {
-        repoDir: "/runs/1/repo.git",
-        repo: expect.objectContaining({ name: "sdlc-code-demo-todo" }),
-        branch: "main",
-        source: "refs/sdlc-run/start",
-      },
-      expect.objectContaining({ branch: "sdlc/todo" }),
-    ]);
-    expect(context.opened).toHaveLength(1);
-  });
+      expect(context.pushes).toEqual([
+        {
+          repoDir: "/runs/1/repo.git",
+          repo: expect.objectContaining({ name: "sdlc-code-demo-todo" }),
+          branch: "main",
+          source: "refs/sdlc-run/start",
+        },
+        expect.objectContaining({ branch: "sdlc/todo" }),
+      ]);
+      expect(context.opened).toHaveLength(1);
+    },
+  );
 
   it("leaves a base branch that exists alone", async () => {
     const context = setup();

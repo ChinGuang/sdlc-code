@@ -122,7 +122,12 @@ export class GitHubRunDelivery implements RunDelivery {
       await github.getBranchSha(run.targetRepo, run.targetRepo.baseBranch);
       return;
     } catch (error) {
-      if (!(error instanceof GitHubApiError) || error.status !== 404)
+      // A branch that is not there is a 404; a repository with no commits at
+      // all is a 409 "Git Repository is empty" (found live in T25).
+      if (
+        !(error instanceof GitHubApiError) ||
+        (error.status !== 404 && error.status !== 409)
+      )
         throw error;
     }
     await pusher.push({
