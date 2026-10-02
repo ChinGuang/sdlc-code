@@ -241,6 +241,13 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       this.resolveEscalation(runId, { choice: "abort", openDraftPrOnAbort });
       return;
     }
+    // An aborted Run whose Draft PR never opened (GitHub refused it, the
+    // repository was empty: found in T25) is aborted again to try again, with
+    // the person's choice this time. Nothing else is left to stop.
+    if (run.status === "aborted" && !run.pullRequest) {
+      this.#options.runs.setOpenDraftPrOnAbort(runId, openDraftPrOnAbort);
+      return;
+    }
     if (isFinished(run.status))
       throw new Error(`Run ${runId} is ${run.status} already.`);
     this.#options.runs.setOpenDraftPrOnAbort(runId, openDraftPrOnAbort);

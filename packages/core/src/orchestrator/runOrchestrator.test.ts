@@ -214,10 +214,11 @@ function setup(options: {
   };
 
   const deliveries: Array<{ runId: string; reason: DeliveryReason }> = [];
+  let failingDelivery = options.failDelivery ?? false;
   const delivery: RunDelivery = {
     deliver: async (runId, reason) => {
       deliveries.push({ runId, reason });
-      if (options.failDelivery) throw new Error("GitHub refused the push");
+      if (failingDelivery) throw new Error("GitHub refused the push");
       const outcome: DeliveryOutcome = options.delivery ?? {
         status: "opened",
         pullRequest: {
@@ -364,6 +365,10 @@ function setup(options: {
     notKept,
     reviewProblems,
     briefProblems,
+    /** GitHub accepts the push from now on. */
+    fixDelivery: () => {
+      failingDelivery = false;
+    },
     /** Reports a Checkpoint from inside a Slice, as the real runner does. */
     sliceCheckpoint: (checkpoint: SliceCheckpoint) =>
       sliceCheckpoints.at(-1)!(checkpoint),
@@ -1258,6 +1263,39 @@ describe("AgentRunOrchestrator: a person aborts the Run (T24g)", () => {
       "GitHub refused the push",
     );
     expect(deliveries).toHaveLength(1);
+  });
+
+  // Found in T25: the Draft PR failed on an empty repository, and a person
+  // had no way to try again: the Run was aborted already.
+  it("aborting an aborted Run whose pull request never opened tries it again", async () => {
+    const { orchestrator, runId, deliveries, fixDelivery, runs } = setup({
+      failDelivery: true,
+    });
+    await orchestrator.advance(runId);
+    orchestrator.abort(runId);
+    await expect(orchestrator.advance(runId)).rejects.toThrow(
+      "GitHub refused the push",
+    );
+    fixDelivery();
+
+    orchestrator.abort(runId);
+    const progress = await orchestrator.advance(runId);
+
+    expect(progress).toEqual({ finished: "aborted" });
+    expect(deliveries).toHaveLength(2);
+    expect(runs.getRun(runId)!.pullRequest).toMatchObject({ number: 7 });
+  });
+
+  it("takes the person's Draft PR choice when it tries again", async () => {
+    const { orchestrator, runId, deliveries } = setup({ failDelivery: true });
+    await orchestrator.advance(runId);
+    orchestrator.abort(runId);
+    await expect(orchestrator.advance(runId)).rejects.toThrow();
+
+    orchestrator.abort(runId, { openDraftPrOnAbort: false });
+    await expect(orchestrator.advance(runId)).rejects.toThrow();
+
+    expect(deliveries.at(-1)!.reason).toMatchObject({ openDraftPr: false });
   });
 
   // A Run waiting at a Gate, or whose loop stopped, is not being advanced:
