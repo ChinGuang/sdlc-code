@@ -165,8 +165,10 @@ const DEFAULT_AUTHOR: GitAuthor = {
 
 /** Workspace branches live beside the run branch, never under it. */
 const WORKSPACE_REFS = "refs/heads/sdlc-workspace/";
-/** Remembers where the run branch started, so Slice Commits can be told apart. */
-/** The commit a Run started from: the template, on the Target Repo's base if any. */
+/**
+ * Where the run branch started, so Slice Commits can be told apart: the
+ * template, on the Target Repo's base branch if it has one.
+ */
 export const START_REF = "refs/sdlc-run/start";
 /** As much diff as a review can read; Nemotron Ultra has room for far more. */
 const DEFAULT_DIFF_BYTES = 200_000;

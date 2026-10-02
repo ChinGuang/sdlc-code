@@ -74,15 +74,18 @@ export class TokenGitPusher implements GitPusher {
     repo,
     branch,
     force = false,
-    source = `refs/heads/${branch}`,
+    source,
   }: PushRequest): Promise<void> => {
     if (!isSafeBranchName(branch))
       throw new Error(`invalid branch name: ${JSON.stringify(branch)}`);
     // A full ref under refs/, so it is never read as an option or a refspec.
-    if (!/^refs\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/.test(source))
+    if (
+      source !== undefined &&
+      !(source.startsWith("refs/") && isSafeBranchName(source.slice(5)))
+    )
       throw new Error(`invalid source ref: ${JSON.stringify(source)}`);
     const remote = `${this.#baseUrl}/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}.git`;
-    const refspec = `${force ? "+" : ""}${source}:refs/heads/${branch}`;
+    const refspec = `${force ? "+" : ""}${source ?? `refs/heads/${branch}`}:refs/heads/${branch}`;
     const result = await this.#runGit(
       // An empty credential.helper stops the user's own git credentials being used.
       ["-c", "credential.helper=", "push", "--porcelain", remote, refspec],

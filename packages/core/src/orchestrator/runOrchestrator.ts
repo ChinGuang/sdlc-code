@@ -130,7 +130,10 @@ export interface RunOrchestrator {
   /**
    * A person stops the Run, whatever it is doing (T24g): at an Escalation as
    * its abort choice, otherwise at once. Work under way stops at the next
-   * model turn; call advance to settle it and deliver what is owed.
+   * model turn; call advance to settle it and deliver what is owed. An
+   * aborted Run whose pull request never opened is aborted again to try its
+   * delivery again, with the new choice; one that has a pull request, or has
+   * finished, is refused.
    */
   abort: (runId: string, options?: { openDraftPrOnAbort?: boolean }) => void;
   /** The human's Verdicts at the Design Gate; then call advance. */

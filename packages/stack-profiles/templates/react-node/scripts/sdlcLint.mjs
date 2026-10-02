@@ -135,7 +135,7 @@ async function typeCheck() {
   const generated = await run("npx", ["prisma", "generate"]);
   if (generated.code !== 0) {
     checks.push({
-      name: "tsc",
+      name: "prisma generate",
       ok: false,
       durationMs: Date.now() - started,
       output: tail(`${generated.out}${generated.err}`),

@@ -111,25 +111,30 @@ export class GitHubRunDelivery implements RunDelivery {
   };
 
   /**
-   * An empty Target Repo has no base branch to open a pull request into, and
-   * GitHub refuses one between branches with no history in common. So its
-   * base begins at the Run's start commit, the template (found in T25: the
-   * demo repository was empty); the pull request then carries the Slices.
+   * An empty Target Repo has nothing to open a pull request into, and GitHub
+   * refuses one between branches with no history in common. So its base begins
+   * at the Run's start commit (the template), and the pull request carries the
+   * Slices. A repository that has commits but not this base branch is not
+   * empty: that is a mistake to report, never a branch to invent.
    */
   async #beginBaseIfMissing(run: Run): Promise<void> {
-    const { github, pusher, repoDir } = this.#options;
+    const { github } = this.#options;
     try {
       await github.getBranchSha(run.targetRepo, run.targetRepo.baseBranch);
       return;
     } catch (error) {
-      // A branch that is not there is a 404; a repository with no commits at
-      // all is a 409 "Git Repository is empty" (found live in T25).
-      if (
-        !(error instanceof GitHubApiError) ||
-        (error.status !== 404 && error.status !== 409)
-      )
-        throw error;
+      if (isEmptyRepository(error)) return this.#beginBase(run);
+      if (error instanceof GitHubApiError && error.status === 404)
+        throw new Error(
+          `${run.targetRepo.owner}/${run.targetRepo.name} has no branch "${run.targetRepo.baseBranch}" to open a pull request into, or the token cannot see it.`,
+          { cause: error },
+        );
+      throw error;
     }
+  }
+
+  async #beginBase(run: Run): Promise<void> {
+    const { pusher, repoDir } = this.#options;
     await pusher.push({
       repoDir,
       repo: run.targetRepo,
@@ -239,4 +244,9 @@ function issueLines(reports: readonly unknown[]): string[] {
 
 function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/** GitHub answers a repository with no commits at all with 409. */
+function isEmptyRepository(error: unknown): boolean {
+  return error instanceof GitHubApiError && error.status === 409;
 }

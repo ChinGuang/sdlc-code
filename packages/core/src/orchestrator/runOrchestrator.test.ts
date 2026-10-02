@@ -1286,6 +1286,15 @@ describe("AgentRunOrchestrator: a person aborts the Run (T24g)", () => {
     expect(runs.getRun(runId)!.pullRequest).toMatchObject({ number: 7 });
   });
 
+  it("still refuses to abort an aborted Run whose pull request is open", async () => {
+    const { orchestrator, runId } = setup({});
+    await orchestrator.advance(runId);
+    orchestrator.abort(runId);
+    await orchestrator.advance(runId);
+
+    expect(() => orchestrator.abort(runId)).toThrow(/is aborted already/);
+  });
+
   it("takes the person's Draft PR choice when it tries again", async () => {
     const { orchestrator, runId, deliveries } = setup({ failDelivery: true });
     await orchestrator.advance(runId);

@@ -25,9 +25,8 @@ import {
 /**
  * Node 22 is not in the public catalogue; it is imported once under this tag.
  * The full image, not the slim one: Prisma's engine needs OpenSSL, which the
- * slim image lacks, and a newer Prisma 6 fails to boot without it (found in
- * T25: the Walking Skeleton's API never started). The tag is part of the
- * Base Snapshot's key, so changing it builds a new one.
+ * slim image lacks. The tag is part of the Base Snapshot's key, so changing
+ * it builds a new snapshot.
  */
 export const NODE_IMAGE_TAG = "sdlc-code/node:22";
 const NODE_IMAGE_SOURCE = "docker://docker.io/library/node:22";
