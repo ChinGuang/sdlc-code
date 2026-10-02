@@ -93,6 +93,14 @@ export const REACT_NODE: StackProfile = {
       forbidden: /@db\./,
       says: "SQLite has no Prisma native types: remove the @db.* attribute and keep the plain type (String, Int, DateTime).",
     },
+    {
+      // Found in T25: its plain entry calls a global expect, which Vitest
+      // without globals does not have.
+      files: /\.test\.tsx?$/,
+      forbidden:
+        /^\s*import\s+(?:[^'"]*\s+from\s+)?["']@testing-library\/jest-dom["']/,
+      says: 'Remove this import: src/testSetup.ts already loads the Testing Library matchers (toBeInTheDocument and the rest) for every test, through "@testing-library/jest-dom/vitest".',
+    },
   ],
   reviewStandard: BASELINE_RULES,
   writablePaths: {
@@ -130,7 +138,7 @@ export const REACT_NODE: StackProfile = {
       ],
       frontend: [
         "src/App.test.tsx and src/screens/HealthScreen.test.tsx are the template's tests: add to them, and keep what they check passing.",
-        'Screen tests (src/**/*.test.tsx) run in jsdom with Testing Library, its matchers loaded by src/testSetup.ts. Stub the API with vi.stubGlobal("fetch", …) as src/screens/HealthScreen.test.tsx does, and render a routed screen inside a MemoryRouter as src/App.test.tsx does.',
+        'Screen tests (src/**/*.test.tsx) run in jsdom with Testing Library, its matchers loaded by src/testSetup.ts for every test: never import "@testing-library/jest-dom" in a test, as it needs a global expect that is not there. Stub the API with vi.stubGlobal("fetch", …) as src/screens/HealthScreen.test.tsx does, and render a routed screen inside a MemoryRouter as src/App.test.tsx does.',
         "src/api.ts is the only way the screens talk to the API: add functions beside getJson and getHealth, and keep both.",
         'getJson(path) adds the /api prefix and only reads: call it with the API Contract\'s path as it is, getJson("/todos"), never "/api/todos". For a write, add a function to src/api.ts that calls fetch(`/api${path}`, …) the same way.',
         "src/App.tsx holds every screen as a <Route>; the Router is in src/main.tsx, so a test renders App inside a MemoryRouter.",
