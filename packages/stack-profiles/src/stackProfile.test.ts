@@ -147,7 +147,7 @@ describe("templateFacts (T24d)", () => {
     expect(file("server/app.test.ts")).toContain(
       'toEqual({ status: "ok", database: "up" })',
     );
-    expect(REACT_NODE.templateFacts.serves[0]).toContain(
+    expect(facts).toContain(
       '{ "status": "ok" | "degraded", "database": "up" | "down" }',
     );
     expect(facts).not.toMatch(/timestamp/);
@@ -195,7 +195,58 @@ describe("templateFacts (T24d)", () => {
     for (const [label, name] of versions)
       expect(facts).toContain(`${label} ${major(name)}`);
     expect(file("vite.config.ts")).not.toMatch(/globals:\s*true/);
+    // Without the types either, a test that forgets its import fails tsc too.
+    expect(file("tsconfig.json")).not.toContain("vitest/globals");
     expect(file("prisma/schema.prisma")).toMatch(/provider = "sqlite"/);
+  });
+
+  // The T24d spec review: every fact, not some, is checked here.
+  it("gives the error answers the template's own tests check", () => {
+    const tests = file("server/app.test.ts");
+
+    expect(tests).toContain('toEqual({ error: "Internal Server Error" })');
+    expect(tests).toContain('toEqual({ error: "Bad Request" })');
+    expect(tests).toMatch(/get\("\/nope"\)[\s\S]*toBe\(404\)/);
+    expect(file("server/app.ts")).toContain(
+      'status(database === "up" ? 200 : 503)',
+    );
+    expect(facts).toContain('{ "error": "Internal Server Error" }');
+    expect(facts).toContain('{ "error": "Bad Request" }');
+  });
+
+  it("gives the /api proxy and how the app and its tests are wired", () => {
+    const vite = file("vite.config.ts");
+
+    expect(vite).toContain('"/api"');
+    expect(vite).toContain('path.replace(/^\\/api/, "")');
+    expect(file("src/api.ts")).toContain("fetch(`/api${path}`)");
+    expect(vite).toMatch(/environment: "jsdom"[\s\S]*src\/\*\*\/\*\.test\.tsx/);
+    expect(vite).toMatch(
+      /environment: "node"[\s\S]*server\/\*\*\/\*\.test\.ts/,
+    );
+    expect(vite).toContain('setupFiles: ["./src/testSetup.ts"]');
+    expect(file("server/app.test.ts")).toContain('from "supertest"');
+    expect(file("src/App.test.tsx")).toContain("<MemoryRouter");
+    expect(file("src/main.tsx")).toContain("<BrowserRouter>");
+    expect(file("src/screens/HealthScreen.test.tsx")).toContain(
+      'vi.stubGlobal(\n    "fetch"',
+    );
+    expect(file("server/app.ts")).toContain(
+      "export function createApp(register?: (app: Express) => void): Express",
+    );
+    expect(file("server/main.ts")).toMatch(/createApp\(.*\)\.listen/);
+  });
+
+  it("gives the TypeScript settings and the shared test database", () => {
+    const tsconfig = file("tsconfig.json");
+
+    expect(tsconfig).toContain('"strict": true');
+    expect(tsconfig).toContain('"verbatimModuleSyntax": true');
+    expect(tsconfig).toContain('"noUncheckedIndexedAccess": true');
+    const script = file("scripts/sdlcTest.mjs");
+    expect(script).toContain('"file:./sdlc-test.db"');
+    expect(script).toContain('"--accept-data-loss"');
+    expect(script).not.toMatch(/migrate (dev|deploy)/);
   });
 });
 

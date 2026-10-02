@@ -17,6 +17,18 @@ describe("GET /health", () => {
   });
 });
 
+describe("a body that is not JSON", () => {
+  it("answers 400, the client's mistake, saying nothing more", async () => {
+    const response = await request(createApp())
+      .post("/health")
+      .set("Content-Type", "application/json")
+      .send("{not json");
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: "Bad Request" });
+  });
+});
+
 describe("a route that throws", () => {
   it("answers 500 without leaking anything about the server (SEC-03)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});

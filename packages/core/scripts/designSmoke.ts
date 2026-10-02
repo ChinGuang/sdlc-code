@@ -10,8 +10,10 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { REACT_NODE } from "@sdlc-code/stack-profiles";
 import {
   ChatAgentLoop,
+  designedOn,
   designDocuments,
   loadAgentConfig,
   LoopSystemDesignAgent,
@@ -73,8 +75,7 @@ console.log(
 const started = Date.now();
 const { design, loop } = await agent.design({
   projectRequest,
-  stackProfile:
-    "React + Vite + Tailwind frontend; Node API with Prisma (SQLite in tests); Vitest.",
+  stackProfile: designedOn(REACT_NODE),
 });
 console.log(
   `${loop.stopReason} in ${loop.iterations} turns, ${((Date.now() - started) / 1000).toFixed(0)}s, ` +
