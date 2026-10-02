@@ -246,13 +246,22 @@ export class LocalWorkspaceFiles implements WorkspaceFiles {
   }
 
   #mayWrite(path: string): boolean {
-    const lower = path.toLowerCase();
-    return this.#writable.some((writable) =>
-      writable.endsWith("/")
-        ? lower.startsWith(writable.toLowerCase())
-        : lower === writable.toLowerCase(),
-    );
+    return mayWrite(this.#writable, path);
   }
+}
+
+/**
+ * Whether a side may write `path`: a folder ends with "/", anything else is
+ * one file. Either case, as Windows and macOS read "Server/x.ts" as
+ * "server/x.ts".
+ */
+export function mayWrite(writable: readonly string[], path: string): boolean {
+  const lower = path.toLowerCase();
+  return writable.some((entry) =>
+    entry.endsWith("/")
+      ? lower.startsWith(entry.toLowerCase())
+      : lower === entry.toLowerCase(),
+  );
 }
 
 type Checked = {

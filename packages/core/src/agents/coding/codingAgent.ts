@@ -8,6 +8,7 @@ import type { AgentTool } from "../../agentLoop/tools.js";
 import type { UiCanvas } from "../uiDesign/uiCanvas.js";
 import { codingContext, type CodingTaskInput } from "./codingContext.js";
 import { fileTools, penpotTools } from "./codingTools.js";
+import { wholeApplication, type SelfCheck } from "./selfCheck.js";
 import {
   LocalWorkspaceFiles,
   type FileChange,
@@ -46,16 +47,23 @@ export type CodingAgentOptions = {
   canvas?: Pick<UiCanvas, "describeScreen">;
   /** Defaults to the Workspace's files on disk. */
   openFiles?: (input: CodingInput) => WorkspaceFiles;
+  /**
+   * Checks the side's work when the agent answers (T24j); what fails goes
+   * back to the agent. Without it a Step ends at the agent's answer.
+   */
+  selfCheck?: SelfCheck;
 };
 
 export class LoopCodingAgent implements CodingAgent {
   #createLoop: CodingAgentOptions["createLoop"];
   #canvas: CodingAgentOptions["canvas"];
   #openFiles: (input: CodingInput) => WorkspaceFiles;
+  #selfCheck: SelfCheck | undefined;
 
   constructor(options: CodingAgentOptions) {
     this.#createLoop = options.createLoop;
     this.#canvas = options.canvas;
+    this.#selfCheck = options.selfCheck;
     this.#openFiles =
       options.openFiles ??
       ((input) =>
@@ -87,7 +95,27 @@ export class LoopCodingAgent implements CodingAgent {
         ? penpotTools(this.#canvas, input.penpotPage, context.screens)
         : []),
     ];
-    const loop = await this.#createLoop(tools).run(context.task);
+    const selfCheck = this.#selfCheck;
+    const loop = await this.#createLoop(tools).run({
+      ...context.task,
+      // An answer with nothing written has nothing to check: it is judged
+      // below as a Step without changes.
+      check: selfCheck
+        ? async () => {
+            if (files.changes().length === 0) return null;
+            // An application that cannot be read whole is the Test Run's to
+            // judge: a partial upload would fail for files it left out.
+            const app = wholeApplication(files);
+            return app
+              ? selfCheck.check({
+                  profile: input.profile,
+                  side: input.side,
+                  files: app,
+                })
+              : null;
+          }
+        : undefined,
+    });
     const changes = files.changes();
     // Spike T03 rule 6: judge the Step by what it did, not what it says.
     const problem =

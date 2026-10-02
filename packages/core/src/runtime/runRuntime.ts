@@ -35,6 +35,7 @@ import { RunTokenBudget, StepTranscript } from "../agentLoop/storeAdapters.js";
 import type { AgentTool } from "../agentLoop/tools.js";
 import { LoopCodeReviewAgent } from "../agents/codeReview/codeReviewAgent.js";
 import { LoopCodingAgent } from "../agents/coding/codingAgent.js";
+import { SandboxSelfCheck } from "../agents/coding/selfCheck.js";
 import { LoopSystemDesignAgent } from "../agents/systemDesign/systemDesignAgent.js";
 import { SandboxTestingAgent } from "../agents/testing/testingAgent.js";
 import { runPageName } from "../agents/uiDesign/penpotRender.js";
@@ -492,6 +493,16 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
               stepId,
             ),
             canvas,
+            // The same sandbox and Base Snapshot as the Test Run (T24j).
+            selfCheck: new SandboxSelfCheck({
+              runner: new SandboxTestRunner({ sandbox, snapshots, uploaded }),
+              onProblem: (problem) =>
+                emit({
+                  runId: run.id,
+                  type: "problem",
+                  problem: redact(problem).slice(0, 300),
+                }),
+            }),
           }),
         checkpoint: (checkpoint) => {
           emit({

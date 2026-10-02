@@ -16,9 +16,23 @@ import type { ModelCapabilities } from "../../config/agentConfig.js";
 import { HEALTH_ENDPOINT, type DesignSlice } from "../systemDesign/design.js";
 import type { UiSpec } from "../uiDesign/uiSpec.js";
 import { FILE_TOOL_NAMES, INSPECT_SCREEN } from "./codingTools.js";
+import { mayWrite } from "./workspaceFiles.js";
 
 /** A problem to fix: from a Test Run (T16), a Code Review Finding or a human. */
 export type CodingIssue = { summary: string; evidence: string };
+
+/**
+ * Problems as a Coding Agent reads them, numbered, each with its evidence:
+ * one shape whether they came back from a Test Run or its own check (T24j).
+ */
+export function listIssues(issues: readonly CodingIssue[]): string {
+  return issues
+    .map(
+      (issue, index) =>
+        `${index + 1}. ${issue.summary}\n   Evidence: ${issue.evidence.trim().replaceAll("\n", "\n   ")}`,
+    )
+    .join("\n");
+}
 
 export type ApprovedDocuments = {
   /** Markdown, as the Design Gate approved it. */
@@ -183,7 +197,7 @@ ${SIDE_WORK[side]}
 How to work:
 - The application's files are listed below. Read the ones you will change and the ones they use (read_file), and reuse the helpers it already has. Do not list or re-read what the list and your notes already tell you.
 - You may write only: ${profile.writablePaths[side].join(", ")}. The other Coding Agent writes the rest at the same time; read its files, never change them.
-- Every change comes with Vitest tests beside it. You cannot run them: when you finish, a Test Run installs, tests, boots and smoke-tests the merged Slice, and any failure comes back to you as an Issue Report.
+- Every change comes with Vitest tests beside it. You cannot run them yourself: when you reply, your side is typechecked and its own tests run, and anything that fails comes back to you, by file and line, to fix before you reply again. Then a Test Run installs, tests, boots and smoke-tests the merged Slice, and any failure comes back to you as an Issue Report.
 - Never write secrets or real credentials; configuration comes from environment variables, with placeholders in .env.example.
 - Keep files small and focused. Make small edits with edit_file, and write whole files only when creating them.
 - Write only source code and configuration. Notes, summaries and plans go in your reply, never into a file.
@@ -218,14 +232,8 @@ function fileListSection(input: CodingTaskInput): string[] {
   const files = input.applicationFiles ?? [];
   if (files.length === 0) return [];
   const writable = input.profile.writablePaths[input.side];
-  const mayWrite = (path: string) =>
-    writable.some((allowed) =>
-      allowed.endsWith("/")
-        ? path.toLowerCase().startsWith(allowed.toLowerCase())
-        : path.toLowerCase() === allowed.toLowerCase(),
-    );
   const listed = files
-    .map((path) => `${mayWrite(path) ? "* " : "  "}${path}`)
+    .map((path) => `${mayWrite(writable, path) ? "* " : "  "}${path}`)
     .join("\n");
   return [
     `The application already has these files; * marks the ones you may write. Read only the ones you need, and do not list folders you can already see here:\n${listed}`,
@@ -234,14 +242,8 @@ function fileListSection(input: CodingTaskInput): string[] {
 
 function issueSection(issues: readonly CodingIssue[]): string[] {
   if (issues.length === 0) return [];
-  const listed = issues
-    .map(
-      (issue, index) =>
-        `${index + 1}. ${issue.summary}\n   Evidence: ${issue.evidence.trim().replaceAll("\n", "\n   ")}`,
-    )
-    .join("\n");
   return [
-    `Fix these problems first; the Slice was sent back because of them:\n${listed}`,
+    `Fix these problems first; the Slice was sent back because of them:\n${listIssues(issues)}`,
   ];
 }
 

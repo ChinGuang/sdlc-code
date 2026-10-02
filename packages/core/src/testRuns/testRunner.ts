@@ -44,6 +44,13 @@ export type TestRunRequest = {
   profile: StackProfile;
   /** Every file of the application, as the Workspace holds it. */
   files: readonly TemplateFile[];
+  /**
+   * What to run instead of the profile's test script, e.g. a Coding Agent's
+   * own check (StackProfile.checkCommand, T24j).
+   */
+  command?: string;
+  /** How long the sandbox may run it; a Test Run's own limit by default. */
+  timeoutSeconds?: number;
 };
 
 /** What the Test Run did, for its Issue Report and the dashboard. */
@@ -111,11 +118,13 @@ export class SandboxTestRunner implements TestRunner {
   runTests = async ({
     profile,
     files,
+    command = profile.testCommand,
+    timeoutSeconds = TEST_RUN_TIMEOUT_SECONDS,
   }: TestRunRequest): Promise<TestRunOutcome> => {
     const plan = planUpload(files, this.#files(profile));
     let result: RunResult;
     try {
-      result = await this.#run(profile, plan);
+      result = await this.#run(profile, plan, command, timeoutSeconds);
     } catch (error) {
       if (!isGone(error)) throw error;
       // The Snapshot's image (or an uploaded file) has expired: start over
@@ -123,23 +132,28 @@ export class SandboxTestRunner implements TestRunner {
       // sandbox reports an expired image is not yet observed live.
       this.#snapshots.discardSnapshot(profile);
       this.#uploaded.clear();
-      result = await this.#run(profile, plan);
+      result = await this.#run(profile, plan, command, timeoutSeconds);
     }
     return toOutcome(result, plan);
   };
 
-  async #run(profile: StackProfile, plan: UploadPlan): Promise<RunResult> {
+  async #run(
+    profile: StackProfile,
+    plan: UploadPlan,
+    script: string,
+    timeoutSeconds: number,
+  ): Promise<RunResult> {
     const image = await this.#snapshots.snapshotImage(profile);
     return this.#sandbox.run(
       {
         image,
-        command: testCommand(profile, plan.removed),
+        command: testCommand(plan.removed, script),
         shell: true,
         files: await uploadFiles(this.#sandbox, plan.changed, this.#uploaded),
-        timeout: TEST_RUN_TIMEOUT_SECONDS,
+        timeout: timeoutSeconds,
         disposable: true,
       },
-      { pollMs: POLL_MS, timeoutMs: (TEST_RUN_TIMEOUT_SECONDS + 120) * 1000 },
+      { pollMs: POLL_MS, timeoutMs: (timeoutSeconds + 120) * 1000 },
     );
   }
 }
@@ -176,8 +190,8 @@ export function planUpload(
  * much the install and tests print, the SDLC_RESULT line is in the output.
  */
 export function testCommand(
-  profile: StackProfile,
   removed: readonly string[],
+  script: string,
 ): string {
   return [
     `cd ${shellQuote(SANDBOX_APP_DIR)}`,
@@ -185,7 +199,7 @@ export function testCommand(
       ? [`rm -f -- ${removed.map(shellQuote).join(" ")}`]
       : []),
     "mkdir -p .sdlc",
-    `{ ${profile.testCommand} > ${LOG_FILE} 2>&1; code=$?; tail -c ${LOG_TAIL_BYTES} ${LOG_FILE}; exit $code; }`,
+    `{ ${script} > ${LOG_FILE} 2>&1; code=$?; tail -c ${LOG_TAIL_BYTES} ${LOG_FILE}; exit $code; }`,
   ].join(" && ");
 }
 

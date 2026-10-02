@@ -70,7 +70,7 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **UI Design Agent** — Produces the target application's screens in Penpot, on the Run's page in the Penpot Workspace File.
 
-**Coding Agent** — Writes the application from a Task plus the System Design and UI Design. Works as either a **Backend Coding Agent** or a **Frontend Coding Agent** within a Slice.
+**Coding Agent** — Writes the application from a Task plus the System Design and UI Design. Works as either a **Backend Coding Agent** or a **Frontend Coding Agent** within a Slice. When it answers, its side's work is checked (cheap checks on the files, then a typecheck and its own tests in the sandbox), and what fails goes back to it while it has turns left.
 
 **Testing Agent** — Runs tests against the application and emits Issue Reports.
 
