@@ -154,6 +154,80 @@ describe("LoopCodingAgent", () => {
     );
   });
 
+  // T24j: the agent's answer is checked against its side's files on disk.
+  it("checks its work when it answers, and fixes what the check sends back", async () => {
+    const manager = await workspaces();
+    const backend = await manager.openWorkspace("slice-2", "backend");
+    const seen: Array<{ side: string; todos: string | undefined }> = [];
+    const { agent, requests } = agentReplaying(
+      [
+        {
+          toolCalls: [
+            call("write_file", {
+              path: "server/todos.ts",
+              contents: "export const todos: number = [];\n",
+            }),
+          ],
+        },
+        { content: "Added the todos module." },
+        {
+          toolCalls: [
+            call("write_file", {
+              path: "server/todos.ts",
+              contents: "export const todos: number[] = [];\n",
+            }),
+          ],
+        },
+        { content: "Fixed its type." },
+      ],
+      {
+        selfCheck: {
+          check: async ({ side, files }) => {
+            const todos = files.find(
+              (file) => file.path === "server/todos.ts",
+            )?.contents;
+            seen.push({ side, todos });
+            return todos?.includes("number[]")
+              ? null
+              : "1. server/todos.ts(1,14): error TS2322: Type 'never[]' is not assignable to type 'number'.";
+          },
+        },
+      },
+    );
+
+    const result = await agent.code(input(backend.dir));
+
+    expect(result).toMatchObject({ summary: "Fixed its type.", problem: null });
+    expect(seen).toEqual([
+      { side: "backend", todos: "export const todos: number = [];\n" },
+      { side: "backend", todos: "export const todos: number[] = [];\n" },
+    ]);
+    expect(requests[2]!.messages.at(-1)).toEqual({
+      role: "user",
+      content:
+        "1. server/todos.ts(1,14): error TS2322: Type 'never[]' is not assignable to type 'number'.",
+    });
+  });
+
+  it("checks nothing when it wrote nothing", async () => {
+    const manager = await workspaces();
+    const backend = await manager.openWorkspace("slice-2", "backend");
+    let checks = 0;
+    const { agent } = agentReplaying([{ content: "Nothing to do." }], {
+      selfCheck: {
+        check: async () => {
+          checks++;
+          return "Failing.";
+        },
+      },
+    });
+
+    const result = await agent.code(input(backend.dir));
+
+    expect(checks).toBe(0);
+    expect(result.problem).toBe("noChanges");
+  });
+
   it("reads several files in one turn, reporting a bad one without failing the rest", async () => {
     const manager = await workspaces();
     const backend = await manager.openWorkspace("slice-2", "backend");

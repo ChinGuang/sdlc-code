@@ -237,6 +237,23 @@ describe("templateFacts (T24d)", () => {
     expect(file("server/main.ts")).toMatch(/createApp\(.*\)\.listen/);
   });
 
+  // T24j: each side checks its own work with the template's script.
+  it("gives each side a check the test script runs: typecheck and its own tests", () => {
+    const script = file("scripts/sdlcTest.mjs");
+    const vite = file("vite.config.ts");
+
+    expect(REACT_NODE.checkCommand).toEqual({
+      backend: "node scripts/sdlcTest.mjs --check backend",
+      frontend: "node scripts/sdlcTest.mjs --check frontend",
+    });
+    expect(script).toContain(
+      'const CHECK_PROJECT = { backend: "api", frontend: "screens" };',
+    );
+    expect(script).toContain('step("typecheck"');
+    expect(vite).toContain('name: "api"');
+    expect(vite).toContain('name: "screens"');
+  });
+
   it("gives the TypeScript settings and the shared test database", () => {
     const tsconfig = file("tsconfig.json");
 

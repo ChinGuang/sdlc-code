@@ -38,7 +38,20 @@ export type AgentTask = {
   user: string;
   /** Sent with the user message; only for a model with vision. */
   images?: ExportedImage[];
+  /**
+   * Asked when the agent answers (T24j): what is still wrong with its work,
+   * or null when nothing is. What it says goes back to the agent as the next
+   * message, while it has turns left, at most MAX_CHECKS times a Step.
+   */
+  check?: (answer: string) => Promise<string | null>;
 };
+
+/**
+ * How often one Step's answer may be sent back: each check can cost a
+ * sandbox run, and a Step that cannot pass its own check after this many
+ * fixes is better judged by the Test Run.
+ */
+export const MAX_CHECKS = 2;
 
 /** One Transcript row; recorded as a Step event (CONTEXT.md "Transcript"). */
 export type TranscriptEvent =
@@ -186,10 +199,11 @@ export class ChatAgentLoop implements AgentLoop {
       error: null,
       lastCalls: [],
       lastPromptTokens: 0,
+      checks: 0,
     };
 
     try {
-      await this.#turns(state, messages);
+      await this.#turns(state, messages, task.check);
     } catch (error) {
       // A failed call still ends the Step with a note, so its retry starts informed.
       if (!(error instanceof ChatApiError)) throw error;
@@ -216,7 +230,11 @@ export class ChatAgentLoop implements AgentLoop {
     };
   };
 
-  async #turns(state: LoopState, messages: ChatMessage[]): Promise<void> {
+  async #turns(
+    state: LoopState,
+    messages: ChatMessage[],
+    check: AgentTask["check"],
+  ): Promise<void> {
     while (state.iterations < this.#options.maxIterations) {
       if (this.#options.stopped?.()) throw new RunStoppedError();
       if (this.#budgetSpent()) {
@@ -241,7 +259,20 @@ export class ChatAgentLoop implements AgentLoop {
         // Spike rule 6: an empty answer is a failed Step, never a result.
         state.stopReason = answer === "" ? "emptyAnswer" : "answered";
         state.answer = answer === "" ? null : answer;
-        return;
+        // T24j: an answer whose work fails its own check goes back to the
+        // agent, while a turn is left to fix it in.
+        const turnsLeft = state.iterations < this.#options.maxIterations;
+        if (!check || !state.answer || !turnsLeft || state.checks >= MAX_CHECKS)
+          return;
+        const problems = await check(state.answer);
+        if (problems === null) return;
+        state.checks++;
+        state.stopReason = "maxIterations";
+        state.answer = null;
+        messages.push({ role: "assistant", content: answer });
+        messages.push({ role: "user", content: problems });
+        this.#record({ type: "message", role: "user", content: problems });
+        continue;
       }
       // Results the model will never see are wasted work, and later tools write files.
       if (this.#budgetSpent()) {
@@ -389,6 +420,8 @@ type LoopState = Omit<AgentLoopResult, "workingMemory"> & {
   lastCalls: Array<{ name: string; problem: ToolProblem | null }>;
   /** Prompt size of the latest call: roughly what one more call will cost. */
   lastPromptTokens: number;
+  /** How often the task's check sent an answer back (T24j). */
+  checks: number;
 };
 
 const STOP_REASON_TEXT: Record<StopReason, string> = {

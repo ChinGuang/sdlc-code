@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   RunStoppedError,
   ChatAgentLoop,
+  MAX_CHECKS,
   type AgentLoop,
   type AgentLoopOptions,
   type TokenBudget,
@@ -209,6 +210,89 @@ describe("ChatAgentLoop: tool call → result → final answer", () => {
       content: "export const a = 1;",
       problem: null,
     });
+  });
+});
+
+// Run #e29ca700: answers whose code did not compile cost a Test Run each.
+describe("ChatAgentLoop: the task checks the answer (T24j)", () => {
+  it("sends a failing check back, and ends when the next answer passes", async () => {
+    const { loop, requests, events } = makeLoop([
+      { content: "Done." },
+      { content: "Fixed the import." },
+      memoryReply,
+    ]);
+    const checked: string[] = [];
+
+    const result = await loop.run({
+      ...task,
+      check: async (answer) => {
+        checked.push(answer);
+        return checked.length === 1
+          ? "1. src/App.tsx:3: Cannot find name 'useEffect'."
+          : null;
+      },
+    });
+
+    expect(result).toMatchObject({
+      stopReason: "answered",
+      answer: "Fixed the import.",
+      iterations: 2,
+    });
+    expect(checked).toEqual(["Done.", "Fixed the import."]);
+    expect(requests[1]!.messages.slice(-2)).toEqual([
+      { role: "assistant", content: "Done." },
+      {
+        role: "user",
+        content: "1. src/App.tsx:3: Cannot find name 'useEffect'.",
+      },
+    ]);
+    expect(events).toContainEqual({
+      type: "message",
+      role: "user",
+      content: "1. src/App.tsx:3: Cannot find name 'useEffect'.",
+    });
+  });
+
+  it(`sends an answer back at most ${MAX_CHECKS} times, then lets it stand`, async () => {
+    const { loop } = makeLoop([
+      { content: "Done." },
+      { content: "Done again." },
+      { content: "Done for good." },
+      memoryReply,
+    ]);
+    let checks = 0;
+
+    const result = await loop.run({
+      ...task,
+      check: async () => {
+        checks++;
+        return "Still failing.";
+      },
+    });
+
+    expect(checks).toBe(MAX_CHECKS);
+    expect(result).toMatchObject({
+      stopReason: "answered",
+      answer: "Done for good.",
+    });
+  });
+
+  it("does not check an answer given on the last turn: nothing is left to fix it in", async () => {
+    const { loop } = makeLoop([{ content: "Done." }, memoryReply], {
+      maxIterations: 1,
+    });
+    let checks = 0;
+
+    const result = await loop.run({
+      ...task,
+      check: async () => {
+        checks++;
+        return "Failing.";
+      },
+    });
+
+    expect(checks).toBe(0);
+    expect(result.stopReason).toBe("answered");
   });
 });
 

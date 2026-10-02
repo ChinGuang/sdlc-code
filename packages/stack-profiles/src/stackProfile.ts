@@ -23,6 +23,16 @@ export type StackProfile = {
   lintCommand: string;
   /** Run once in the application's directory to build its Base Snapshot. */
   snapshotCommand: string;
+  /**
+   * A Coding Agent's own check before its Step ends (T24j): install,
+   * typecheck and that side's tests, with no API booted.
+   */
+  checkCommand: Record<CodingSide, string>;
+  /**
+   * Mistakes found by reading the files, before any sandbox runs (T24j):
+   * each a pattern no file of that kind may hold, and what to do instead.
+   */
+  cheapChecks: readonly CheapCheck[];
   reviewStandard: readonly Rule[];
   /**
    * What each Coding Agent may write: a folder ends with "/", anything else
@@ -35,6 +45,15 @@ export type StackProfile = {
    * beside the template, and checked against it by the tests.
    */
   templateFacts: TemplateFacts;
+};
+
+export type CheapCheck = {
+  /** The files it reads, by path. */
+  files: RegExp;
+  /** What none of them may hold, matched line by line. */
+  forbidden: RegExp;
+  /** What to change, said to the Coding Agent. */
+  says: string;
 };
 
 export type TemplateFacts = {
@@ -58,6 +77,23 @@ export const REACT_NODE: StackProfile = {
   testCommand: "node scripts/sdlcTest.mjs",
   lintCommand: "node scripts/sdlcLint.mjs",
   snapshotCommand: "node scripts/sdlcTest.mjs --install-only",
+  checkCommand: {
+    backend: "node scripts/sdlcTest.mjs --check backend",
+    frontend: "node scripts/sdlcTest.mjs --check frontend",
+  },
+  cheapChecks: [
+    {
+      files: /\.test\.tsx?$/,
+      forbidden:
+        /\bjest\.(mock|fn|spyOn|Mock|Mocked|clearAllMocks|resetAllMocks)\b/,
+      says: 'The tests run on Vitest, not Jest: use vi.mock, vi.fn and vi.spyOn (type Mock), imported from "vitest".',
+    },
+    {
+      files: /^prisma\/schema\.prisma$/,
+      forbidden: /@db\./,
+      says: "SQLite has no Prisma native types: remove the @db.* attribute and keep the plain type (String, Int, DateTime).",
+    },
+  ],
   reviewStandard: BASELINE_RULES,
   writablePaths: {
     backend: ["server/", "prisma/", "package.json", ".env.example"],

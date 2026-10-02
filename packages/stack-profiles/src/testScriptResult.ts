@@ -8,7 +8,15 @@ import { z } from "zod";
 /** Prefix of the single machine-readable line the script prints last. */
 export const RESULT_MARKER = "SDLC_RESULT ";
 
-export const TEST_STEPS = ["install", "unit", "boot", "smoke", "stop"] as const;
+export const TEST_STEPS = [
+  "install",
+  // Only in a Coding Agent's own check (T24j); a Test Run has none.
+  "typecheck",
+  "unit",
+  "boot",
+  "smoke",
+  "stop",
+] as const;
 export type TestStepName = (typeof TEST_STEPS)[number];
 
 /** A test the step reported as failing, for an Issue Report (T16). */

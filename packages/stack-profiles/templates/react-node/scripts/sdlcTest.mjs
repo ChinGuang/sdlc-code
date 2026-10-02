@@ -6,6 +6,7 @@
  *
  * Steps: install → unit tests → boot the API → smoke tests → stop.
  * `--install-only` stops after install: it builds a Base Snapshot.
+ * `--check <side>` installs, typechecks and runs that side's tests (T24j).
  * Every step is bounded by a timeout, a failing step stops the run, and the
  * script always prints its result. Exit code 0 means every step passed.
  */
@@ -37,6 +38,18 @@ const VITEST_REPORT = ".sdlc/vitest.json";
 /** What node_modules was installed from; install again when it changes. */
 const INSTALL_STAMP = "node_modules/.sdlc-installed";
 const INSTALL_ONLY = process.argv.includes("--install-only");
+/**
+ * `--check backend|frontend`: a Coding Agent's own check before its Step ends
+ * (T24j). Install, typecheck, and that side's tests only: no API is booted.
+ */
+const CHECK = process.argv[process.argv.indexOf("--check") + 1];
+const CHECKING = process.argv.includes("--check");
+if (CHECKING && CHECK !== "backend" && CHECK !== "frontend") {
+  process.stderr.write("--check needs backend or frontend\n");
+  process.exit(2);
+}
+/** Each side's tests, by the Vitest project they run in (vite.config.ts). */
+const CHECK_PROJECT = { backend: "api", frontend: "screens" };
 
 // Run from the application's root whatever the caller's directory is.
 process.chdir(join(dirname(fileURLToPath(import.meta.url)), ".."));
@@ -201,6 +214,14 @@ try {
     return installed;
   });
 
+  // The Prisma client's types come from the schema, so the typecheck needs it.
+  if (passed && CHECKING)
+    passed = await step("typecheck", async () => {
+      const generated = await asStep("npx", ["prisma", "generate"]);
+      if (!generated.ok) return generated;
+      return asStep("npx", ["tsc", "--noEmit", "-p", "tsconfig.json"]);
+    });
+
   if (passed && !INSTALL_ONLY)
     passed = await step("unit", async () => {
       // npm install leaves a stub client, so this always runs. It rewrites the
@@ -219,13 +240,20 @@ try {
       mkdirSync(dirname(VITEST_REPORT), { recursive: true });
       const tested = await asStep(
         "npx",
-        ["vitest", "run", "--reporter=default", "--reporter=json", `--outputFile=${VITEST_REPORT}`],
+        [
+          "vitest",
+          "run",
+          ...(CHECKING ? [`--project=${CHECK_PROJECT[CHECK]}`] : []),
+          "--reporter=default",
+          "--reporter=json",
+          `--outputFile=${VITEST_REPORT}`,
+        ],
         { timeoutMs: STEP_TIMEOUT_MS.unit },
       );
       return { ...tested, failures: vitestFailures() };
     });
 
-  if (passed && !INSTALL_ONLY)
+  if (passed && !INSTALL_ONLY && !CHECKING)
     passed = await step("boot", async () => {
       if (!(await portIsFree()))
         return {
@@ -250,7 +278,7 @@ try {
       };
     });
 
-  if (passed && !INSTALL_ONLY)
+  if (passed && !INSTALL_ONLY && !CHECKING)
     passed = await step("smoke", async () => {
       // One line per check: "ok <request>" or "FAIL <request>: expected …, got …",
       // so a report can name the failing check alone.
@@ -277,7 +305,7 @@ try {
       return { ok: healthy && notFound, output: lines.join("\n") };
     });
 } finally {
-  if (!INSTALL_ONLY)
+  if (!INSTALL_ONLY && !CHECKING)
     await step("stop", async () => {
       await killTree(server);
       // The port must be free again: a survivor would let the next run pass

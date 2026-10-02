@@ -341,8 +341,14 @@ describe("planUpload", () => {
 
 describe("testCommand", () => {
   it("keeps the end of the log so the result line survives truncation", () => {
-    expect(testCommand(REACT_NODE, [])).toBe(
+    expect(testCommand([], REACT_NODE.testCommand)).toBe(
       "cd '/app' && mkdir -p .sdlc && { node scripts/sdlcTest.mjs > .sdlc/test.log 2>&1; code=$?; tail -c 60000 .sdlc/test.log; exit $code; }",
+    );
+  });
+
+  it("runs a Coding Agent's own check the same way (T24j)", () => {
+    expect(testCommand([], REACT_NODE.checkCommand.frontend)).toContain(
+      "{ node scripts/sdlcTest.mjs --check frontend > .sdlc/test.log 2>&1;",
     );
   });
 });
