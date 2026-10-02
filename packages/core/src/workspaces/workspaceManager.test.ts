@@ -496,6 +496,45 @@ describe("GitWorkspaceManager.runDiff", () => {
   });
 });
 
+describe("GitWorkspaceManager.resetUnsaved (T24h)", () => {
+  it("keeps every saved Step and drops what no Workspace saved", async () => {
+    const { manager } = await setup();
+    const { backend, frontend } = await builtSlice(manager);
+    write(backend, "server/todos.ts", "export const todos = [ // unsaved\n");
+    write(frontend, "src/Draft.tsx", "export const Draft = () => null;\n");
+
+    await manager.resetUnsaved();
+
+    expect(read(backend, "server/todos.ts")).toBe("export const todos = [];\n");
+    expect(read(frontend, "src/TodoList.tsx")).toBe(
+      "export const TodoList = () => null;\n",
+    );
+    expect(existsSync(join(frontend.dir, "src/Draft.tsx"))).toBe(false);
+  });
+
+  it("leaves the run branch where it is", async () => {
+    const { manager, scaffold } = await setup();
+    const { backend } = await builtSlice(manager);
+    write(backend, "server/todos.ts", "unsaved");
+
+    await manager.resetUnsaved();
+
+    expect(await manager.lastSliceCommit()).toBe(scaffold);
+  });
+
+  // A folder lost while the Run was stopped must not lose its saved Steps.
+  it("checks a lost Workspace folder out again with its saved Steps", async () => {
+    const { manager } = await setup();
+    const { backend } = await builtSlice(manager);
+    rmSync(backend.dir, { recursive: true, force: true });
+
+    await manager.resetUnsaved();
+    const again = await manager.openWorkspace("slice-1", "backend");
+
+    expect(read(again, "server/todos.ts")).toBe("export const todos = [];\n");
+  });
+});
+
 describe("GitWorkspaceManager discard and reset", () => {
   it("discards a Slice's Workspaces, so its next attempt starts clean", async () => {
     const { manager } = await setup();

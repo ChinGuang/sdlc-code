@@ -254,17 +254,13 @@ export class GitWorkspaceManager implements WorkspaceManager {
     rmSync(workspace.dir, { recursive: true, force: true });
     // Its branch does: the saved Steps of a Workspace whose folder was lost
     // are checked out again, not reset to the last Slice Commit (T24h).
-    if (await this.#resolve(`refs/heads/${workspace.branch}`)) {
-      await this.#prune();
-      mkdirSync(this.#workspacesDir, { recursive: true });
-      await this.#run(this.#repoDir, [
-        "worktree",
-        "add",
-        "--quiet",
-        workspace.dir,
-        workspace.branch,
-      ]);
-    } else await this.#addWorktree(workspace.dir, workspace.branch);
+    const saved = await this.#resolve(`refs/heads/${workspace.branch}`);
+    if (saved) await this.#prune();
+    await this.#addWorktree(
+      workspace.dir,
+      workspace.branch,
+      saved ?? undefined,
+    );
     return workspace;
   };
 
@@ -294,9 +290,9 @@ export class GitWorkspaceManager implements WorkspaceManager {
   };
 
   resetWorkspace = async (workspace: Workspace): Promise<void> => {
-    const { dir } = this.#workspace(workspace.sliceId, workspace.role);
-    await this.#run(dir, ["reset", "--hard", "--quiet", "HEAD"]);
-    await this.#run(dir, ["clean", "-d", "--force", "-x", "--quiet"]);
+    await this.#resetToSave(
+      this.#workspace(workspace.sliceId, workspace.role).dir,
+    );
   };
 
   mergeSlice = async (
@@ -484,10 +480,8 @@ export class GitWorkspaceManager implements WorkspaceManager {
       "-z",
     ]);
     for (const { dir, branch } of parseWorktrees(list.stdout))
-      if (branch?.startsWith(WORKSPACE_REFS) && existsSync(dir)) {
-        await this.#run(dir, ["reset", "--hard", "--quiet", "HEAD"]);
-        await this.#run(dir, ["clean", "-d", "--force", "-x", "--quiet"]);
-      }
+      if (branch?.startsWith(WORKSPACE_REFS) && existsSync(dir))
+        await this.#resetToSave(dir);
   };
 
   resetToSliceCommit = async (commit: string): Promise<void> => {
@@ -526,6 +520,12 @@ export class GitWorkspaceManager implements WorkspaceManager {
       dir: join(this.#workspacesDir, `${sliceId}-${name}`),
       branch: `${WORKSPACE_REFS.slice("refs/heads/".length)}${sliceId}/${name}`,
     };
+  }
+
+  /** Throws away what a worktree holds past its last save. */
+  async #resetToSave(dir: string) {
+    await this.#run(dir, ["reset", "--hard", "--quiet", "HEAD"]);
+    await this.#run(dir, ["clean", "-d", "--force", "-x", "--quiet"]);
   }
 
   async #addWorktree(dir: string, branch: string, from?: string) {
@@ -570,7 +570,7 @@ export class GitWorkspaceManager implements WorkspaceManager {
       worktree.branch?.startsWith(prefix),
     );
     for (const worktree of worktrees) await this.#removeWorktree(worktree.dir);
-    await this.#run(this.#repoDir, ["worktree", "prune"]);
+    await this.#prune();
     const refs = await this.#run(this.#repoDir, [
       "for-each-ref",
       "--format=%(refname)",

@@ -202,9 +202,17 @@ export class OrchestratedSliceRunner implements SliceRunner {
     };
     this.#move(input, "building");
 
-    // Every side builds first; later, only the sides that own a failure.
+    // Every side builds first; later, only the sides that own a failure. A
+    // Slice picked up again with no hint (a restart mid-retry) is told what
+    // it failed on: its saved code is kept now (T24h), and an agent told
+    // nothing would hand it back unchanged and fail the same way.
     let pending = new Map<CodingSide, CodingIssue[]>(
-      sides.map((side) => [side, hintIssues(input.hint)]),
+      sides.map((side) => [
+        side,
+        input.hint
+          ? hintIssues(input.hint)
+          : codingIssues(latestOf(history.earlier[side])),
+      ]),
     );
     let lastReports: IssueReport[] = [];
     for (let attempt = 1; ; attempt++) {
@@ -493,12 +501,15 @@ export class OrchestratedSliceRunner implements SliceRunner {
       await this.#options.workspaces.resetWorkspace(workspace);
       return { side, outcome: "stopped", reason: result.loop.stopReason };
     }
-    store.completeStep(step.id, result.loop.workingMemory);
+    // Saved before the Step is marked complete: a process that dies between
+    // the two leaves a discarded Step whose code is kept, never a completed
+    // Step whose code a restart throws away (T24h).
     if (result.problem === "notAnswered") {
       await this.#options.workspaces.saveWorkspace(
         workspace,
         `${side}: ${input.plan.title} (attempt ${attempt}, unfinished: ${STOPPED[result.loop.stopReason] ?? result.loop.stopReason})`,
       );
+      store.completeStep(step.id, result.loop.workingMemory);
       // The Token Budget is the one stop no attempt can recover from.
       return result.loop.stopReason === "tokenBudget"
         ? { side, outcome: "stopped", reason: "tokenBudget" }
@@ -508,6 +519,7 @@ export class OrchestratedSliceRunner implements SliceRunner {
       workspace,
       `${side}: ${input.plan.title} (attempt ${attempt})${result.summary ? `\n\n${result.summary}` : ""}`,
     );
+    store.completeStep(step.id, result.loop.workingMemory);
     return { side, outcome: saved ? "changed" : "unchanged" };
   }
 
@@ -561,6 +573,19 @@ export class OrchestratedSliceRunner implements SliceRunner {
  * part of it: a Coding Agent reading "a person says" about a machine's Finding
  * would be told something untrue about its own Task.
  */
+/**
+ * Each failure once, its latest report first: what a side failed on
+ * before, kept in order of attempt (SliceHistory.earlier).
+ */
+function latestOf(reports: readonly IssueReport[]): IssueReport[] {
+  const seen = new Set<string>();
+  return [...reports].reverse().filter((report) => {
+    if (seen.has(report.signature)) return false;
+    seen.add(report.signature);
+    return true;
+  });
+}
+
 function hintIssues(hint: SliceHint | undefined): CodingIssue[] {
   if (!hint) return [];
   return hint.issues.map((issue) => ({

@@ -113,25 +113,18 @@ describe("resumeRun", () => {
     const done = join(workspace.dir, "server/events.ts");
     writeFileSync(done, "export const events = [];\n");
     await context.workspaces.saveWorkspace(workspace, "backend: attempt 1");
-    const half = join(workspace.dir, "server/bookings.ts");
-    writeFileSync(half, "export const bookings = [ // half written\n");
-    const saved = await context.workspaces.openWorkspace(
-      workspace.sliceId,
-      "backend",
-    );
+    const unsaved = join(workspace.dir, "server/bookings.ts");
+    writeFileSync(unsaved, "export const bookings = [ // half written\n");
 
     await resumeRun(context.run.id, context.options);
 
     expect(readFileSync(done, "utf8")).toBe("export const events = [];\n");
-    expect(existsSync(half)).toBe(false);
-    expect(
-      await context.workspaces.openWorkspace(workspace.sliceId, "backend"),
-    ).toEqual(saved);
+    expect(existsSync(unsaved)).toBe(false);
   });
 
   it("keeps an escalated Run's code whole: nothing was running", async () => {
     const context = await setup();
-    const { workspace, step } = await midStep(context);
+    const { workspace, step, half } = await midStep(context);
     await context.workspaces.saveWorkspace(workspace, "backend: attempt 3");
     context.tasks.completeStep(step.id, "Stopped: Token Budget exhausted.");
 
@@ -139,7 +132,7 @@ describe("resumeRun", () => {
 
     expect(resumed.discardedSteps).toBe(0);
     // Saved as the agent left it, half-written or not: the next attempt fixes it.
-    expect(readFileSync(join(workspace.dir, "server/todos.ts"), "utf8")).toBe(
+    expect(readFileSync(half, "utf8")).toBe(
       "export const todos = [ // half written\n",
     );
   });
