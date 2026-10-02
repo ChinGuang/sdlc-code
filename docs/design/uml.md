@@ -548,9 +548,9 @@ sequenceDiagram
   DB-->>SRV: latest Checkpoint per Run
   SRV->>O: resume Run from Checkpoint
   O->>DB: mark in-flight Step discarded
-  O->>W: reset worktrees to last Slice Commit
-  alt Run was waiting at a Gate
-    O-->>SRV: Gate still open, wait for human
+  O->>W: reset worktrees to their last save (completed Steps kept)
+  alt Run was waiting at a Gate or an Escalation
+    O-->>SRV: Gate or Escalation still open, wait for human
   else Run was building or reviewing
     O->>A: redo Step with fresh context
     Note over O,A: context = Approved Documents + Task + Issue Reports<br/>+ Working Memory (never the Transcript)

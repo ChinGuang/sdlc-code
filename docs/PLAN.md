@@ -112,7 +112,7 @@ M4 and M5 overlap: the server API (T21) is started as soon as M3's domain events
 - Tests: owner resolution table-driven tests; budget and loop scenarios; escalation choices move the Run to the right state.
 
 **T18 Checkpoints + resume** · Oct 8
-- Checkpoint at every Step boundary; on startup resume unfinished Runs, discard in-flight Step, reset worktrees, rebuild context from Checkpoint + Working Memory (never Transcript).
+- Checkpoint at every Step boundary; on startup resume unfinished Runs, discard in-flight Step, reset worktrees to their last save (completed Steps kept, T24h), rebuild context from Checkpoint + Working Memory (never Transcript).
 - Tests: kill mid-Step simulation → resume → same next action.
 
 ### M4 — Review & delivery

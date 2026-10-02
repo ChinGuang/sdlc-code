@@ -5,9 +5,12 @@
  * Working Memory in the database, its decisions in a Checkpoint.
  *
  * What is not trustworthy is whatever was in flight. So resuming throws that
- * away rather than guessing at it: the running Steps are discarded, the
- * unfinished worktrees are deleted, and the Run's next action is the one it
- * would have taken before the interrupted Step began.
+ * away rather than guessing at it: the running Steps are discarded, what their
+ * Workspaces hold unsaved is reset, and the Run's next action is the one it
+ * would have taken before the interrupted Step began. A Step that finished
+ * saved its Workspace, so its code is kept: an escalated Run goes on from
+ * the code its agents wrote, not from nothing (T24h, found in Run #e29ca700,
+ * where a restart threw away about 7M tokens of work).
  */
 import type { Run } from "../domain/entities.js";
 import { memoryFromCheckpoint } from "./runCheckpoint.js";
@@ -19,7 +22,7 @@ import type { WorkspaceManager } from "../workspaces/workspaceManager.js";
 export type ResumeRunOptions = {
   runs: RunStore;
   tasks: TaskStore;
-  /** The Run's Workspaces; its unfinished worktrees are discarded. */
+  /** The Run's Workspaces; what they hold unsaved is thrown away. */
   workspaces: WorkspaceManager;
 };
 
@@ -50,8 +53,9 @@ export async function resumeRun(
   // a Step that was interrupted as if it had finished.
   const discarded = tasks.discardRunningSteps(runId);
   // The run branch only moves forward by a Slice Commit, so it is already at
-  // the last Slice that passed; only the worktrees can be half-written.
-  await workspaces.discardUnfinished();
+  // the last Slice that passed; only a worktree can be half-written, and only
+  // past its last save.
+  await workspaces.resetUnsaved();
   return {
     run,
     discardedSteps: discarded.length,

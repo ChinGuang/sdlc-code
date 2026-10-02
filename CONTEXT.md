@@ -40,7 +40,7 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Approved Documents** — The System Design, Slice Plan, API Contract and UI Spec once passed at the Design Gate. Any later change to them re-opens the Design Gate.
 
-**Step** — One agent working on one Task until it hands back a result. A Step either completes or is discarded; an interrupted Step is redone from the last Slice Commit, never resumed mid-way.
+**Step** — One agent working on one Task until it hands back a result. A Step either completes or is discarded; a completed Step's code is saved in its Workspace, and an interrupted Step is redone from that last save, never resumed mid-way.
 
 **Checkpoint** — Everything saved at a Step boundary that lets a Run continue after the system stops: Approved Documents, Slice plan, Task status, last Slice Commit, Issue Reports, the blocking Findings a Slice was sent back to fix, Gate decisions, retry counts and Working Memory. Non-blocking Findings are not kept: they are written into the pull request instead.
 

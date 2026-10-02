@@ -143,8 +143,14 @@ export interface WorkspaceManager {
   ) => Promise<string>;
   /** Discards a Slice's worktrees and branches, so its next attempt starts clean. */
   discardSlice: (sliceId: string) => Promise<void>;
-  /** Discards every unfinished worktree, e.g. when a Run resumes. */
+  /** Discards every unfinished worktree, e.g. when a Run stops early. */
   discardUnfinished: () => Promise<void>;
+  /**
+   * Throws away what no Workspace saved: an interrupted Step's writes, a
+   * merge cut short. Every saved Step is kept, so a resumed Run goes on from
+   * the code its agents finished (T24h).
+   */
+  resetUnsaved: () => Promise<void>;
   /**
    * Moves the run branch back to an earlier Slice Commit, e.g. the one the
    * last Checkpoint recorded, and discards every worktree.
@@ -246,7 +252,19 @@ export class GitWorkspaceManager implements WorkspaceManager {
     if (await this.#isWorktree(workspace.dir)) return workspace;
     // A folder git does not know (left by a crash) holds nothing to keep.
     rmSync(workspace.dir, { recursive: true, force: true });
-    await this.#addWorktree(workspace.dir, workspace.branch);
+    // Its branch does: the saved Steps of a Workspace whose folder was lost
+    // are checked out again, not reset to the last Slice Commit (T24h).
+    if (await this.#resolve(`refs/heads/${workspace.branch}`)) {
+      await this.#prune();
+      mkdirSync(this.#workspacesDir, { recursive: true });
+      await this.#run(this.#repoDir, [
+        "worktree",
+        "add",
+        "--quiet",
+        workspace.dir,
+        workspace.branch,
+      ]);
+    } else await this.#addWorktree(workspace.dir, workspace.branch);
     return workspace;
   };
 
@@ -457,6 +475,21 @@ export class GitWorkspaceManager implements WorkspaceManager {
   discardUnfinished = (): Promise<void> =>
     this.#discard(WORKSPACE_REFS, (entry) => WORKSPACE_FOLDER.test(entry));
 
+  resetUnsaved = async (): Promise<void> => {
+    await this.#prune();
+    const list = await this.#run(this.#repoDir, [
+      "worktree",
+      "list",
+      "--porcelain",
+      "-z",
+    ]);
+    for (const { dir, branch } of parseWorktrees(list.stdout))
+      if (branch?.startsWith(WORKSPACE_REFS) && existsSync(dir)) {
+        await this.#run(dir, ["reset", "--hard", "--quiet", "HEAD"]);
+        await this.#run(dir, ["clean", "-d", "--force", "-x", "--quiet"]);
+      }
+  };
+
   resetToSliceCommit = async (commit: string): Promise<void> => {
     const target = await this.#commitOf(commit);
     const head = await this.lastSliceCommit();
@@ -506,6 +539,14 @@ export class GitWorkspaceManager implements WorkspaceManager {
       dir,
       from ?? (await this.lastSliceCommit()),
     ]);
+  }
+
+  /**
+   * Forgets worktrees whose folder is gone, or checking their branch out
+   * again fails with "already checked out".
+   */
+  async #prune() {
+    await this.#run(this.#repoDir, ["worktree", "prune"]);
   }
 
   async #removeWorktree(dir: string) {
