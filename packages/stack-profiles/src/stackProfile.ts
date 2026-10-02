@@ -142,6 +142,8 @@ export const REACT_NODE: StackProfile = {
         "src/api.ts is the only way the screens talk to the API: add functions beside getJson and getHealth, and keep both.",
         'getJson(path) adds the /api prefix and only reads: call it with the API Contract\'s path as it is, getJson("/todos"), never "/api/todos". For a write, add a function to src/api.ts that calls fetch(`/api${path}`, …) the same way.',
         "src/App.tsx holds every screen as a <Route>; the Router is in src/main.tsx, so a test renders App inside a MemoryRouter.",
+        // Found in T25: an Update Todo screen test looped on this.
+        'A screen that reads its route\'s params (useParams) is tested through its route, or the params are empty: <MemoryRouter initialEntries={["/edit/1"]}><Routes><Route path="/edit/:id" element={<EditScreen />} /></Routes></MemoryRouter>.',
       ],
     },
   },
