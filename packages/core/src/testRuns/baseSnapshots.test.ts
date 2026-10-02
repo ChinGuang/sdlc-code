@@ -149,9 +149,7 @@ describe("SandboxBaseSnapshots", () => {
 
     await snapshots.snapshotImage(REACT_NODE);
 
-    expect(sandbox.imports).toEqual([
-      "docker://docker.io/library/node:22-slim",
-    ]);
+    expect(sandbox.imports).toEqual(["docker://docker.io/library/node:22"]);
   });
 
   it("does not import Node 22 when the tag exists", async () => {

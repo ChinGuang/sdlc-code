@@ -22,9 +22,14 @@ import {
   type UploadCache,
 } from "./sandboxFiles.js";
 
-/** Node 22 is not in the public catalogue; it is imported once under this tag. */
-export const NODE_IMAGE_TAG = "sdlc-code/node:22-slim";
-const NODE_IMAGE_SOURCE = "docker://docker.io/library/node:22-slim";
+/**
+ * Node 22 is not in the public catalogue; it is imported once under this tag.
+ * The full image, not the slim one: Prisma's engine needs OpenSSL, which the
+ * slim image lacks. The tag is part of the Base Snapshot's key, so changing
+ * it builds a new snapshot.
+ */
+export const NODE_IMAGE_TAG = "sdlc-code/node:22";
+const NODE_IMAGE_SOURCE = "docker://docker.io/library/node:22";
 
 /** Installing the template's dependencies is the slow part (spike T01). */
 const BUILD_TIMEOUT_SECONDS = 900;

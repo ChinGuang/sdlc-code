@@ -9,8 +9,8 @@
  * which is what a Finding needs (T19). Exit code 0 means nothing was found that
  * either tool calls an error.
  *
- * It never installs anything: a Test Run has already installed, and the Base
- * Snapshot has the dependencies.
+ * It never installs anything: the Base Snapshot has the dependencies. It
+ * only generates the Prisma client from the application's own schema.
  */
 import { spawn } from "node:child_process";
 import { dirname, join, relative } from "node:path";
@@ -129,6 +129,19 @@ async function eslintCheck() {
 /** The TypeScript compiler: every diagnostic is an error. */
 async function typeCheck() {
   const started = Date.now();
+  // The lint runs on a fresh Base Snapshot, whose Prisma client is the
+  // template's: without generating it from this schema, every model a Slice
+  // added reads as missing (found in T25: 14 false blocking Findings).
+  const generated = await run("npx", ["prisma", "generate"]);
+  if (generated.code !== 0) {
+    checks.push({
+      name: "prisma generate",
+      ok: false,
+      durationMs: Date.now() - started,
+      output: tail(`${generated.out}${generated.err}`),
+    });
+    return;
+  }
   const { code, out, err } = await run("npx", [
     "tsc",
     "--noEmit",

@@ -29,7 +29,7 @@ All numbers below come from the probe's saved results (gitignored `results/`), m
 
 | Step | What ran | Result | Execution / wall | `cost` |
 |---|---|---|---|---|
-| Node 22 image | import `docker.io/library/node:22-slim` as `sdlc-code/node:22-slim` | ✅ first run imported it (14.2 s wall incl. lookup); later runs found the tag (`imported: false`, 0.2 s) | — / 14.2 s once | — |
+| Node 22 image | import `docker.io/library/node:22-slim` as `sdlc-code/node:22-slim` (since T25 the full `node:22`, which has OpenSSL, as `sdlc-code/node:22`) | ✅ first run imported it (14.2 s wall incl. lookup); later runs found the tag (`imported: false`, 0.2 s) | — / 14.2 s once | — |
 | Hello | `node -v && uname -a && nproc && free -m` | `v22.23.2`, Linux x86_64, **4 CPUs**; `free` missing → **exit 127** | 0.44 s / 1.0 s | 0.00019 |
 | Network | `npm view express version` | ✅ `5.2.1` — outbound internet works | 1.37 s / 1.8 s | 0.0045 |
 | Upload | 228-byte `server.cjs` | ✅ uuid + sha256 | — / 0.2 s | — |

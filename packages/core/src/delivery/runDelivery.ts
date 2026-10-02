@@ -11,12 +11,20 @@
  * Nothing is pushed when there is no Slice Commit, or when the person said not
  * to. A Run's work then stays in its local repository, where it already is.
  */
-import type { GitHubClient, GitPusher, PullRequest } from "@sdlc-code/clients";
+import {
+  GitHubApiError,
+  type GitHubClient,
+  type GitPusher,
+  type PullRequest,
+} from "@sdlc-code/clients";
 import type { Run, Slice } from "../domain/entities.js";
 import type { RunStore } from "../persistence/runStore.js";
 import type { SliceStore } from "../persistence/sliceStore.js";
 import type { TaskStore } from "../persistence/taskStore.js";
-import type { WorkspaceManager } from "../workspaces/workspaceManager.js";
+import {
+  START_REF,
+  type WorkspaceManager,
+} from "../workspaces/workspaceManager.js";
 import {
   pullRequestBody,
   pullRequestTitle,
@@ -81,6 +89,7 @@ export class GitHubRunDelivery implements RunDelivery {
       return { status: "keptLocal", reason: "noSliceCommit" };
 
     const content = this.#pullRequestContent(run, reason);
+    await this.#beginBaseIfMissing(run);
     await pusher.push({
       repoDir,
       repo: run.targetRepo,
@@ -100,6 +109,39 @@ export class GitHubRunDelivery implements RunDelivery {
     });
     return { status: "opened", pullRequest };
   };
+
+  /**
+   * An empty Target Repo has nothing to open a pull request into, and GitHub
+   * refuses one between branches with no history in common. So its base begins
+   * at the Run's start commit (the template), and the pull request carries the
+   * Slices. A repository that has commits but not this base branch is not
+   * empty: that is a mistake to report, never a branch to invent.
+   */
+  async #beginBaseIfMissing(run: Run): Promise<void> {
+    const { github } = this.#options;
+    try {
+      await github.getBranchSha(run.targetRepo, run.targetRepo.baseBranch);
+      return;
+    } catch (error) {
+      if (isEmptyRepository(error)) return this.#beginBase(run);
+      if (error instanceof GitHubApiError && error.status === 404)
+        throw new Error(
+          `${run.targetRepo.owner}/${run.targetRepo.name} has no branch "${run.targetRepo.baseBranch}" to open a pull request into, or the token cannot see it.`,
+          { cause: error },
+        );
+      throw error;
+    }
+  }
+
+  async #beginBase(run: Run): Promise<void> {
+    const { pusher, repoDir } = this.#options;
+    await pusher.push({
+      repoDir,
+      repo: run.targetRepo,
+      branch: run.targetRepo.baseBranch,
+      source: START_REF,
+    });
+  }
 
   /**
    * A Run's branch may already have a pull request: a Run that was resumed, or
@@ -202,4 +244,9 @@ function issueLines(reports: readonly unknown[]): string[] {
 
 function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/** GitHub answers a repository with no commits at all with 409. */
+function isEmptyRepository(error: unknown): boolean {
+  return error instanceof GitHubApiError && error.status === 409;
 }

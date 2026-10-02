@@ -106,6 +106,23 @@ describe("cheapFindings (T24j)", () => {
     ]);
   });
 
+  // T25: the Create Todo Slice looped on "expect is not defined".
+  it("names a test that imports jest-dom itself, not the setup that does it right", () => {
+    const files = withFile(
+      "src/screens/CreateTodoScreen.test.tsx",
+      'import { render } from "@testing-library/react";\nimport "@testing-library/jest-dom";\n',
+    );
+
+    expect(cheapFindings(files, REACT_NODE, "frontend")).toEqual([
+      {
+        summary: expect.stringMatching(
+          /^src\/screens\/CreateTodoScreen\.test\.tsx:2: Remove this import: src\/testSetup\.ts already loads/,
+        ),
+        evidence: 'import "@testing-library/jest-dom";',
+      },
+    ]);
+  });
+
   it("finds nothing in the template itself", () => {
     expect(cheapFindings(template, REACT_NODE, "backend")).toEqual([]);
     expect(cheapFindings(template, REACT_NODE, "frontend")).toEqual([]);

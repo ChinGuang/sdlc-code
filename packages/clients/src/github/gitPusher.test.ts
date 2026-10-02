@@ -93,6 +93,57 @@ describe("TokenGitPusher", () => {
     );
   });
 
+  // An empty Target Repo's base begins at the Run's start commit (T25).
+  it("pushes another local ref as the branch", async () => {
+    const { runGit, calls } = fakeGit();
+
+    await makePusher({ token: TOKEN, runGit }).push({
+      repoDir: "/w",
+      repo,
+      branch: "main",
+      source: "refs/sdlc-run/start",
+    });
+
+    expect(calls[0]![0].at(-1)).toBe("refs/sdlc-run/start:refs/heads/main");
+  });
+
+  it.each([
+    "HEAD",
+    "refs/x:refs/heads/y",
+    "-f",
+    "refs/a b",
+    "+refs/x",
+    "refs/a/../b",
+    "refs/x.lock",
+  ])("refuses the source %j, which is not a plain ref", async (source) => {
+    const { runGit, calls } = fakeGit();
+
+    await expect(
+      makePusher({ token: TOKEN, runGit }).push({
+        repoDir: "/w",
+        repo,
+        branch: "main",
+        source,
+      }),
+    ).rejects.toThrow(/invalid source ref/);
+    expect(calls).toEqual([]);
+  });
+
+  // The default source is the branch itself, checked as a branch is.
+  it("still pushes a branch whose name has characters a ref pattern would not", async () => {
+    const { runGit, calls } = fakeGit();
+
+    await makePusher({ token: TOKEN, runGit }).push({
+      repoDir: "/w",
+      repo,
+      branch: "feature/a@b+c",
+    });
+
+    expect(calls[0]![0].at(-1)).toBe(
+      "refs/heads/feature/a@b+c:refs/heads/feature/a@b+c",
+    );
+  });
+
   it.each(["-delete", "a..b", "a b", "a/", "x.lock", "", "a~1", "a:b"])(
     "rejects the unsafe branch name %j without running git",
     async (branch) => {

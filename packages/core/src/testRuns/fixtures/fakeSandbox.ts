@@ -19,7 +19,7 @@ export type FakeSandbox = SandboxClient & {
 };
 
 export function fakeSandbox({
-  images = [{ uuid: "node-img", tag: "sdlc-code/node:22-slim" }],
+  images = [{ uuid: "node-img", tag: "sdlc-code/node:22" }],
   onRun = () => ranOk(),
 }: {
   images?: Array<{ uuid: string; tag?: string }>;
