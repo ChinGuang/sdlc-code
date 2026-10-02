@@ -15,8 +15,10 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { REACT_NODE } from "@sdlc-code/stack-profiles";
 import {
   ChatAgentLoop,
+  designedOn,
   designDocuments,
   loadAgentConfig,
   LoopSystemDesignAgent,
@@ -83,8 +85,7 @@ const { design, loop: designLoop } = await new LoopSystemDesignAgent({
   createLoop: loopFor("systemDesign", 12),
 }).design({
   projectRequest,
-  stackProfile:
-    "React + Vite + Tailwind frontend; Node API with Prisma (SQLite in tests); Vitest.",
+  stackProfile: designedOn(REACT_NODE),
 });
 if (!design) {
   console.error(`No design passed validation: ${designLoop.workingMemory}`);

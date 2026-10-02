@@ -6,7 +6,7 @@
  * redoes only the agents whose documents were sent back or went Stale.
  */
 import type { ExportedImage } from "@sdlc-code/clients";
-import type { StackProfile } from "@sdlc-code/stack-profiles";
+import { factLines, type StackProfile } from "@sdlc-code/stack-profiles";
 import { designDocuments } from "../agents/systemDesign/designDocuments.js";
 import type { SystemDesignAgent } from "../agents/systemDesign/systemDesignAgent.js";
 import type { UiDesignAgent } from "../agents/uiDesign/uiDesignAgent.js";
@@ -98,7 +98,7 @@ export class AgentDesignPhase implements DesignPhase {
     if (needs(SYSTEM_DESIGN_KINDS)) {
       const { design, loop } = await this.#options.systemDesign.design({
         projectRequest: run.projectRequest,
-        stackProfile: this.#options.profile(run).summary,
+        stackProfile: designedOn(this.#options.profile(run)),
         revision: first
           ? undefined
           : {
@@ -256,4 +256,16 @@ function loadDesignForUi(documents: DocumentStore, runId: string) {
     slicePlan: JSON.parse(content("slicePlan")),
     apiContract: JSON.parse(content("apiContract")),
   };
+}
+
+/**
+ * The stack, and what its template already serves (T24d): an API Contract
+ * that contradicts the template's own tests fails every Slice after it
+ * (Run #27f388: the Contract left out /health's database field).
+ */
+export function designedOn(profile: StackProfile): string {
+  return `${profile.summary}
+
+What the template already serves; the API Contract agrees with it:
+${factLines(profile.templateFacts.serves)}`;
 }

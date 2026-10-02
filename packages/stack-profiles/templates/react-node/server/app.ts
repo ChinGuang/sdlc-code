@@ -4,6 +4,7 @@ import express, {
   type Request,
   type Response,
 } from "express";
+import { STATUS_CODES } from "node:http";
 import { prisma } from "./prisma.js";
 
 /**
@@ -59,6 +60,23 @@ function errorHandler(
     next(error);
     return;
   }
+  // The client's own mistake, e.g. a body that is not JSON (express.json()
+  // marks it 400): said as such, by its status's name and nothing more.
+  const status = clientErrorStatus(error);
+  if (status !== null) {
+    response.status(status).json({ error: STATUS_CODES[status] });
+    return;
+  }
   console.error(error);
   response.status(500).json({ error: "Internal Server Error" });
+}
+
+function clientErrorStatus(error: unknown): number | null {
+  const status =
+    typeof error === "object" && error !== null && "status" in error
+      ? error.status
+      : null;
+  return typeof status === "number" && status >= 400 && status < 500
+    ? status
+    : null;
 }

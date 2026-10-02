@@ -80,7 +80,7 @@ _Avoid_: "subagent" as a synonym for a specific agent role.
 
 ## Standards and output
 
-**Stack Profile** — A supported target stack: the starter template, how it is tested, and its baseline Review Standards. One exists at launch.
+**Stack Profile** — A supported target stack: the starter template, the facts of the template every design and Slice must agree with, how it is tested, and its baseline Review Standards. One exists at launch.
 
 **Review Standard** — A layered set of Rules: the Stack Profile baseline, extended or overridden by the user's own standards, which they write in an `AGENTS.md` in their Target Repo under a "Review Standard" heading. A Rule with a baseline ID replaces it; a new ID is added.
 

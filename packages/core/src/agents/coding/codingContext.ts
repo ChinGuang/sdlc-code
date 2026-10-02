@@ -5,7 +5,11 @@
  * with `vision`, and live Penpot tools with `penpotMcp`.
  */
 import type { ExportedImage } from "@sdlc-code/clients";
-import type { CodingSide, StackProfile } from "@sdlc-code/stack-profiles";
+import {
+  factLines,
+  type CodingSide,
+  type StackProfile,
+} from "@sdlc-code/stack-profiles";
 import { stringify } from "yaml";
 import type { AgentTask } from "../../agentLoop/agentLoop.js";
 import type { ModelCapabilities } from "../../config/agentConfig.js";
@@ -67,14 +71,13 @@ const SIDE_RULES: Record<CodingSide, string> = {
   backend: `Writing the API:
 - Answer exactly what the API Contract defines: path, status code and body shape, including the fields a smoke test reads.
 - Validate request bodies with zod and answer 400 when they do not fit, rather than letting the route throw.
-- Test a route through the app (supertest against createApp()), not by calling the handler.`,
+- Test a route through the app, not by calling the handler.`,
   frontend: `Writing screens and their tests (Vitest, Testing Library):
 - Anything that appears after a fetch needs "await screen.findBy…"; "getBy…" only sees what is on screen before the first await, which is the loading state.
 - Stub fetch per test and assert each state the UI Spec lists: loading, empty, error, and data.
 - One <h1> per screen: change the screen the template already has instead of adding a second heading, or queries by role match two elements and fail.
 - When you change what a screen renders, update the tests that assert the old text in the same edit.
-- Screens are routed: add each one as a <Route> in App.tsx and move between them with <Link> or useNavigate. Never assign window.location; jsdom cannot replace it, so a test of that screen cannot run.
-- Render a screen that uses routing inside <MemoryRouter initialEntries={["/its/path"]}>, as App.test.tsx does.`,
+- Move between screens with <Link> or useNavigate. Never assign window.location; jsdom cannot replace it, so a test of that screen cannot run.`,
 };
 
 const SIDE_WORK: Record<CodingSide, string> = {
@@ -188,6 +191,9 @@ How to work:
 - Your turns are limited: read what you need, make the changes, then reply. Finish the code you started before you run out, because a half-written screen or route fails the Test Run. Do not re-read a file you have already read.
 
 ${SIDE_RULES[side]}
+
+The template every Slice builds on (its facts; code that contradicts them fails the Test Run):
+${factLines([...profile.templateFacts.builds.both, ...profile.templateFacts.builds[side]])}
 
 Your tools: ${tools}.
 
