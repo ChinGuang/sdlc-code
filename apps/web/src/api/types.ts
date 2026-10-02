@@ -72,6 +72,8 @@ export type Waiting =
       workingMemory: Array<{ role: AgentRole; note: string }>;
       /** What went wrong in plain words (T24c); null while it is written. */
       brief: EscalationBrief | null;
+      /** Where a retry's hint goes unless a person says otherwise (T24i). */
+      sideAtFault: HintSide;
       openDraftPrOnAbort: boolean;
     }
   | { for: "prGate"; pullRequest: PullRequest | null }
@@ -239,7 +241,7 @@ type GoingOn = { tokenBudget?: number };
 
 /** The four ways out of an Escalation (CONTEXT.md). */
 export type EscalationResolution =
-  | ({ choice: "retryWithHint"; hint: string } & GoingOn)
+  | ({ choice: "retryWithHint"; hint: string; side?: HintSide } & GoingOn)
   | ({
       choice: "editDocuments";
       edits: Array<{ documentKind: DocumentKind; comments: string }>;
@@ -249,3 +251,6 @@ export type EscalationResolution =
 
 export type PullRequestDecision =
   { choice: "approve" } | { choice: "requestChanges"; comments: string };
+
+/** Who a retry's hint is for (T24i). */
+export type HintSide = "backend" | "frontend" | "both";

@@ -58,6 +58,8 @@ export const EscalationBody = z.discriminatedUnion("choice", [
   z.strictObject({
     choice: z.literal("retryWithHint"),
     hint: z.string().trim().min(1),
+    /** Who the hint is for (T24i); the side at fault when left out. */
+    side: z.enum(["backend", "frontend", "both"]).optional(),
     tokenBudget: RaisedBudget,
   }),
   z.strictObject({

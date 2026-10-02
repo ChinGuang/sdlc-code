@@ -146,6 +146,7 @@ const ESCALATED: RunDetail = {
       { role: "backendCoding", note: "Aligned /health with the API Contract." },
     ],
     brief: null,
+    sideAtFault: "backend",
     openDraftPrOnAbort: true,
   },
 };
@@ -885,6 +886,53 @@ describe("sdlccode escalation and abort", () => {
         },
       ],
     ]);
+  });
+
+  // T24i: a hint for one Coding Agent; the rest of the Slice stays as saved.
+  it("sends a retry's hint to the side --side names, and refuses another", async () => {
+    const { run, posted, out, err } = await cli(ESCALATED);
+
+    expect(
+      await run(
+        "escalation",
+        "retry",
+        "27f388",
+        "Use getJson.",
+        "--side",
+        "frontend",
+        "--budget",
+        "3M",
+      ),
+    ).toBe(0);
+    expect(posted()).toEqual([
+      [
+        `/runs/${ID}/escalation`,
+        {
+          choice: "retryWithHint",
+          hint: "Use getJson.",
+          side: "frontend",
+          tokenBudget: 3_000_000,
+        },
+      ],
+    ]);
+    expect(out.join("\n")).toContain(
+      "Retrying with your hint for the frontend.",
+    );
+
+    expect(
+      await run("escalation", "retry", "27f388", "x", "--side", "database"),
+    ).toBe(2);
+    expect(err.at(-1)).toMatch(/--side is backend, frontend or both/);
+  });
+
+  it("says where a retry's hint goes when no --side is given", async () => {
+    const { run, out } = await cli(ESCALATED);
+
+    await run("escalation", "show", "27f388");
+
+    expect(out.join("\n")).toContain(
+      "A retry's hint goes to the backend, where the evidence points",
+    );
   });
 
   it("sends a document back, or skips the Slice", async () => {

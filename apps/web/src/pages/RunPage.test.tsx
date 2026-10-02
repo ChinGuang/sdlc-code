@@ -343,6 +343,7 @@ describe("RunPage: a Run that needs a person or stopped", () => {
         reports: [],
         workingMemory: [],
         brief: null,
+        sideAtFault: "both",
         openDraftPrOnAbort: true,
       },
     });

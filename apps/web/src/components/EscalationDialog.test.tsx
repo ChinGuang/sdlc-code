@@ -2,7 +2,7 @@
  * Board 05: what stopped the Run, and the four ways on. Aborting carries the
  * Draft PR checkbox as the person left it.
  */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { EscalationBrief, RunDetail } from "../api/types.js";
 import { fakeApi } from "../testing/fakeApi.js";
@@ -191,9 +191,57 @@ describe("EscalationDialog", () => {
         escalation: {
           choice: "retryWithHint",
           hint: "Slots are 30 minutes everywhere.",
+          // The fixture's one report suspects the backend.
+          side: "backend",
         },
       },
     ]);
+  });
+
+  // Run #e29ca700: frontend hints also ran, and confused, the backend.
+  it("sends the hint where the evidence points, or where the person says (T24i)", async () => {
+    const { calls } = open();
+
+    pick(/Retry with a hint/);
+    const sides = screen.getByRole("group", { name: "Send the hint to" });
+    expect(
+      within(sides).getByRole("radio", { name: /Backend Coding Agent/ }),
+    ).toBeChecked();
+    expect(sides).toHaveTextContent("(where the evidence points)");
+    fireEvent.click(
+      within(sides).getByRole("radio", { name: /Frontend Coding Agent/ }),
+    );
+    expect(sides).toHaveTextContent("Only the frontend codes");
+    fireEvent.change(screen.getByLabelText("Hint for the agents"), {
+      target: { value: "Use getJson." },
+    });
+    confirm("Retry with hint");
+
+    await vi.waitFor(() => expect(calls.decisions).toHaveLength(1));
+    expect(calls.decisions[0]).toEqual({
+      escalation: {
+        choice: "retryWithHint",
+        hint: "Use getJson.",
+        side: "frontend",
+      },
+    });
+  });
+
+  it("offers no side in review, where no Slice is being built", () => {
+    open({
+      ...ESCALATED,
+      waiting: {
+        ...ESCALATED.waiting,
+        slice: null,
+        reports: [],
+      } as RunDetail["waiting"],
+    });
+
+    pick(/Retry with a hint/);
+
+    expect(
+      screen.queryByRole("group", { name: "Send the hint to" }),
+    ).toBeNull();
   });
 
   it("sends the chosen documents back to their owners, with what should change", async () => {

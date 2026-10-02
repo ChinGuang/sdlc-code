@@ -85,6 +85,8 @@ export type Waiting =
       workingMemory: Array<{ role: AgentRole; note: string }>;
       /** Null while it is written, and for an Escalation from before T24c. */
       brief: EscalationBrief | null;
+      /** Where a retry's hint goes unless a person says otherwise (T24i). */
+      sideAtFault: HintSide;
       openDraftPrOnAbort: boolean;
     }
   | { for: "prGate"; pullRequest: PullRequest | null }
@@ -171,7 +173,7 @@ export type DesignVerdict = {
 type GoingOn = { tokenBudget?: number };
 
 export type EscalationResolution =
-  | ({ choice: "retryWithHint"; hint: string } & GoingOn)
+  | ({ choice: "retryWithHint"; hint: string; side?: HintSide } & GoingOn)
   | ({
       choice: "editDocuments";
       edits: Array<{ documentKind: DocumentKind; comments: string }>;
@@ -381,3 +383,6 @@ async function refusal(response: Response): Promise<ApiError> {
 }
 
 const runPath = (runId: string) => `/runs/${encodeURIComponent(runId)}`;
+
+/** Who a retry's hint is for (T24i). */
+export type HintSide = "backend" | "frontend" | "both";

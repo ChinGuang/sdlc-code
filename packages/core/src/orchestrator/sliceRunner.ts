@@ -70,6 +70,12 @@ export type SliceHistory = {
 export type SliceHint = {
   from: "person" | "codeReview";
   issues: readonly CodingIssue[];
+  /**
+   * The sides it is for (T24i): only they code on the next attempt, while
+   * the other side's saved code is merged and tested as it is. Absent, every
+   * side of the Slice is.
+   */
+  sides?: readonly CodingSide[];
 };
 
 export type SliceRunInput = {
@@ -207,12 +213,14 @@ export class OrchestratedSliceRunner implements SliceRunner {
     // it failed on: its saved code is kept now (T24h), and an agent told
     // nothing would hand it back unchanged and fail the same way.
     let pending = new Map<CodingSide, CodingIssue[]>(
-      sides.map((side) => [
-        side,
-        input.hint
-          ? hintIssues(input.hint)
-          : codingIssues(latestOf(history.earlier[side])),
-      ]),
+      sides
+        .filter((side) => this.#codesFirst(side, input.hint, tasks))
+        .map((side) => [
+          side,
+          input.hint
+            ? hintIssues(input.hint)
+            : codingIssues(latestOf(history.earlier[side])),
+        ]),
     );
     let lastReports: IssueReport[] = [];
     for (let attempt = 1; ; attempt++) {
@@ -521,6 +529,24 @@ export class OrchestratedSliceRunner implements SliceRunner {
     );
     store.completeStep(step.id, result.loop.workingMemory);
     return { side, outcome: saved ? "changed" : "unchanged" };
+  }
+
+  /**
+   * Whether a side codes on the first attempt: every side does, unless a
+   * hint names another side of this Slice (T24i). A side that never built
+   * anything in this Slice codes anyway, as there would be nothing of it to
+   * merge.
+   */
+  #codesFirst(
+    side: CodingSide,
+    hint: SliceHint | undefined,
+    tasks: ReadonlyMap<CodingSide, Task>,
+  ): boolean {
+    const named = hint?.sides?.filter((one) => tasks.has(one)) ?? [];
+    if (named.length === 0 || named.includes(side)) return true;
+    return !this.#options.tasks
+      .listSteps(tasks.get(side)!.id)
+      .some((step) => step.status === "completed");
   }
 
   /** The side's Task in this Slice, created the first time it is needed. */

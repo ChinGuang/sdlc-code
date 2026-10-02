@@ -395,6 +395,59 @@ describe("OrchestratedSliceRunner", () => {
     ]);
   });
 
+  // Run #e29ca700: each frontend retry also ran the backend, which spent its
+  // turns on nothing and was confused by a hint meant for the frontend.
+  describe("a hint for one side (T24i)", () => {
+    const hint = (sides?: Array<"backend" | "frontend">) => ({
+      from: "person" as const,
+      issues: [{ summary: "Use getJson.", evidence: "Use getJson." }],
+      ...(sides ? { sides } : {}),
+    });
+
+    it("codes only that side, and tests the other side's saved code with it", async () => {
+      const { runner, input, calls } = await setup({
+        results: [failing(frontendFailure("a")), passing()],
+        retryBudget: 0,
+      });
+      const first = await runner.runSlice(input());
+      if (first.status !== "escalated")
+        throw new Error("expected an Escalation");
+      const before = calls.length;
+
+      const again = await runner.runSlice(
+        input({ history: first.history, hint: hint(["frontend"]) }),
+      );
+
+      expect(again.status).toBe("passed");
+      expect(calls.slice(before).map((call) => call.side)).toEqual([
+        "frontend",
+      ]);
+    });
+
+    it("codes every side for a hint to both", async () => {
+      const { runner, input, calls } = await setup({ results: [passing()] });
+
+      await runner.runSlice(input({ hint: hint() }));
+
+      expect(calls.map((call) => call.side).sort()).toEqual([
+        "backend",
+        "frontend",
+      ]);
+    });
+
+    // Nothing of the other side would be there to merge.
+    it("codes a side that never built anything, whoever the hint is for", async () => {
+      const { runner, input, calls } = await setup({ results: [passing()] });
+
+      await runner.runSlice(input({ hint: hint(["frontend"]) }));
+
+      expect(calls.map((call) => call.side).sort()).toEqual([
+        "backend",
+        "frontend",
+      ]);
+    });
+  });
+
   // A Coding Agent told "a person says" about a machine's Finding would be
   // told something untrue about its own Task.
   it("says when a hint came from the Code Review Agent, not a person", async () => {

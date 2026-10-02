@@ -58,6 +58,7 @@ import type {
 import type { RunReview } from "./runReview.js";
 import {
   AgentRunOrchestrator,
+  sideAtFault,
   type RunOrchestrator,
 } from "./runOrchestrator.js";
 import type {
@@ -975,6 +976,8 @@ describe("AgentRunOrchestrator: resuming a Run (T18)", () => {
           evidence: "Validate the title before saving it.",
         },
       ],
+      // Kept across the restart: the report suspected the backend (T24i).
+      sides: ["backend"],
     });
     expect(retry.history).toEqual(failed.history);
   });
@@ -1445,6 +1448,32 @@ describe("AgentRunOrchestrator: Escalations", () => {
     });
   });
 
+  // T24i: a retry goes to the side at fault, or where the person says.
+  it.each([
+    [undefined, ["backend"]],
+    ["frontend", ["frontend"]],
+    ["both", undefined],
+  ] as const)(
+    "retry with hint for side %s: the Slice codes %s",
+    async (side, sides) => {
+      const { orchestrator, runId, runnerCalls } = await approved({
+        // The report suspects the Backend Coding Agent.
+        outcomes: [escalatedWith()],
+      });
+      await orchestrator.advance(runId);
+
+      orchestrator.resolveEscalation(runId, {
+        choice: "retryWithHint",
+        hint: "Return 404 for a missing todo.",
+        ...(side ? { side } : {}),
+      });
+      await orchestrator.advance(runId);
+
+      const retried = runnerCalls.find((call) => call.hint !== undefined)!;
+      expect(retried.hint!.sides).toEqual(sides);
+    },
+  );
+
   it("skip Slice: marks it skipped, fails its Tasks, and builds on", async () => {
     const { orchestrator, runId, sliceStatuses, tasks, slices } =
       await approved({
@@ -1831,5 +1860,33 @@ describe("AgentRunOrchestrator: a design agent fails", () => {
     expect(() => orchestrator.retryDesign(runId)).toThrow(
       /has no failed design to try again/,
     );
+  });
+});
+
+describe("sideAtFault (T24i)", () => {
+  it("is the one side every report suspects", () => {
+    expect(
+      sideAtFault([
+        issueReport({ suspectedOwner: "frontendCoding" }),
+        issueReport({ suspectedOwner: "frontendCoding" }),
+      ]),
+    ).toBe("frontend");
+  });
+
+  it("is both when the reports suspect both, no one, or nothing at all", () => {
+    expect(
+      sideAtFault([
+        issueReport({ suspectedOwner: "frontendCoding" }),
+        issueReport({ suspectedOwner: "backendCoding" }),
+      ]),
+    ).toBe("both");
+    expect(
+      sideAtFault([
+        issueReport({ suspectedOwner: "backendCoding" }),
+        issueReport({ suspectedOwner: null }),
+      ]),
+    ).toBe("both");
+    expect(sideAtFault([])).toBe("both");
+    expect(sideAtFault([null, "not a report"])).toBe("both");
   });
 });
