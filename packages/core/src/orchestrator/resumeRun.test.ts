@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -102,6 +103,53 @@ describe("resumeRun", () => {
     expect(
       context.tasks.listSteps(step.taskId).map((saved) => saved.status),
     ).toEqual(["discarded"]);
+  });
+
+  // Run #e29ca700: a restart while the Run waited at an Escalation threw away
+  // every Step its agents had finished, and they began the Slice again.
+  it("keeps the Steps a Workspace saved, and only what it never saved goes", async () => {
+    const context = await setup();
+    const { workspace } = await midStep(context);
+    const done = join(workspace.dir, "server/events.ts");
+    writeFileSync(done, "export const events = [];\n");
+    await context.workspaces.saveWorkspace(workspace, "backend: attempt 1");
+    const unsaved = join(workspace.dir, "server/bookings.ts");
+    writeFileSync(unsaved, "export const bookings = [ // half written\n");
+
+    await resumeRun(context.run.id, context.options);
+
+    expect(readFileSync(done, "utf8")).toBe("export const events = [];\n");
+    expect(existsSync(unsaved)).toBe(false);
+  });
+
+  it("keeps an escalated Run's code whole: nothing was running", async () => {
+    const context = await setup();
+    const { workspace, step, half } = await midStep(context);
+    await context.workspaces.saveWorkspace(workspace, "backend: attempt 3");
+    context.tasks.completeStep(step.id, "Stopped: Token Budget exhausted.");
+
+    const resumed = await resumeRun(context.run.id, context.options);
+
+    expect(resumed.discardedSteps).toBe(0);
+    // Saved as the agent left it, half-written or not: the next attempt fixes it.
+    expect(readFileSync(half, "utf8")).toBe(
+      "export const todos = [ // half written\n",
+    );
+  });
+
+  it("opens again a Workspace whose folder was deleted while it was stopped", async () => {
+    const context = await setup();
+    const { workspace } = await midStep(context);
+    await context.workspaces.saveWorkspace(workspace, "backend: attempt 1");
+    rmSync(workspace.dir, { recursive: true, force: true });
+
+    await resumeRun(context.run.id, context.options);
+
+    const reopened = await context.workspaces.openWorkspace(
+      workspace.sliceId,
+      "backend",
+    );
+    expect(existsSync(join(reopened.dir, "server/todos.ts"))).toBe(true);
   });
 
   it("keeps the Slice Commits the Run already earned", async () => {

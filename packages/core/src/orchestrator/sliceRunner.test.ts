@@ -543,6 +543,30 @@ describe("OrchestratedSliceRunner across calls", () => {
     expect(calls.length - callsBefore).toBe(2);
   });
 
+  // The T24h review: a restart mid-retry keeps the code now, so an agent
+  // told nothing would hand it back unchanged and the failure would come
+  // back as a false Loop.
+  it("tells a side picked up again without a hint what it failed on", async () => {
+    const { runner, input, calls } = await setup({
+      results: ["a", "b", "c", "d", "e"].map((sig) =>
+        failing(frontendFailure(sig)),
+      ),
+    });
+    const first = await runner.runSlice(input());
+    if (first.status !== "escalated") throw new Error("expected an Escalation");
+    const callsBefore = calls.length;
+
+    await runner.runSlice(input({ history: first.history }));
+
+    const frontend = calls
+      .slice(callsBefore)
+      .find((call) => call.side === "frontend")!;
+    expect(frontend.issues[0]).toContain(frontendFailure("c").failingTest!);
+    expect(
+      calls.slice(callsBefore).find((call) => call.side === "backend")!.issues,
+    ).toEqual([]);
+  });
+
   it("escalates as a Loop when a document revision did not help", async () => {
     const uiSpec = goodUiSpec();
     uiSpec.screens[1]!.endpoints.push("DELETE /todos/{id}");
