@@ -11,12 +11,20 @@
  * Nothing is pushed when there is no Slice Commit, or when the person said not
  * to. A Run's work then stays in its local repository, where it already is.
  */
-import type { GitHubClient, GitPusher, PullRequest } from "@sdlc-code/clients";
+import {
+  GitHubApiError,
+  type GitHubClient,
+  type GitPusher,
+  type PullRequest,
+} from "@sdlc-code/clients";
 import type { Run, Slice } from "../domain/entities.js";
 import type { RunStore } from "../persistence/runStore.js";
 import type { SliceStore } from "../persistence/sliceStore.js";
 import type { TaskStore } from "../persistence/taskStore.js";
-import type { WorkspaceManager } from "../workspaces/workspaceManager.js";
+import {
+  START_REF,
+  type WorkspaceManager,
+} from "../workspaces/workspaceManager.js";
 import {
   pullRequestBody,
   pullRequestTitle,
@@ -81,6 +89,7 @@ export class GitHubRunDelivery implements RunDelivery {
       return { status: "keptLocal", reason: "noSliceCommit" };
 
     const content = this.#pullRequestContent(run, reason);
+    await this.#beginBaseIfMissing(run);
     await pusher.push({
       repoDir,
       repo: run.targetRepo,
@@ -100,6 +109,29 @@ export class GitHubRunDelivery implements RunDelivery {
     });
     return { status: "opened", pullRequest };
   };
+
+  /**
+   * An empty Target Repo has no base branch to open a pull request into, and
+   * GitHub refuses one between branches with no history in common. So its
+   * base begins at the Run's start commit, the template (found in T25: the
+   * demo repository was empty); the pull request then carries the Slices.
+   */
+  async #beginBaseIfMissing(run: Run): Promise<void> {
+    const { github, pusher, repoDir } = this.#options;
+    try {
+      await github.getBranchSha(run.targetRepo, run.targetRepo.baseBranch);
+      return;
+    } catch (error) {
+      if (!(error instanceof GitHubApiError) || error.status !== 404)
+        throw error;
+    }
+    await pusher.push({
+      repoDir,
+      repo: run.targetRepo,
+      branch: run.targetRepo.baseBranch,
+      source: START_REF,
+    });
+  }
 
   /**
    * A Run's branch may already have a pull request: a Run that was resumed, or

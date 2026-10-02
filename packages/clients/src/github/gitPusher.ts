@@ -25,6 +25,11 @@ export type PushRequest = {
   branch: string;
   /** Overwrite the remote branch, e.g. after resetting to the last Slice Commit. */
   force?: boolean;
+  /**
+   * The local ref to push as `branch`; the local branch of that name by
+   * default. E.g. a Run's start commit, to begin an empty Target Repo.
+   */
+  source?: string;
 };
 
 export type GitPusherOptions = {
@@ -69,11 +74,15 @@ export class TokenGitPusher implements GitPusher {
     repo,
     branch,
     force = false,
+    source = `refs/heads/${branch}`,
   }: PushRequest): Promise<void> => {
     if (!isSafeBranchName(branch))
       throw new Error(`invalid branch name: ${JSON.stringify(branch)}`);
+    // A full ref under refs/, so it is never read as an option or a refspec.
+    if (!/^refs\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/.test(source))
+      throw new Error(`invalid source ref: ${JSON.stringify(source)}`);
     const remote = `${this.#baseUrl}/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}.git`;
-    const refspec = `${force ? "+" : ""}refs/heads/${branch}:refs/heads/${branch}`;
+    const refspec = `${force ? "+" : ""}${source}:refs/heads/${branch}`;
     const result = await this.#runGit(
       // An empty credential.helper stops the user's own git credentials being used.
       ["-c", "credential.helper=", "push", "--porcelain", remote, refspec],

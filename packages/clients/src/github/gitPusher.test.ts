@@ -93,6 +93,26 @@ describe("TokenGitPusher", () => {
     );
   });
 
+  // T25: an empty Target Repo's base begins at the Run's start commit.
+  it("pushes another local ref as the branch, and refuses one that is not a ref", async () => {
+    const { runGit, calls } = fakeGit();
+    const pusher = makePusher({ token: TOKEN, runGit });
+
+    await pusher.push({
+      repoDir: "/w",
+      repo,
+      branch: "main",
+      source: "refs/sdlc-run/start",
+    });
+    for (const source of ["HEAD", "refs/x:refs/heads/y", "-f", "refs/a b"])
+      await expect(
+        pusher.push({ repoDir: "/w", repo, branch: "main", source }),
+      ).rejects.toThrow(/invalid source ref/);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![0].at(-1)).toBe("refs/sdlc-run/start:refs/heads/main");
+  });
+
   it.each(["-delete", "a..b", "a b", "a/", "x.lock", "", "a~1", "a:b"])(
     "rejects the unsafe branch name %j without running git",
     async (branch) => {
