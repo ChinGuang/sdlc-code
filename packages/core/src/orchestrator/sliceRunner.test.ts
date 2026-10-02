@@ -780,6 +780,24 @@ describe("OrchestratedSliceRunner when a Step goes wrong", () => {
     expect(testsLeft()).toBe(1);
   });
 
+  // Found in T25: the code a side needed was saved already, its first
+  // attempt stopped with nothing to change, and the second, rightly
+  // unchanged, was taken for a Loop though nothing had been tested.
+  it("tests unchanged code that no Test Run has failed yet", async () => {
+    const { runner, input, testsLeft } = await setup({
+      behave: {
+        backend: ["nothing", "nothing"],
+        frontend: [{ stop: "maxIterations" }, "nothing"],
+      },
+      results: [passing()],
+    });
+
+    const outcome = await runner.runSlice(input());
+
+    expect(outcome.status).toBe("passed");
+    expect(testsLeft()).toBe(0);
+  });
+
   it("escalates a merge conflict between the two sides", async () => {
     const manifest = (name: string) =>
       `${JSON.stringify({ name: "app", dependencies: { react: name } }, null, 2)}\n`;
