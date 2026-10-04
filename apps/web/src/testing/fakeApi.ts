@@ -26,6 +26,7 @@ export function fakeApi(options: {
 }) {
   let detail = options.detail;
   const listeners = new Set<(event: RunEvent) => void>();
+  const reconnectors = new Set<() => void>();
   const calls = {
     getRun: 0,
     followedFrom: [] as number[],
@@ -82,12 +83,14 @@ export function fakeApi(options: {
       return answer();
     },
     serverUp: async () => true,
-    followRun: (_runId, after, onEvent) => {
+    followRun: (_runId, after, onEvent, onReconnect) => {
       calls.followedFrom.push(after);
       listeners.add(onEvent);
+      if (onReconnect) reconnectors.add(onReconnect);
       return () => {
         calls.closed += 1;
         listeners.delete(onEvent);
+        if (onReconnect) reconnectors.delete(onReconnect);
       };
     },
   };
@@ -115,7 +118,12 @@ export function fakeApi(options: {
     detail = next;
   };
 
-  return { api, push, resend, setDetail, calls };
+  /** The stream was lost and came back, as when the server restarted. */
+  const reconnect = () => {
+    for (const reconnected of reconnectors) reconnected();
+  };
+
+  return { api, push, resend, setDetail, reconnect, calls };
 }
 
 export const SUMMARY: RunSummary = {

@@ -56,11 +56,16 @@ export interface RunsApi {
   ) => Promise<RunDetail>;
   /** Whether the local server answers at all. */
   serverUp: () => Promise<boolean>;
-  /** Follows a Run's events from `after`; returns what stops following. */
+  /**
+   * Follows a Run's events from `after`; returns what stops following. The
+   * stream is kept: when it is lost and comes back (the server restarted),
+   * `onReconnect` is called, so the caller reads what it missed.
+   */
   followRun: (
     runId: string,
     after: number,
     onEvent: (event: RunEvent) => void,
+    onReconnect?: () => void,
   ) => () => void;
 }
 
@@ -69,17 +74,29 @@ export type HttpRunsApiOptions = {
   fetch?: typeof fetch;
   /** A browser's EventSource; tests pass a fake. */
   eventSource?: (url: string) => EventSource;
+  /** How long to wait before opening a stream the browser gave up on. */
+  reconnectDelayMs?: number;
+  /** How long a stream may say nothing, pings included, before it is dead. */
+  staleAfterMs?: number;
 };
+
+/** EventSource.CLOSED: the browser has given up and will not try again. */
+const CLOSED = 2;
 
 export class HttpRunsApi implements RunsApi {
   #base: string;
   #fetch: typeof fetch;
   #eventSource: (url: string) => EventSource;
+  #reconnectDelayMs: number;
+  #staleAfterMs: number;
 
   constructor(options: HttpRunsApiOptions = {}) {
     this.#base = options.base ?? "/api";
     this.#fetch = options.fetch ?? ((...args) => fetch(...args));
     this.#eventSource = options.eventSource ?? ((url) => new EventSource(url));
+    this.#reconnectDelayMs = options.reconnectDelayMs ?? 2000;
+    // The server pings every 15 s: three missed are a dead stream.
+    this.#staleAfterMs = options.staleAfterMs ?? 45_000;
   }
 
   listRuns = (): Promise<RunSummary[]> => this.#call("GET", "/runs");
@@ -130,23 +147,72 @@ export class HttpRunsApi implements RunsApi {
     runId: string,
     after: number,
     onEvent: (event: RunEvent) => void,
+    onReconnect?: () => void,
   ): (() => void) => {
-    // `after` only on the first connection: when EventSource reconnects on its
-    // own it sends Last-Event-ID, which the server reads instead.
-    const source = this.#eventSource(
-      `${this.#base}/runs/${encodeURIComponent(runId)}/events?after=${after}`,
-    );
+    let seen = after;
+    let source: EventSource | null = null;
+    let reopen: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+    let lost = false;
+    let heard = Date.now();
     const receive = (message: MessageEvent<string>) => {
+      heard = Date.now();
       let event: RunEvent;
       try {
         event = JSON.parse(message.data) as RunEvent;
       } catch {
         return; // Not an event this dashboard can read; the next one may be.
       }
+      seen = Math.max(seen, event.seq);
       onEvent(event);
     };
-    for (const type of EVENT_TYPES) source.addEventListener(type, receive);
-    return () => source.close();
+    const open = () => {
+      reopen = null;
+      // `after` only on a stream the browser did not open itself: when
+      // EventSource reconnects on its own it sends Last-Event-ID, which the
+      // server reads instead.
+      const next = this.#eventSource(
+        `${this.#base}/runs/${encodeURIComponent(runId)}/events?after=${seen}`,
+      );
+      source = next;
+      heard = Date.now();
+      for (const type of EVENT_TYPES) next.addEventListener(type, receive);
+      next.addEventListener("ping", () => (heard = Date.now()));
+      next.addEventListener("open", () => {
+        if (!lost) return;
+        lost = false;
+        onReconnect?.();
+      });
+      next.addEventListener("error", () => {
+        lost = true;
+        // After a dropped connection the browser tries again by itself. After
+        // an error answer (a proxy's, while the server restarts) it gives up,
+        // and the page would stay as it was: so a stream it closed is opened
+        // again here.
+        if (next.readyState === CLOSED && !stopped && !reopen)
+          reopen = setTimeout(open, this.#reconnectDelayMs);
+      });
+    };
+    open();
+    // A proxy can leave a stream open after the server behind it has gone: no
+    // error comes, and the page would stay as it was. A stream that has gone
+    // quiet is closed and opened again.
+    const watch = setInterval(
+      () => {
+        if (stopped || reopen || Date.now() - heard < this.#staleAfterMs)
+          return;
+        lost = true;
+        source?.close();
+        reopen = setTimeout(open, this.#reconnectDelayMs);
+      },
+      Math.max(1, Math.floor(this.#staleAfterMs / 3)),
+    );
+    return () => {
+      stopped = true;
+      clearInterval(watch);
+      if (reopen) clearTimeout(reopen);
+      source?.close();
+    };
   };
 
   async #call<T>(method: string, path: string, body?: unknown): Promise<T> {

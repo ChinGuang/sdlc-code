@@ -3,7 +3,7 @@
  * it sends each request, what it makes of a refusal, and how it follows a
  * Run's named SSE events.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ApiError, HttpRunsApi, type RunsApi } from "./client.js";
 import type { RunEvent } from "./types.js";
 
@@ -22,12 +22,29 @@ function withFetch(status: number, body: unknown) {
 class FakeEventSource extends EventTarget {
   url: string;
   closed = false;
+  /** 0 connecting, 1 open, 2 closed: what the browser says of the stream. */
+  readyState = 1;
   constructor(url: string) {
     super();
     this.url = url;
   }
   close = () => {
     this.closed = true;
+    this.readyState = 2;
+  };
+  /** The connection dropped; a browser tries again by itself. */
+  drop = () => {
+    this.readyState = 0;
+    this.dispatchEvent(new Event("error"));
+  };
+  /** The server answered with an error (a proxy, mid-restart): it gives up. */
+  refused = () => {
+    this.readyState = 2;
+    this.dispatchEvent(new Event("error"));
+  };
+  open = () => {
+    this.readyState = 1;
+    this.dispatchEvent(new Event("open"));
   };
   send = (type: string, data: unknown) =>
     this.dispatchEvent(new MessageEvent(type, { data: JSON.stringify(data) }));
@@ -148,6 +165,122 @@ describe("HttpRunsApi", () => {
     expect(source!.url).toBe("/api/runs/r1/events?after=41");
     expect(received.map((event) => event.seq)).toEqual([42, 43]);
     expect(source!.closed).toBe(true);
+  });
+
+  describe("when the stream is lost (T25c)", () => {
+    function followed() {
+      const sources: FakeEventSource[] = [];
+      const api: RunsApi = new HttpRunsApi({
+        reconnectDelayMs: 100,
+        eventSource: (url) => {
+          const source = new FakeEventSource(url);
+          sources.push(source);
+          return source as unknown as EventSource;
+        },
+      });
+      const received: RunEvent[] = [];
+      let reconnected = 0;
+      const stop = api.followRun(
+        "r1",
+        0,
+        (event) => received.push(event),
+        () => (reconnected += 1),
+      );
+      return { sources, received, stop, reconnected: () => reconnected };
+    }
+
+    it("says so when the browser's own reconnect succeeds", () => {
+      const { sources, reconnected } = followed();
+      const [source] = sources;
+      source!.open();
+      expect(reconnected()).toBe(0); // the first connection is not a return
+
+      source!.drop();
+      source!.open();
+
+      expect(reconnected()).toBe(1);
+      expect(sources).toHaveLength(1);
+    });
+
+    it("opens a stream the browser gave up on, from the last event seen", () => {
+      vi.useFakeTimers();
+      try {
+        const { sources, reconnected } = followed();
+        sources[0]!.send("status", { type: "status", status: "x", seq: 7 });
+
+        sources[0]!.refused();
+        vi.advanceTimersByTime(99);
+        expect(sources).toHaveLength(1);
+        vi.advanceTimersByTime(1);
+        expect(sources).toHaveLength(2);
+        expect(sources[1]!.url).toBe("/api/runs/r1/events?after=7");
+
+        sources[1]!.open();
+        expect(reconnected()).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // A proxy can hold a stream open after the server behind it has gone.
+    it("opens a stream again that has gone quiet, and a ping keeps one alive", () => {
+      vi.useFakeTimers();
+      try {
+        const sources: FakeEventSource[] = [];
+        let reconnected = 0;
+        const api: RunsApi = new HttpRunsApi({
+          reconnectDelayMs: 100,
+          staleAfterMs: 3000,
+          eventSource: (url) => {
+            const source = new FakeEventSource(url);
+            sources.push(source);
+            return source as unknown as EventSource;
+          },
+        });
+        api.followRun(
+          "r1",
+          0,
+          () => {},
+          () => (reconnected += 1),
+        );
+
+        for (let i = 0; i < 4; i += 1) {
+          vi.advanceTimersByTime(2000);
+          sources[0]!.dispatchEvent(new Event("ping"));
+        }
+        expect(sources).toHaveLength(1); // 8 s, but never 3 s of silence
+
+        vi.advanceTimersByTime(4000); // now it is silent
+        expect(sources[0]!.closed).toBe(true);
+        vi.advanceTimersByTime(100);
+        expect(sources).toHaveLength(2);
+        sources[1]!.open();
+        expect(reconnected).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps trying while the server is down, and stops when stopped", () => {
+      vi.useFakeTimers();
+      try {
+        const { sources, stop } = followed();
+
+        sources[0]!.refused();
+        vi.advanceTimersByTime(100);
+        sources[1]!.refused();
+        vi.advanceTimersByTime(100);
+        expect(sources).toHaveLength(3);
+
+        sources[2]!.refused();
+        stop();
+        vi.advanceTimersByTime(1000);
+
+        expect(sources).toHaveLength(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("skips a message it cannot read, and keeps following", () => {
