@@ -155,11 +155,20 @@ export function useRun(
     // From the first event the server still has, so the feed shows what
     // happened before the page was opened; the reducer keeps the Run's own
     // fields from going back in time.
-    const stop = api.followRun(runId, 0, (event) => {
-      if (!live) return;
-      dispatch({ type: "event", event });
-      if (CHANGES_DETAIL.has(event.type)) readSoon();
-    });
+    const stop = api.followRun(
+      runId,
+      0,
+      (event) => {
+        if (!live) return;
+        dispatch({ type: "event", event });
+        if (CHANGES_DETAIL.has(event.type)) readSoon();
+      },
+      // The stream was lost (the server restarted) and is back: whatever
+      // happened meanwhile came as no event, so the Run is read again.
+      () => {
+        if (live) readSoon();
+      },
+    );
     return () => {
       live = false;
       if (refresh) clearTimeout(refresh);

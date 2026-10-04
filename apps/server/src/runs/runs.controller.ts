@@ -11,7 +11,8 @@
  *   POST /runs/:id/abort          abort at an Escalation, with or without a Draft PR
  *   GET  /runs/:id/events         SSE; ?after=<seq>, or the Last-Event-ID a
  *                                 browser sends when it reconnects, replays
- *                                 what the client missed
+ *                                 what the client missed. A "ping" event
+ *                                 every few seconds says the stream is alive.
  *
  * A decision answers at once with the Run as it now stands; what the Run does
  * next arrives on the stream.
@@ -31,7 +32,7 @@ import {
   Sse,
   StreamableFile,
 } from "@nestjs/common";
-import { map, type Observable } from "rxjs";
+import { interval, map, merge, type Observable } from "rxjs";
 import {
   AbortBody,
   DesignGateBody,
@@ -50,12 +51,25 @@ import {
 } from "./runService.js";
 import { parse } from "./parse.js";
 
+/**
+ * How often a stream says it is alive. A proxy (the dashboard's dev server)
+ * leaves a stream open after the server behind it has gone, and the browser
+ * hears no error; a page that hears no ping for a while opens it again (T25c).
+ */
+export const EVENT_HEARTBEAT_MS = Symbol("EVENT_HEARTBEAT_MS");
+export const DEFAULT_HEARTBEAT_MS = 15_000;
+
 @Controller("runs")
 export class RunsController {
   #runs: RunService;
+  #heartbeatMs: number;
 
-  constructor(@Inject(RUN_SERVICE) runs: RunService) {
+  constructor(
+    @Inject(RUN_SERVICE) runs: RunService,
+    @Inject(EVENT_HEARTBEAT_MS) heartbeatMs: number,
+  ) {
     this.#runs = runs;
+    this.#heartbeatMs = heartbeatMs;
   }
 
   @Post()
@@ -139,14 +153,20 @@ export class RunsController {
     // wins, or every reconnect would replay from the first page load.
     const resumeFrom = lastEventId ?? after;
     const from = resumeFrom === undefined ? undefined : Number(resumeFrom);
-    return this.#runs
+    // Nest numbers a message that has no id itself, which would move the
+    // browser's Last-Event-ID; so a ping repeats the id of the last real event.
+    let lastId = Number.isInteger(from) ? String(from) : "0";
+    const events = this.#runs
       .events(id, Number.isInteger(from) ? from : undefined)
       .pipe(
-        map((event) => ({
-          id: String(event.seq),
-          type: event.type,
-          data: event,
-        })),
+        map((event) => {
+          lastId = String(event.seq);
+          return { id: lastId, type: event.type, data: event };
+        }),
       );
+    const pings = interval(this.#heartbeatMs).pipe(
+      map((): MessageEvent => ({ id: lastId, type: "ping", data: {} })),
+    );
+    return merge(events, pings);
   }
 }

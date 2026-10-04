@@ -30,7 +30,11 @@ import {
   RuntimeUnavailableError,
   type RunLifecycle,
 } from "./runService.js";
-import { RunsController } from "./runs.controller.js";
+import {
+  DEFAULT_HEARTBEAT_MS,
+  EVENT_HEARTBEAT_MS,
+  RunsController,
+} from "./runs.controller.js";
 import { RuntimeRunService } from "./runtimeRunService.js";
 
 /**
@@ -94,6 +98,7 @@ const WAITING_FOR_A_PERSON = new Set([
     // The same object: it serves requests and is started and stopped.
     { provide: RUN_LIFECYCLE, useExisting: RUN_SERVICE },
     { provide: APP_FILTER, useClass: RunErrorsFilter },
+    { provide: EVENT_HEARTBEAT_MS, useValue: DEFAULT_HEARTBEAT_MS },
   ],
 })
 export class RunsModule

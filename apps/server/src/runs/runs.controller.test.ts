@@ -23,6 +23,7 @@ import {
   type RunSummary,
   type StreamedEvent,
 } from "./runService.js";
+import { EVENT_HEARTBEAT_MS } from "./runs.controller.js";
 
 // Each test boots a Nest application: slow on Windows and under a full suite.
 vi.setConfig({ testTimeout: 60_000 });
@@ -117,13 +118,18 @@ const idleLifecycle: RunLifecycle = {
   shutdown: async () => {},
 };
 
-async function start(service: RunService): Promise<string> {
+async function start(
+  service: RunService,
+  heartbeatMs = 60_000,
+): Promise<string> {
   const app = (
     await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(RUN_SERVICE)
       .useValue(service)
       .overrideProvider(RUN_LIFECYCLE)
       .useValue(idleLifecycle)
+      .overrideProvider(EVENT_HEARTBEAT_MS)
+      .useValue(heartbeatMs)
       .compile()
   ).createNestApplication({ logger: false });
   // The configuration main.ts starts with, and the host it listens on.
@@ -603,6 +609,33 @@ describe("GET /runs/:id/events", () => {
     await reading;
 
     expect(calls).toContainEqual(["events", [RUN_ID, 57]]);
+  });
+
+  // T25c: a stream through a proxy can die without the browser hearing of it.
+  it("pings now and then, so a client can tell a stream is alive", async () => {
+    const { service } = fakeService();
+    const url = await start(service, 30);
+
+    const { events } = await read(`${url}/runs/${RUN_ID}/events`, 2);
+
+    expect(events.map(({ event }) => event)).toEqual(["ping", "ping"]);
+    // Not an event of the Run: it must not move the browser's Last-Event-ID.
+    expect(events.map(({ id }) => id)).toEqual(["0", "0"]);
+  });
+
+  it("pings with the id of the last event, so Last-Event-ID does not move", async () => {
+    const { service, stream } = fakeService();
+    const url = await start(service, 400);
+
+    const reading = read(`${url}/runs/${RUN_ID}/events`, 2);
+    await connected();
+    stream.next(step(5, "started"));
+    const { events } = await reading;
+
+    expect(events.map(({ id, event }) => [id, event])).toEqual([
+      ["5", "step"],
+      ["5", "ping"],
+    ]);
   });
 
   // It reconnects to the URL it was opened with, whose ?after is out of date.

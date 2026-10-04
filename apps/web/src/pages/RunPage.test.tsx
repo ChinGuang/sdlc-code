@@ -230,6 +230,19 @@ describe("RunPage: live from the stream", () => {
     expect(within(frontend).getByText("Writing code")).toBeInTheDocument();
   });
 
+  // T25c: the server restarted, and what happened meanwhile came as no event.
+  it("reads the Run again when its stream comes back", async () => {
+    const { reconnect, calls, setDetail } = await open();
+    const before = calls.getRun;
+    setDetail({ ...DETAIL, status: "escalated", lastSeq: 900 });
+
+    act(() => reconnect());
+    await act(() => vi.advanceTimersByTimeAsync(60));
+
+    expect(calls.getRun).toBe(before + 1);
+    expect(screen.getByText(/escalated/i)).toBeInTheDocument();
+  });
+
   // The feed replays what happened before the page opened; the Run's own
   // fields must not go back in time with it.
   it("does not let an old event undo what the Run was read as", async () => {
