@@ -18,6 +18,9 @@ import { SANDBOX_APP_DIR } from "../../testRuns/sandboxFiles.js";
 import type { TestRunOutcome } from "../../testRuns/testRunner.js";
 import type { CodingIssue } from "../coding/codingContext.js";
 import { HTTP_METHODS } from "../systemDesign/design.js";
+import { normalizeError, stripAnsi } from "../../normalizeError.js";
+
+export { normalizeError };
 
 /** Only a Coding Agent is ever *suspected*; the Orchestrator decides (T17). */
 export type SuspectedOwner = Extract<
@@ -403,35 +406,6 @@ function head(text: string): string {
   return clean.length <= MAX_EVIDENCE_CHARS
     ? clean
     : `${clean.slice(0, MAX_EVIDENCE_CHARS)}…`;
-}
-
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const stripAnsi = (text: string): string => text.replace(ANSI, "");
-
-/**
- * What stays the same when the same failure happens again: the error without
- * what varies between runs. Timestamps first, then ids, then timings and line
- * numbers, so one rule never leaves part of another's match behind.
- */
-export function normalizeError(error: string): string {
-  return (
-    stripAnsi(error)
-      .replace(
-        /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?/g,
-        "<timestamp>",
-      )
-      .replace(
-        /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
-        "<uuid>",
-      )
-      // A hex id has a letter in it; a plain number is part of the error.
-      .replace(/\b(?=[0-9]*[a-f])[0-9a-f]{8,}\b/gi, "<id>")
-      .replace(/\b\d+(\.\d+)?\s?(ms|s)\b/g, "<time>")
-      .replace(/:\d+:\d+\b/g, ":<line>")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
 }
 
 type Draft = Omit<IssueReport, "signature" | "occurrences">;
