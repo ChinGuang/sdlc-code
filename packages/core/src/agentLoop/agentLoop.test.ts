@@ -302,6 +302,28 @@ describe("ChatAgentLoop: the task checks the answer (T24j)", () => {
     });
   });
 
+  // The sandbox's evidence carries timings and line numbers, which differ run
+  // to run for the same failure.
+  it("takes the same failure for the same when only its timings and line numbers differ", async () => {
+    const { loop } = makeLoop([
+      { content: "Done." },
+      { content: "Fixed it." },
+      { content: "Should not be asked." },
+      memoryReply,
+    ]);
+    const says = [
+      "1. Create.test.tsx:12:5 timed out in 5003ms",
+      "1. Create.test.tsx:14:5 timed out in 5011ms",
+    ];
+
+    const result = await loop.run({
+      ...task,
+      check: async () => says.shift() ?? null,
+    });
+
+    expect(result).toMatchObject({ answer: "Fixed it.", iterations: 2 });
+  });
+
   it("sends a failure back again once it has changed", async () => {
     const { loop } = makeLoop([
       { content: "Done." },

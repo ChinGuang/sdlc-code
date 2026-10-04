@@ -29,6 +29,7 @@ import {
   type ToolOutcome,
   type ToolProblem,
 } from "./tools.js";
+import { normalizeError } from "../normalizeError.js";
 import { trimToolResults } from "./trimMessages.js";
 
 export type CompletionClient = Pick<ChatClient, "complete">;
@@ -276,9 +277,11 @@ export class ChatAgentLoop implements AgentLoop {
         if (problems === null) return;
         // The same failure again: the agent could not fix it, and another
         // round would cost its turns and a check for nothing (T25b). The
-        // answer stands; the Test Run judges it, and an Escalation follows.
-        if (problems === state.lastProblems) return;
-        state.lastProblems = problems;
+        // answer stands and the Test Run judges it. Compared as a Loop is, with
+        // timings, ids and line numbers taken out.
+        const failure = normalizeError(problems);
+        if (failure === state.lastProblems) return;
+        state.lastProblems = failure;
         state.checks++;
         // Not an answer yet: the Step goes on. If its turns run out before
         // another answer, this one stands (see run), as it would have

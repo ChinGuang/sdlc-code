@@ -163,6 +163,7 @@ describe("templateFacts (T24d)", () => {
     expect(exported("server/app.ts", "route")).toBe(true);
     expect(exported("server/prisma.ts", "prisma")).toBe(true);
     expect(exported("src/api.ts", "getJson")).toBe(true);
+    expect(exported("src/api.ts", "sendJson")).toBe(true);
     expect(exported("src/api.ts", "getHealth")).toBe(true);
   });
 
@@ -171,18 +172,26 @@ describe("templateFacts (T24d)", () => {
     const helpers = file("src/testing/screens.tsx");
     const example = file("src/testing/screenTests.example.test.tsx");
 
-    for (const name of [
-      "stubApi",
-      "renderRoute",
-      "currentPath",
-      "typeInto",
-      "press",
-    ]) {
-      expect(facts).toContain(name);
-      expect(helpers).toMatch(new RegExp(`^export function ${name}\\b`, "m"));
-      // The example shows each one in use.
+    const stubbing = file("src/testing/stubApi.ts");
+    for (const [name, source] of [
+      ["stubApi", stubbing],
+      ["stubConfirm", stubbing],
+      ["expectUnstubbed", stubbing],
+      ["renderRoute", helpers],
+      ["renderApp", helpers],
+      ["currentPath", helpers],
+      ["typeInto", helpers],
+      ["press", helpers],
+      ["follow", helpers],
+    ] as const) {
+      // expectUnstubbed is for the example's tests; the facts name the rest.
+      if (name !== "expectUnstubbed") expect(facts).toContain(name);
+      expect(source).toMatch(new RegExp(`^export function ${name}\\b`, "m"));
+      // The example shows each one in use, and screens.tsx hands it on.
       expect(example).toContain(name);
+      if (source === stubbing) expect(helpers).toContain(name);
     }
+    expect(file("src/testSetup.ts")).toContain("verifyStubs()");
     expect(file("src/testSetup.ts")).toContain("vi.unstubAllGlobals()");
   });
 

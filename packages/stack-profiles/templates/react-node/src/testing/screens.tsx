@@ -1,64 +1,37 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { vi } from "vitest";
+import { App } from "../App.js";
 
 /**
  * Helpers for testing a screen, so a test says what it checks and not how a
  * fetch is faked or a route is mounted. src/testing/screenTests.example.test.tsx
- * is a worked example of every one of them: copy it.
+ * is a worked example of every one of them: copy it. The API stubbing
+ * (stubApi, stubConfirm, expectUnstubbed) lives in stubApi.ts and is
+ * re-exported here, so a test imports everything from one place.
  */
-
-/** What a stubbed endpoint answers; `pending` never answers, to test "loading". */
-export type StubReply =
-  | { status?: number; body?: unknown }
-  | "pending"
-  | ((call: ApiCall) => { status?: number; body?: unknown } | "pending");
-
-/** A request the screen made, with the path as the API Contract writes it. */
-export type ApiCall = { method: string; path: string; body: unknown };
+export {
+  expectUnstubbed,
+  stubApi,
+  stubConfirm,
+  type ApiCall,
+  type StubAnswer,
+  type StubReply,
+} from "./stubApi.js";
 
 /**
- * Answers the screen's requests from a table: "GET /todos", "PATCH /todos/1".
- * Paths are the API Contract's, without the /api prefix the app adds. A
- * request nothing answers fails the test with the table, so a typo is seen.
- * Returns the calls made, in order.
+ * Shows where the router is, for a test and for no one else: it has no text
+ * and no role, so no query of a screen's own finds it twice.
  */
-export function stubApi(replies: Record<string, StubReply>): {
-  calls: ApiCall[];
-} {
-  const calls: ApiCall[] = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(url).replace(/^\/api(?=\/)/, "");
-      const method = (init?.method ?? "GET").toUpperCase();
-      const call: ApiCall = {
-        method,
-        path,
-        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
-      };
-      calls.push(call);
-      const reply = replies[`${method} ${path}`];
-      if (reply === undefined)
-        throw new Error(
-          `No stub for ${method} ${path}. Stubbed: ${Object.keys(replies).join(", ") || "nothing"}`,
-        );
-      const answer = typeof reply === "function" ? reply(call) : reply;
-      if (answer === "pending") return new Promise<Response>(() => {});
-      return new Response(
-        answer.body === undefined ? null : JSON.stringify(answer.body),
-        { status: answer.status ?? 200 },
-      );
-    }),
-  );
-  return { calls };
-}
-
-/** Shows where the router is, so a test sees a navigation without faking it. */
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="location">{location.pathname}</output>;
+  return (
+    <div
+      hidden
+      data-testid="location"
+      data-path={location.pathname + location.search}
+    />
+  );
 }
 
 /**
@@ -82,14 +55,29 @@ export function renderRoute(
   );
 }
 
-/** The router's current path, e.g. "/" after a screen navigated home. */
+/** Renders the whole App, opened at `at`, to test how screens link to each other. */
+export function renderApp(at = "/"): void {
+  render(
+    <MemoryRouter initialEntries={[at]}>
+      <App />
+      <LocationProbe />
+    </MemoryRouter>,
+  );
+}
+
+/** The router's current path and query, e.g. "/" after a screen navigated home. */
 export function currentPath(): string {
-  return screen.getByTestId("location").textContent ?? "";
+  return screen.getByTestId("location").getAttribute("data-path") ?? "";
 }
 
 /** Types into the field with this label, as a person does. */
 export function typeInto(label: string | RegExp, text: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value: text } });
+}
+
+/** Follows the link with this name, as a click does. */
+export function follow(name: string | RegExp): void {
+  fireEvent.click(screen.getByRole("link", { name }));
 }
 
 /** Presses the button with this name; a submit button submits its form. */
