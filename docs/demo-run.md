@@ -107,3 +107,74 @@ Draft PR #1 contains the Walking Skeleton, List Todos, Create Todo, Update Todo
 and Delete Todo Slices on top of the template (`main`, begun by the Run). It is
 a Draft because the Run was aborted at an Escalation: no PR Gate was reached.
 A clean Run (all of the above fixed) is the one to show in the demo video.
+
+# The second demo Run (after T24c to T25b)
+
+The same request, on a new empty Target Repo, to see what the fixes bought.
+
+- **Target Repo:** `ChinGuang/sdlc-code-demo-todo-2` (empty before the Run)
+- **Run:** `ac52ee` · gated · Token Budget 8M, raised to 11M, 13M and 14.1M
+- **Result:** Draft PR [#1](https://github.com/ChinGuang/sdlc-code-demo-todo-2/pull/1),
+  23 files, +1,108 / -69, titled "4 of 5 slices". The Run was aborted at its
+  last Token Budget Escalation, so no PR Gate was reached. Delivery failed
+  twice first with a 403 (the GitHub token did not cover the new repository),
+  and succeeded on the abort retry once it did: the retry path T25's first Run
+  added worked on an empty repository.
+
+## Against the first Run
+
+| | First Run `c4bce5a2` | Second Run `ac52ee` |
+|---|---|---|
+| Tokens | 13.51M | 14.10M |
+| Escalations | 7 (4 loops, 3 Token Budget) | 6 (1 loop, 5 Token Budget) |
+| Design | 2 min 2 s, 35k | about 1.5 min, 34k |
+| Walking Skeleton | 1.66M, 1 Escalation (no OpenSSL) | 0.84M, none |
+| Slices passed their tests | 5 of 5 | 5 of 5 |
+| Last Slice | sent back by Code Review, never merged | the same |
+
+Fewer things went wrong for platform reasons: no OpenSSL, no Prisma schema
+validation, no false lint findings, one loop instead of four. The cost did not
+fall, because it moved: the Token Budget Escalations went from 3 to 5.
+
+## Escalations (6)
+
+| # | At | Trigger | What it was | Answered |
+|---|---|---|---|---|
+| 1 | List Todos | loop | A test (`src/App.test.tsx`) had a relative import that does not resolve ("Failed to resolve import") | retry with a hint, frontend only |
+| 2 | Toggle Todo | Token Budget | 8M spent; the frontend's loading-state stub typing took about 3.2M | raised to 11M |
+| 3 | Delete Todo | Token Budget | 11M spent | raised to 13M |
+| 4 | Delete Todo | loop | A test waited for a "Deleting..." label the stub's instant answer never left on screen | retry with a hint, frontend only |
+| 5 | Delete Todo | Token Budget | 13M spent, after Code Review sent the Slice back | raised to 14.1M |
+| 6 | Delete Todo | Token Budget | 14.1M spent | aborted, with a Draft PR |
+
+## What went wrong at the end (T25f)
+
+Delete Todo passed its tests, then Code Review sent it back on one blocking
+Finding: `catch (_)` in `src/api.ts` was an unused variable. The template's
+`no-unused-vars` excused unused arguments and variables that start with `_`
+but not caught errors, which have their own option; and its message said an
+underscore is allowed. The agents renamed `_` to `__` and back across three
+reviews until the budget was gone: about 3.4M tokens on one character. The rule
+now has `caughtErrorsIgnorePattern` (T25f).
+
+## What the review did well (T25a)
+
+Two Findings quoted code the diff did not show, and were not recorded: the
+grounding works. The first review also reported four unused imports and an unused
+variable; those were real, and the agents fixed them.
+
+## Found, not fixed (follow-ups)
+
+- **The Escalation Brief says nothing once the Token Budget is spent** ("so no
+  analysis was made"), which is when a person most needs one. Both budget
+  Escalations at the end left the cause of the loop to be found by hand.
+- **The Draft PR text is the same as in the first Run:** "The Run was stopped"
+  as the reason, "None recorded" for Issue Reports after six Escalations, and
+  raw agent notes as Working Memory (T25d).
+- **Frontend tests are still the cost.** Toggle Todo's frontend alone took
+  about 3.2M, with about 45 model turns a Step, most of them on the loading
+  state and on the structure of a test.
+- **A test that imports a path that does not exist** is found only by running
+  it (a cheap check could name it).
+- **A Run cannot start on a repository that already has code:** it needs a
+  clone of the base and a branch name that is unique per Run.
