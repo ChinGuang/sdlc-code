@@ -10,7 +10,11 @@
  * Findings arrive through a tool, a few at a time (spike T03: Nemotron breaks on
  * large nested arguments), and the Step ends when the agent replies.
  */
-import type { Rule, StackProfile } from "@sdlc-code/stack-profiles";
+import {
+  isLintRule,
+  type Rule,
+  type StackProfile,
+} from "@sdlc-code/stack-profiles";
 import { stringify } from "yaml";
 import { z } from "zod";
 import type { AgentLoop, AgentLoopResult } from "../../agentLoop/agentLoop.js";
@@ -26,15 +30,16 @@ import { quoteIsShown, shownByDiff, type ShownDiff } from "./reviewDiff.js";
 
 export const SUBMIT_FINDINGS = "submit_findings";
 /** Enough for one pass over a file; more would risk a truncated tool call. */
-const MAX_FINDINGS_PER_CALL = 5;
+const SUGGESTED_FINDINGS_PER_CALL = 5;
 /**
  * What one call may hold before it is refused. A review of a whole Run finds
  * more than five things, and refusing the call wasted the turn that wrote it
  * (T25); the advice stays at a few at a time.
  */
-const MAX_FINDINGS_PER_CALL_ACCEPTED = 30;
+const MAX_FINDINGS_PER_CALL = 30;
 /** A review that reports more than this has stopped being a review. */
 const MAX_FINDINGS_RECORDED = 40;
+const ENOUGH_RECORDED = "enough Findings are recorded";
 
 export type CodeReviewInput = {
   projectRequest: string;
@@ -80,11 +85,9 @@ export class LoopCodeReviewAgent implements CodeReviewAgent {
     const rules = new Map(input.standard.map((rule) => [rule.id, rule]));
     const submit = defineTool({
       name: SUBMIT_FINDINGS,
-      description: `Report Findings, a few at a time (up to ${MAX_FINDINGS_PER_CALL} is best), each citing a Rule ID from the Review Standard and a file and line the diff shows. A blocking Rule's Finding must also quote the line of code it is about. Call it again for more.`,
+      description: `Report Findings, a few at a time (up to ${SUGGESTED_FINDINGS_PER_CALL} is best), each citing a Rule ID from the Review Standard and a file and line the diff shows. A blocking Rule's Finding must also quote the line of code it is about. Call it again for more.`,
       input: z.object({
-        findings: ReportedFindingSchema.array().max(
-          MAX_FINDINGS_PER_CALL_ACCEPTED,
-        ),
+        findings: ReportedFindingSchema.array().max(MAX_FINDINGS_PER_CALL),
       }),
       run: ({ findings }) => {
         const notes: string[] = [];
@@ -95,8 +98,10 @@ export class LoopCodeReviewAgent implements CodeReviewAgent {
             refused.push({ finding, why });
             notes.push(`- ${finding.ruleId} ${place(finding)}: ${why}`);
           } else if (reported.length >= MAX_FINDINGS_RECORDED) {
+            const why = ENOUGH_RECORDED;
+            refused.push({ finding, why });
             notes.push(
-              `- ${finding.ruleId} ${place(finding)}: enough Findings are recorded; reply now`,
+              `- ${finding.ruleId} ${place(finding)}: ${why}; reply now`,
             );
           } else {
             reported.push(finding);
@@ -121,25 +126,35 @@ export class LoopCodeReviewAgent implements CodeReviewAgent {
       input.standard,
       "codeReview",
     );
-    // A refusal the agent then put right is not worth a person's attention.
-    const notRecorded = refused
-      .filter(
-        ({ finding }) =>
-          !reported.some(
-            (kept) =>
-              kept.file === finding.file && kept.ruleId === finding.ruleId,
+    // A refusal the agent then put right is not worth a person's attention;
+    // the same one sent twice is told once.
+    const notRecorded = [
+      ...new Set(
+        refused
+          .filter(
+            ({ finding, why }) =>
+              // Resending cannot put a cap right; it can the others.
+              why === ENOUGH_RECORDED ||
+              !reported.some(
+                (kept) =>
+                  kept.file === finding.file &&
+                  kept.ruleId === finding.ruleId &&
+                  kept.line === finding.line,
+              ),
+          )
+          .map(
+            ({ finding, why }) =>
+              `The Code Review Agent's ${finding.ruleId} Finding at ${place(finding)} was not recorded: ${why}.`,
           ),
-      )
-      .map(
-        ({ finding, why }) =>
-          `The Code Review Agent's ${finding.ruleId} Finding at ${place(finding)} was not recorded: ${why}.`,
-      );
+      ),
+    ];
     return { findings, unknownRuleIds, notRecorded, loop };
   };
 }
 
-const place = (finding: ReportedFinding): string =>
-  finding.line > 0 ? `${finding.file}:${finding.line}` : finding.file;
+function place(finding: ReportedFinding): string {
+  return finding.line > 0 ? `${finding.file}:${finding.line}` : finding.file;
+}
 
 /**
  * Why the diff does not support a Finding, or null when it does. A Finding
@@ -152,7 +167,7 @@ function whyNotShown(
   rule: Rule | undefined,
   shown: ShownDiff,
 ): string | null {
-  if (finding.ruleId.startsWith("LINT-"))
+  if (isLintRule(finding.ruleId))
     return "the linters report the LINT Rules, and what they found is listed above";
   const file = shown.get(finding.file);
   if (!file)

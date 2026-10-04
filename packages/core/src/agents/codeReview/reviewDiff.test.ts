@@ -36,6 +36,59 @@ const DIFF = [
   "",
 ].join("\n");
 
+// Other shapes `git diff` writes (the review reads paths from these headers).
+const OTHER = [
+  "diff --git a/src/caf\\303\\251.ts b/src/caf\\303\\251.ts",
+  "--- a/src/caf\\303\\251.ts",
+  '+++ "b/src/caf\\303\\251.ts"',
+  "@@ -1,1 +1,2 @@",
+  " export const a = 1;",
+  "+export const b = 2;",
+  "diff --git a/my notes/todo list.ts b/my notes/todo list.ts",
+  "--- a/my notes/todo list.ts",
+  "+++ b/my notes/todo list.ts",
+  "@@ -1,1 +1,1 @@",
+  "-old",
+  "+new",
+  "diff --git a/img/logo.png b/img/logo.png",
+  "Binary files a/img/logo.png and b/img/logo.png differ",
+  "diff --git a/old name.ts b/new name.ts",
+  "similarity index 90%",
+  "rename from old name.ts",
+  "rename to new name.ts",
+  "--- a/old name.ts",
+  "+++ b/new name.ts",
+  "@@ -1,1 +1,1 @@",
+  "-x",
+  "+y\r",
+  "",
+].join("\n");
+
+describe("shownByDiff: paths and files git writes in other ways (T25a)", () => {
+  const shown = shownByDiff(OTHER);
+
+  it("unquotes a path git quoted for its non-ASCII characters", () => {
+    expect(shown.get("src/café.ts")!.get(2)).toBe("export const b = 2;");
+  });
+
+  it("reads a path with a space, a renamed file under its new name, and no lines of a binary file", () => {
+    expect(shown.get("my notes/todo list.ts")!.get(1)).toBe("new");
+    expect(shown.get("new name.ts")!.get(1)).toBe("y\r");
+    expect(shown.has("old name.ts")).toBe(false);
+    expect(shown.has("img/logo.png")).toBe(false);
+  });
+
+  it("shows nothing for a header git did not prefix with b/", () => {
+    expect(
+      shownByDiff(
+        ["diff --git x y", "+++ other.ts", "@@ -0,0 +1,1 @@", "+a", ""].join(
+          "\n",
+        ),
+      ).size,
+    ).toBe(0);
+  });
+});
+
 describe("shownByDiff (T25a)", () => {
   const shown = shownByDiff(DIFF);
 
@@ -91,6 +144,23 @@ describe("quoteIsShown (T25a)", () => {
     expect(quoteIsShown(app, 0, "register?.(app);")).toBe(true);
     expect(quoteIsShown(app, 0, "never written")).toBe(false);
     expect(quoteIsShown(app, 12, "   ")).toBe(false);
+  });
+
+  it("finds a quote of several lines, one after the other, and not out of order", () => {
+    expect(
+      quoteIsShown(
+        app,
+        12,
+        "app.get('/health', health);\napp.get('/todos', todos);",
+      ),
+    ).toBe(true);
+    expect(
+      quoteIsShown(
+        app,
+        12,
+        "app.get('/todos', todos);\napp.get('/health', health);",
+      ),
+    ).toBe(false);
   });
 
   it("does not take code the diff removed", () => {

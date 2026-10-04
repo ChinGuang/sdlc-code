@@ -278,12 +278,16 @@ describe("LoopCodeReviewAgent", () => {
       answer(),
     ]);
 
-    const { findings } = await agent.review(input());
+    const { findings, notRecorded } = await agent.review(input());
 
     expect(findings).toHaveLength(40);
     expect(JSON.stringify(requests.at(-1)?.messages)).toContain(
       "enough Findings are recorded",
     );
+    // A person is told too, once for the same Finding sent 10 times.
+    expect(notRecorded).toEqual([
+      expect.stringContaining("was not recorded: enough Findings are recorded"),
+    ]);
   });
 });
 
@@ -313,6 +317,33 @@ describe("LoopCodeReviewAgent: the diff supports what it reports (T25a)", () => 
     ]);
     expect(toolResult(requests)).toContain("0 Findings recorded");
     expect(toolResult(requests)).toContain("Not recorded:");
+  });
+
+  // The same file and Rule at another line is another Finding: putting one
+  // right does not excuse the other.
+  it("tells a person of a refusal even when the same Rule is recorded elsewhere in the file", async () => {
+    const { agent } = agentReplaying([
+      submit([
+        { ruleId: "CLEAN-01", file: "server/todos.ts", line: 1, message: "a" },
+        { ruleId: "CLEAN-01", file: "server/todos.ts", line: 99, message: "b" },
+      ]),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings).toHaveLength(1);
+    expect(notRecorded).toHaveLength(1);
+    expect(notRecorded[0]).toContain("line 99");
+  });
+
+  it("tells a person of the same refusal once", async () => {
+    const bad = { ruleId: "CLEAN-01", file: "nope.ts", line: 1, message: "x" };
+    const { agent } = agentReplaying([submit([bad]), submit([bad]), answer()]);
+
+    const { notRecorded } = await agent.review(input());
+
+    expect(notRecorded).toHaveLength(1);
   });
 
   it("does not record a Finding about a line the diff does not show", async () => {

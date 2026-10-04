@@ -373,6 +373,9 @@ export class GitWorkspaceManager implements WorkspaceManager {
       // Function context in the hunk headers, so a reviewer can see where it is.
       "--unified=5",
       "--no-color",
+      // Pinned: the review reads paths from the headers, whatever git is set to.
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
       `${await this.#commitOf(START_REF)}..${await this.lastSliceCommit()}`,
     ]);
     const bytes = Buffer.from(diff.stdout, "utf8");
