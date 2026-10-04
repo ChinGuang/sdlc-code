@@ -2,11 +2,12 @@
  * Delivery over a real database, with a fake GitHub and a fake Workspace
  * manager: what reaches the Target Repo, and what never does (UML diagram 3b).
  */
-import type {
-  GitHubClient,
-  GitPusher,
-  PullRequest,
-  PushRequest,
+import {
+  GitHubApiError,
+  type GitHubClient,
+  type GitPusher,
+  type PullRequest,
+  type PushRequest,
 } from "@sdlc-code/clients";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../persistence/database.js";
@@ -19,7 +20,9 @@ import { GitHubRunDelivery, type RunDelivery } from "./runDelivery.js";
 /** What happened to the repository, in order, including the push. */
 type Step = "discardUnfinished" | "push";
 
-function setup(options: { commits?: string[] } = {}) {
+function setup(
+  options: { commits?: string[]; emptyRepo?: 404 | 409 | false } = {},
+) {
   const db = openDatabase(":memory:");
   const store = { db };
   const runs = new SqliteRunStore(store);
@@ -59,6 +62,18 @@ function setup(options: { commits?: string[] } = {}) {
   const opened: Array<{ title: string; body: string; draft: boolean }> = [];
   let existing: PullRequest | null = null;
   const github = {
+    // An empty repository has no base branch yet (T25).
+    getBranchSha: async () => {
+      if (options.emptyRepo === 404)
+        throw new GitHubApiError(404, null, "GitHub 404: Branch not found");
+      if (options.emptyRepo === 409)
+        throw new GitHubApiError(
+          409,
+          null,
+          "GitHub 409: Git Repository is empty.",
+        );
+      return "base-sha";
+    },
     findOpenPullRequest: async () => existing,
     openPullRequest: async (
       _repo: unknown,
@@ -322,5 +337,52 @@ describe("GitHubRunDelivery: a Run it cannot deliver", () => {
         findings: [],
       }),
     ).rejects.toThrow(/No Run no-such-run/);
+  });
+});
+
+describe("GitHubRunDelivery: a Target Repo with no base branch (T25)", () => {
+  it("begins its base branch at the Run's start commit, then pushes the Run", async () => {
+    const context = setup({ emptyRepo: 409 });
+
+    await context.delivery.deliver(context.run.id, {
+      ended: "complete",
+      findings: [],
+    });
+
+    expect(context.pushes).toEqual([
+      {
+        repoDir: "/runs/1/repo.git",
+        repo: expect.objectContaining({ name: "sdlc-code-demo-todo" }),
+        branch: "main",
+        source: "refs/sdlc-run/start",
+      },
+      expect.objectContaining({ branch: "sdlc/todo" }),
+    ]);
+    expect(context.opened).toHaveLength(1);
+  });
+
+  // A repository with commits but no `main` is not empty: inventing a main
+  // with no history in common with its own would be the surprise.
+  it("reports a missing base branch of a repository that is not empty, and pushes nothing", async () => {
+    const context = setup({ emptyRepo: 404 });
+
+    await expect(
+      context.delivery.deliver(context.run.id, {
+        ended: "complete",
+        findings: [],
+      }),
+    ).rejects.toThrow(/has no branch "main" to open a pull request into/);
+    expect(context.pushes).toEqual([]);
+  });
+
+  it("leaves a base branch that exists alone", async () => {
+    const context = setup();
+
+    await context.delivery.deliver(context.run.id, {
+      ended: "complete",
+      findings: [],
+    });
+
+    expect(context.pushes.map((push) => push.branch)).toEqual(["sdlc/todo"]);
   });
 });

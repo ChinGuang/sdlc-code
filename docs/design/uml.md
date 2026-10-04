@@ -331,6 +331,7 @@ sequenceDiagram
   O->>W: discard backend + frontend worktrees of unfinished Slice
   W-->>O: run branch = Slice Commits only (it never held anything else)
   alt openDraftPr and at least one Slice Commit
+    O->>G: empty Target Repo (409)? push its base branch from the Run's start commit
     O->>G: push run branch
     O->>G: open draft PR "[Aborted] or [Failed] title — N of M slices"
     Note over O,G: description = passed Slices, failed Slice + Issue Reports,<br/>Working Memory. No code from the unfinished Slice.

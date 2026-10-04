@@ -98,6 +98,7 @@ async function setup() {
     },
   };
   const github = {
+    getBranchSha: async () => "base-sha",
     findOpenPullRequest: async () => null,
     openPullRequest: async (): Promise<PullRequest> => ({
       number: 1,

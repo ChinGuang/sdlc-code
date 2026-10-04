@@ -58,9 +58,9 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Escalation Brief** — What went wrong at an Escalation, in plain words, for the person deciding: facts found in code, and the Orchestrator's one read-only look at the failure (what is failing, what was tried, the likely cause, a suggested choice with a ready hint). A Token Budget Escalation gets the facts only. A brief never decides: the person does.
 
-**Abort** — A person stopping a Run before it finishes. They may abort at any time, whatever the Run is doing; at an Escalation it is one of the four choices. Work under way stops at its next step: a model turn, Test Run or push already under way finishes, nothing new starts, and the Step under way is discarded. The Run ends Aborted, offering a Draft PR of the Slices that passed (on by default); a pull request already open stays open. An aborted Run is never resumed.
+**Abort** — A person stopping a Run before it finishes. They may abort at any time, whatever the Run is doing; at an Escalation it is one of the four choices. Work under way stops at its next step: a model turn, Test Run or push already under way finishes, nothing new starts, and the Step under way is discarded. The Run ends Aborted, offering a Draft PR of the Slices that passed (on by default); a pull request already open stays open. An aborted Run is never resumed; one whose Draft PR never opened (GitHub refused it) is aborted again to try that delivery again.
 
-**Draft PR** — A pull request opened as a draft when a Run stops early. Contains only Slice Commits (Slices that passed testing) plus a failure report; code from the unfinished Slice is never included.
+**Draft PR** — A pull request opened as a draft when a Run stops early. Contains only Slice Commits (Slices that passed testing) plus a failure report; code from the unfinished Slice is never included. Into an empty Target Repo (no commits, so no base branch) a Run's delivery first begins the base branch at the Run's start commit, the template, so the pull request has history in common with it.
 
 ## Agents
 

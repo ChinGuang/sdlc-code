@@ -284,8 +284,13 @@ export class OrchestratedSliceRunner implements SliceRunner {
         pending = this.#retry(decisions, tasks);
         continue;
       }
-      if (attempt > 1 && coded.every((step) => step.outcome === "unchanged"))
-        // Testing the same code again would only fail the same way.
+      if (
+        lastReports.length > 0 &&
+        coded.every((step) => step.outcome === "unchanged")
+      )
+        // Testing the same code again would only fail the same way. Only
+        // once a Test Run has failed: after an attempt that stopped before
+        // testing, unchanged code has not failed yet (found in T25).
         return this.#escalate(
           input,
           "loop",
