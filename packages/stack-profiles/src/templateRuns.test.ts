@@ -141,6 +141,16 @@ describe.runIf(live)("the template passes its own lint script", () => {
           "  return <p>{total}</p>;",
           "}",
           "",
+          // An underscore excuses an error caught and ignored, as it does an
+          // unused argument: this must not be a Finding (T25f).
+          "export function Quiet() {",
+          "  try {",
+          "    return JSON.parse('{}');",
+          "  } catch (_) {",
+          "    return null;",
+          "  }",
+          "}",
+          "",
         ].join("\n"),
       );
 
@@ -158,6 +168,13 @@ describe.runIf(live)("the template passes its own lint script", () => {
           ["tsc", "src/Broken.tsx"],
         ]),
       );
+      expect(
+        found.problems.filter(
+          (problem) =>
+            problem.rule === "@typescript-eslint/no-unused-vars" &&
+            problem.message.includes("'_'"),
+        ),
+      ).toEqual([]);
       const typeError = found.problems.find(
         (problem) => problem.tool === "tsc",
       );
