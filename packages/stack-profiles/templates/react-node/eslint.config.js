@@ -19,10 +19,17 @@ export default tseslint.config(
     },
     rules: {
       // An unused local is a LINT-01 Finding; an argument named on purpose
-      // (a handler's event) is not, so a leading underscore excuses it.
+      // (a handler's event) or an error caught and ignored is not, so a leading
+      // underscore excuses it. A caught error has an option of its own: without
+      // it `catch (_)` is flagged, and the message ("must match /^_/") sends an
+      // agent round in circles renaming `_` to `__` (found in T25).
       "@typescript-eslint/no-unused-vars": [
         "error",
-        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
       ],
     },
   },
