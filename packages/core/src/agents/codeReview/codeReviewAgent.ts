@@ -85,23 +85,29 @@ export class LoopCodeReviewAgent implements CodeReviewAgent {
     const rules = new Map(input.standard.map((rule) => [rule.id, rule]));
     const submit = defineTool({
       name: SUBMIT_FINDINGS,
-      description: `Report Findings, a few at a time (up to ${SUGGESTED_FINDINGS_PER_CALL} is best), each citing a Rule ID from the Review Standard and a file and line the diff shows. A blocking Rule's Finding must also quote the line of code it is about. Call it again for more.`,
+      description: `Report Findings, a few at a time (up to ${SUGGESTED_FINDINGS_PER_CALL} is best, never more than ${MAX_FINDINGS_PER_CALL}), each citing a Rule ID from the Review Standard and a file and line the diff shows. A blocking Rule's Finding must also quote the line of code it is about. Call it again for more.`,
       input: z.object({
         findings: ReportedFindingSchema.array().max(MAX_FINDINGS_PER_CALL),
       }),
       run: ({ findings }) => {
         const notes: string[] = [];
         let recorded = 0;
+        let fixable = false;
         for (const finding of findings) {
-          const why = whyNotShown(finding, rules.get(finding.ruleId), shown);
+          const rule = rules.get(finding.ruleId);
+          const why = whyNotShown(finding, rule, shown);
           if (why) {
             refused.push({ finding, why });
             notes.push(`- ${finding.ruleId} ${place(finding)}: ${why}`);
-          } else if (reported.length >= MAX_FINDINGS_RECORDED) {
-            const why = ENOUGH_RECORDED;
-            refused.push({ finding, why });
+            fixable = true;
+          } else if (
+            reported.length >= MAX_FINDINGS_RECORDED &&
+            // What would send work back is never what the cap leaves out.
+            rule?.severity !== "blocking"
+          ) {
+            refused.push({ finding, why: ENOUGH_RECORDED });
             notes.push(
-              `- ${finding.ruleId} ${place(finding)}: ${why}; reply now`,
+              `- ${finding.ruleId} ${place(finding)}: ${ENOUGH_RECORDED}`,
             );
           } else {
             reported.push(finding);
@@ -109,9 +115,12 @@ export class LoopCodeReviewAgent implements CodeReviewAgent {
           }
         }
         const head = `${recorded} Finding${recorded === 1 ? "" : "s"} recorded (${reported.length} in all).`;
+        const advice = fixable
+          ? "Send those again corrected if they are real, or leave them out."
+          : `Only blocking Findings are recorded now; reply when the review is done.`;
         const refusals =
           notes.length > 0
-            ? ` Not recorded:\n${notes.join("\n")}\nSend those again corrected if they are real, or leave them out.`
+            ? ` Not recorded:\n${notes.join("\n")}\n${advice}`
             : "";
         return `${head}${refusals} Report more, or reply when the review is done.`;
       },
@@ -128,7 +137,7 @@ export class LoopCodeReviewAgent implements CodeReviewAgent {
     );
     // A refusal the agent then put right is not worth a person's attention;
     // the same one sent twice is told once.
-    const notRecorded = [
+    const notRecorded = cutList([
       ...new Set(
         refused
           .filter(
@@ -147,9 +156,21 @@ export class LoopCodeReviewAgent implements CodeReviewAgent {
               `The Code Review Agent's ${finding.ruleId} Finding at ${place(finding)} was not recorded: ${why}.`,
           ),
       ),
-    ];
+    ]);
     return { findings, unknownRuleIds, notRecorded, loop };
   };
+}
+
+/** A person reads the first few; an agent that keeps inventing adds no more. */
+const MAX_NOT_RECORDED_LISTED = 8;
+
+function cutList(lines: string[]): string[] {
+  return lines.length <= MAX_NOT_RECORDED_LISTED
+    ? lines
+    : [
+        ...lines.slice(0, MAX_NOT_RECORDED_LISTED),
+        `${lines.length - MAX_NOT_RECORDED_LISTED} more of the Code Review Agent's Findings were not recorded.`,
+      ];
 }
 
 function place(finding: ReportedFinding): string {
@@ -183,7 +204,9 @@ function whyNotShown(
 }
 
 function systemPrompt(standard: readonly Rule[]): string {
+  // The LINT Rules are the linters' to report: offered, they would be cited.
   const rules = standard
+    .filter((rule) => !isLintRule(rule.id))
     .map((rule) => `- ${rule.id} (${rule.severity}): ${rule.description}`)
     .join("\n");
   return `You are the Code Review Agent of sdlc-code, a multi-agent tool that builds full-stack applications. Other agents wrote the code; you review it.
@@ -196,7 +219,7 @@ ${rules}
 How to review:
 - Every Finding cites one Rule ID from the list above. A problem no Rule covers is not a Finding; leave it out.
 - Report the file and line from the diff's own headers, so the Finding points at real code. A Finding about a file or a line the diff does not show is not recorded.
-- A blocking Rule's Finding also quotes the line of code it is about (quote), copied exactly from the diff. If you cannot quote it, it is not something to block on.
+- A blocking Rule's Finding also quotes the line of code it is about (quote), copied exactly from the diff. If you cannot quote it, it is not something to block on. For something missing (a test, a check), cite the file that should have it, at line 0, and quote its declaration (the route, the function, the screen).
 - Never report a compile error, a type error, a missing import or an undefined name, and never cite a LINT Rule: the compiler and ESLint ran, and what they found is listed in the next message. A file you have not read in full may be longer than the part the diff shows.
 - Say what is wrong in one sentence, and what to do instead when it is not obvious.
 - Judge the code against the Approved Documents too: an endpoint that answers something the API Contract does not describe, or a screen the UI Spec does not have, breaks a Rule about following them.

@@ -59,6 +59,8 @@ function setup(
     agentFindings?: ReportedFinding[];
     /** What the agent reported that the diff did not support (T25a). */
     notRecorded?: string[];
+    /** What the Workspace's diff is; a short one unless a test cuts it. */
+    diff?: string;
     stopReason?: "answered" | "tokenBudget";
   } = {},
 ) {
@@ -84,7 +86,7 @@ function setup(
     lastSliceCommit: async () => "commit-1",
     readFiles: async () => FILES,
     runDiff: async () =>
-      "diff --git a/src/App.tsx b/src/App.tsx\n+const d = 1;\n",
+      options.diff ?? "diff --git a/src/App.tsx b/src/App.tsx\n+const d = 1;\n",
   };
 
   const linters: LintRunner = {
@@ -234,6 +236,18 @@ describe("AgentRunReview: what the linters contribute", () => {
 
     expect(findings).toEqual([]);
     expect(problems).toEqual([claim]);
+  });
+
+  it("tells a person when the diff was too big to read whole", async () => {
+    const { review, run } = setup({
+      diff: "diff --git a/a.ts b/a.ts\n+x\n…(the diff is 412345 bytes; cut here)\n",
+    });
+
+    const { problems } = await review.reviewRun(run);
+
+    expect(problems).toEqual([
+      "The diff of this Run is 412345 bytes, more than a review reads: the Code Review Agent read the first part only.",
+    ]);
   });
 
   it("says so when a tool failed without reporting anything", async () => {

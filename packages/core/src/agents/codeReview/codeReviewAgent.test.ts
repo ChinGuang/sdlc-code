@@ -446,6 +446,67 @@ describe("LoopCodeReviewAgent: the diff supports what it reports (T25a)", () => 
     expect(notRecorded[0]).toContain("the linters report the LINT Rules");
   });
 
+  // What would send work back is never what the cap leaves out.
+  it("records a blocking Finding after the cap has been reached", async () => {
+    const minors = Array.from({ length: 25 }, (_, index) => ({
+      ruleId: "CLEAN-01",
+      file: "server/todos.ts",
+      line: 1,
+      message: `finding ${index}`,
+    }));
+    const blocking = {
+      ruleId: "SEC-02",
+      file: "server/todos.ts",
+      line: 2,
+      message: "SQL built from input.",
+      quote: "return db.query(",
+    };
+    const { agent } = agentReplaying([
+      submit(minors),
+      submit(minors),
+      submit([blocking]),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings.at(-1)?.ruleId).toBe("SEC-02");
+    expect(findings).toHaveLength(41);
+    // The minors beyond forty are told once, not once each.
+    expect(notRecorded).toEqual([
+      expect.stringContaining("enough Findings are recorded"),
+    ]);
+  });
+
+  it("tells a person of a few refusals, and counts the rest", async () => {
+    const invented = Array.from({ length: 12 }, (_, index) => ({
+      ruleId: "CLEAN-01",
+      file: `src/Invented${index}.tsx`,
+      line: 1,
+      message: "bad",
+    }));
+    const { agent } = agentReplaying([submit(invented), answer()]);
+
+    const { notRecorded } = await agent.review(input());
+
+    expect(notRecorded).toHaveLength(9);
+    expect(notRecorded.at(-1)).toBe(
+      "4 more of the Code Review Agent's Findings were not recorded.",
+    );
+  });
+
+  it("does not offer the LINT Rules, which are the linters' to report", async () => {
+    const { agent, requests } = agentReplaying([answer()]);
+
+    await agent.review(input());
+
+    const system = String(requests[0]?.messages[0]?.content);
+    expect(system).not.toContain("LINT-01 (");
+    expect(system).not.toContain("LINT-03 (");
+    expect(system).toContain("SEC-02 (blocking):");
+    expect(system).toContain("cite the file that should have it, at line 0");
+  });
+
   it("does not ask for a quote of a Finding that cannot block", async () => {
     const { agent } = agentReplaying([
       submit([
