@@ -99,6 +99,7 @@ describe("LoopCodeReviewAgent", () => {
           line: 2,
           message: "The title goes into SQL unvalidated.",
           suggestion: "Validate the body with zod first.",
+          quote: "select * from todos where title",
         },
         {
           ruleId: "CLEAN-01",
@@ -124,8 +125,22 @@ describe("LoopCodeReviewAgent", () => {
 
   it("takes Findings a few calls at a time", async () => {
     const { agent } = agentReplaying([
-      submit([{ ruleId: "SEC-02", file: "a.ts", line: 1, message: "one" }]),
-      submit([{ ruleId: "CLEAN-01", file: "b.ts", line: 2, message: "two" }]),
+      submit([
+        {
+          ruleId: "CLEAN-01",
+          file: "server/todos.ts",
+          line: 1,
+          message: "one",
+        },
+      ]),
+      submit([
+        {
+          ruleId: "CLEAN-01",
+          file: "server/todos.ts",
+          line: 3,
+          message: "two",
+        },
+      ]),
       answer(),
     ]);
 
@@ -147,8 +162,19 @@ describe("LoopCodeReviewAgent", () => {
   it("drops a Finding citing a Rule the Review Standard does not have", async () => {
     const { agent } = agentReplaying([
       submit([
-        { ruleId: "VIBES-01", file: "a.ts", line: 1, message: "feels wrong" },
-        { ruleId: "SEC-02", file: "a.ts", line: 2, message: "unvalidated" },
+        {
+          ruleId: "VIBES-01",
+          file: "server/todos.ts",
+          line: 1,
+          message: "feels wrong",
+        },
+        {
+          ruleId: "SEC-02",
+          file: "server/todos.ts",
+          line: 2,
+          message: "unvalidated",
+          quote: "return db.query",
+        },
       ]),
       answer(),
     ]);
@@ -201,7 +227,15 @@ describe("LoopCodeReviewAgent", () => {
       { id: "OURS-01", description: "Our own rule.", severity: "blocking" },
     ];
     const { agent, requests } = agentReplaying([
-      submit([{ ruleId: "OURS-01", file: "a.ts", line: 1, message: "broken" }]),
+      submit([
+        {
+          ruleId: "OURS-01",
+          file: "server/todos.ts",
+          line: 1,
+          message: "broken",
+          quote: "export function todos",
+        },
+      ]),
       answer(),
     ]);
 
@@ -211,5 +245,288 @@ describe("LoopCodeReviewAgent", () => {
     expect(String(requests[0]?.messages[0]?.content)).toContain(
       "OURS-01 (blocking): Our own rule.",
     );
+  });
+
+  it("takes more than five Findings in one call", async () => {
+    // A review of a whole Run finds more than five things; refusing the call
+    // wasted the turn that wrote it (found in T25).
+    const many = Array.from({ length: 12 }, (_, index) => ({
+      ruleId: "CLEAN-01",
+      file: "server/todos.ts",
+      line: 1,
+      message: `finding ${index}`,
+    }));
+    const { agent } = agentReplaying([submit(many), answer()]);
+
+    const { findings, loop } = await agent.review(input());
+
+    expect(findings).toHaveLength(12);
+    expect(loop.failedToolCalls).toBe(0);
+  });
+
+  it("stops recording once enough Findings are in, and says so", async () => {
+    const batch = (from: number) =>
+      Array.from({ length: 25 }, (_, index) => ({
+        ruleId: "CLEAN-01",
+        file: "server/todos.ts",
+        line: 1,
+        message: `finding ${from + index}`,
+      }));
+    const { agent, requests } = agentReplaying([
+      submit(batch(0)),
+      submit(batch(25)),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings).toHaveLength(40);
+    expect(JSON.stringify(requests.at(-1)?.messages)).toContain(
+      "enough Findings are recorded",
+    );
+    // A person is told too, once for the same Finding sent 10 times.
+    expect(notRecorded).toEqual([
+      expect.stringContaining("was not recorded: enough Findings are recorded"),
+    ]);
+  });
+});
+
+// Found in T25: blocking Findings about code that was fine ("component is
+// incomplete, missing imports") sent a passing Slice back, and the linters had
+// already said it compiled.
+describe("LoopCodeReviewAgent: the diff supports what it reports (T25a)", () => {
+  const toolResult = (requests: ChatRequest[]) =>
+    String(
+      requests.at(-1)?.messages.findLast((message) => message.role === "tool")
+        ?.content,
+    );
+
+  it("does not record a Finding about a file the diff does not show, and says so", async () => {
+    const { agent, requests } = agentReplaying([
+      submit([
+        { ruleId: "CLEAN-01", file: "src/Nope.tsx", line: 1, message: "bad" },
+      ]),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings).toEqual([]);
+    expect(notRecorded).toEqual([
+      "The Code Review Agent's CLEAN-01 Finding at src/Nope.tsx:1 was not recorded: the diff does not show src/Nope.tsx (use the path as the diff writes it).",
+    ]);
+    expect(toolResult(requests)).toContain("0 Findings recorded");
+    expect(toolResult(requests)).toContain("Not recorded:");
+  });
+
+  // The same file and Rule at another line is another Finding: putting one
+  // right does not excuse the other.
+  it("tells a person of a refusal even when the same Rule is recorded elsewhere in the file", async () => {
+    const { agent } = agentReplaying([
+      submit([
+        { ruleId: "CLEAN-01", file: "server/todos.ts", line: 1, message: "a" },
+        { ruleId: "CLEAN-01", file: "server/todos.ts", line: 99, message: "b" },
+      ]),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings).toHaveLength(1);
+    expect(notRecorded).toHaveLength(1);
+    expect(notRecorded[0]).toContain("line 99");
+  });
+
+  it("tells a person of the same refusal once", async () => {
+    const bad = { ruleId: "CLEAN-01", file: "nope.ts", line: 1, message: "x" };
+    const { agent } = agentReplaying([submit([bad]), submit([bad]), answer()]);
+
+    const { notRecorded } = await agent.review(input());
+
+    expect(notRecorded).toHaveLength(1);
+  });
+
+  it("does not record a Finding about a line the diff does not show", async () => {
+    const { agent } = agentReplaying([
+      submit([
+        { ruleId: "CLEAN-01", file: "server/todos.ts", line: 99, message: "x" },
+      ]),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings).toEqual([]);
+    expect(notRecorded[0]).toContain(
+      "the diff does not show line 99 of server/todos.ts",
+    );
+  });
+
+  it("holds a blocking Finding to a quote, and records it once it has one", async () => {
+    const blocking = {
+      ruleId: "SEC-02",
+      file: "server/todos.ts",
+      line: 2,
+      message: "The title goes into SQL unvalidated.",
+    };
+    const { agent, requests } = agentReplaying([
+      submit([blocking]),
+      submit([{ ...blocking, quote: "return db.query(" }]),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings.map((finding) => finding.ruleId)).toEqual(["SEC-02"]);
+    // Put right inside the Step, so a person is not told of it.
+    expect(notRecorded).toEqual([]);
+    expect(JSON.stringify(requests[1]?.messages.at(-1))).toContain(
+      "must quote the line of code it is about",
+    );
+  });
+
+  it("does not record a blocking Finding whose quote is not in the diff there", async () => {
+    const { agent } = agentReplaying([
+      submit([
+        {
+          ruleId: "SEC-02",
+          file: "server/todos.ts",
+          line: 2,
+          message: "parseResult is not used",
+          quote: "const parseResult = schema.parse(request.body);",
+        },
+      ]),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings).toEqual([]);
+    expect(notRecorded[0]).toContain(
+      "the diff does not show that code at server/todos.ts:2",
+    );
+  });
+
+  it("finds a quote a line or two off and under other spacing, as models cite", async () => {
+    const { agent } = agentReplaying([
+      submit([
+        {
+          ruleId: "SEC-02",
+          file: "server/todos.ts",
+          line: 3,
+          message: "SQL built from input.",
+          quote: 'return   db.query("select * from todos',
+        },
+      ]),
+      answer(),
+    ]);
+
+    const { findings } = await agent.review(input());
+
+    expect(findings).toHaveLength(1);
+  });
+
+  it("leaves the LINT Rules to the linters", async () => {
+    const { agent } = agentReplaying([
+      submit([
+        {
+          ruleId: "LINT-03",
+          file: "server/todos.ts",
+          line: 1,
+          message: "TypeScript errors: incomplete component",
+          quote: "export function todos",
+        },
+      ]),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings).toEqual([]);
+    expect(notRecorded[0]).toContain("the linters report the LINT Rules");
+  });
+
+  // What would send work back is never what the cap leaves out.
+  it("records a blocking Finding after the cap has been reached", async () => {
+    const minors = Array.from({ length: 25 }, (_, index) => ({
+      ruleId: "CLEAN-01",
+      file: "server/todos.ts",
+      line: 1,
+      message: `finding ${index}`,
+    }));
+    const blocking = {
+      ruleId: "SEC-02",
+      file: "server/todos.ts",
+      line: 2,
+      message: "SQL built from input.",
+      quote: "return db.query(",
+    };
+    const { agent } = agentReplaying([
+      submit(minors),
+      submit(minors),
+      submit([blocking]),
+      answer(),
+    ]);
+
+    const { findings, notRecorded } = await agent.review(input());
+
+    expect(findings.at(-1)?.ruleId).toBe("SEC-02");
+    expect(findings).toHaveLength(41);
+    // The minors beyond forty are told once, not once each.
+    expect(notRecorded).toEqual([
+      expect.stringContaining("enough Findings are recorded"),
+    ]);
+  });
+
+  it("tells a person of a few refusals, and counts the rest", async () => {
+    const invented = Array.from({ length: 12 }, (_, index) => ({
+      ruleId: "CLEAN-01",
+      file: `src/Invented${index}.tsx`,
+      line: 1,
+      message: "bad",
+    }));
+    const { agent } = agentReplaying([submit(invented), answer()]);
+
+    const { notRecorded } = await agent.review(input());
+
+    expect(notRecorded).toHaveLength(9);
+    expect(notRecorded.at(-1)).toBe(
+      "4 more of the Code Review Agent's Findings were not recorded.",
+    );
+  });
+
+  it("does not offer the LINT Rules, which are the linters' to report", async () => {
+    const { agent, requests } = agentReplaying([answer()]);
+
+    await agent.review(input());
+
+    const system = String(requests[0]?.messages[0]?.content);
+    expect(system).not.toContain("LINT-01 (");
+    expect(system).not.toContain("LINT-03 (");
+    expect(system).toContain("SEC-02 (blocking):");
+    expect(system).toContain("cite the file that should have it, at line 0");
+  });
+
+  it("does not ask for a quote of a Finding that cannot block", async () => {
+    const { agent } = agentReplaying([
+      submit([
+        { ruleId: "CLEAN-01", file: "server/todos.ts", line: 2, message: "x" },
+      ]),
+      answer(),
+    ]);
+
+    const { findings } = await agent.review(input());
+
+    expect(findings).toHaveLength(1);
+  });
+
+  it("tells the agent a blocking Finding needs a quote, and not to report what a compiler found", async () => {
+    const { agent, requests } = agentReplaying([answer()]);
+
+    await agent.review(input());
+
+    const system = String(requests[0]?.messages[0]?.content);
+    expect(system).toContain("quotes the line of code it is about");
+    expect(system).toContain("Never report a compile error");
   });
 });

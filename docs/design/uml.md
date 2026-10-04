@@ -512,7 +512,8 @@ sequenceDiagram
   O->>S: run ESLint + tsc --strict on final Slice Commits
   S-->>O: linter Findings (Rule IDs)
   O->>CR: review diff vs Review Standard + Approved Documents
-  CR-->>O: Findings (Rule ID, severity, location, suggestion)
+  CR-->>O: Findings (Rule ID, severity, location, suggestion; a blocking one quotes its code)
+  Note over CR,O: a Finding about a file or line the diff does not show,<br/>a blocking one without its quote, or a LINT Rule, is not recorded
   alt blocking Findings
     O->>C: fix Task with blocking Findings
     Note over O,C: the last Slice is built again with the Findings as its hint,<br/>and spends the Run's review Retry Budget (3)

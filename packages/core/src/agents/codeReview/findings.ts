@@ -23,6 +23,12 @@ export const ReportedFindingSchema = z.strictObject({
   message: z.string().min(1),
   /** What to do instead; omitted when the message says it. */
   suggestion: z.string().optional(),
+  /**
+   * The line of code the Finding is about, copied from the diff (T25a). A
+   * blocking Finding must have one the diff shows: it is what tells a real
+   * problem from an invented one.
+   */
+  quote: z.string().optional(),
 });
 
 export type ReportedFinding = z.infer<typeof ReportedFindingSchema>;

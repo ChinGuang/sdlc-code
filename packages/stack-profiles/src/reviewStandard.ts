@@ -26,6 +26,11 @@ export const RULE_FAMILIES = {
   SEC: "Secrets, input validation and dependencies",
 } as const;
 
+/** The linters' own Rules: what a linter or the compiler reports, no one else. */
+export function isLintRule(ruleId: string): boolean {
+  return ruleId.startsWith("LINT-");
+}
+
 export const BASELINE_RULES: readonly Rule[] = [
   // The linters report against these three (T19): a tool's own rule name goes
   // in the Finding's message, so one Rule per tool and severity is enough.

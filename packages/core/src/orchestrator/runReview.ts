@@ -75,18 +75,26 @@ export class AgentRunReview implements RunReview {
     const problems: string[] = [];
     const standard = await this.#standard(run, problems);
     const fromLinters = await this.#linters(run, standard, problems);
+    const diff = await this.#options.workspaces.runDiff();
+    // The agent sees where it ends; a person is told the review read part.
+    const cut = /\(the diff is (\d+) bytes; cut here\)\s*$/.exec(diff);
+    if (cut)
+      problems.push(
+        `The diff of this Run is ${cut[1]} bytes, more than a review reads: the Code Review Agent read the first part only.`,
+      );
     const reviewed = await this.#options.agent.review({
       projectRequest: run.projectRequest,
       profile: this.#options.profile(run),
       documents: loadApprovedDocuments(this.#options.documents, run.id),
       standard,
-      diff: await this.#options.workspaces.runDiff(),
+      diff,
       linterFindings: fromLinters,
     });
     for (const unknown of reviewed.unknownRuleIds)
       problems.push(
         `The Code Review Agent cited ${unknown}, which this Review Standard does not have.`,
       );
+    problems.push(...reviewed.notRecorded);
     return {
       findings: [...fromLinters, ...reviewed.findings],
       stopReason: reviewed.loop.stopReason,

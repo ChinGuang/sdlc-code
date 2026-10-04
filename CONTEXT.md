@@ -86,7 +86,7 @@ _Avoid_: "subagent" as a synonym for a specific agent role.
 
 **Rule** — A single checkable requirement with an ID (e.g. `SEC-01`), a pass/fail test and a severity (minor, major, blocking).
 
-**Finding** — A Rule violation reported by linting or the Code Review Agent. Always cites a Rule ID, and takes that Rule's severity: a reporter cannot decide how serious its own Finding is. Only blocking Findings send work back.
+**Finding** — A Rule violation reported by linting or the Code Review Agent. Always cites a Rule ID, and takes that Rule's severity: a reporter cannot decide how serious its own Finding is. Only blocking Findings send work back. A Code Review Agent's Finding must be one the diff supports: it names a file and line the diff shows, a blocking one quotes the code it is about, and the LINT Rules are the linters' alone. One the diff does not support is not recorded, and a person is told.
 
 **Lint Run** — One sandbox run of a Stack Profile's lint script (ESLint and the TypeScript compiler) over the Slice Commits, whose complaints become Findings. Like a Test Run it only executes; the files come from the Workspace.
 

@@ -57,6 +57,10 @@ function setup(
     lint?: LintRunOutcome;
     userStandards?: string | null;
     agentFindings?: ReportedFinding[];
+    /** What the agent reported that the diff did not support (T25a). */
+    notRecorded?: string[];
+    /** What the Workspace's diff is; a short one unless a test cuts it. */
+    diff?: string;
     stopReason?: "answered" | "tokenBudget";
   } = {},
 ) {
@@ -82,7 +86,7 @@ function setup(
     lastSliceCommit: async () => "commit-1",
     readFiles: async () => FILES,
     runDiff: async () =>
-      "diff --git a/src/App.tsx b/src/App.tsx\n+const d = 1;\n",
+      options.diff ?? "diff --git a/src/App.tsx b/src/App.tsx\n+const d = 1;\n",
   };
 
   const linters: LintRunner = {
@@ -99,6 +103,7 @@ function setup(
           source: "codeReview" as const,
         })),
         unknownRuleIds: [],
+        notRecorded: options.notRecorded ?? [],
         loop: {
           stopReason: options.stopReason ?? "answered",
           answer: "Reviewed.",
@@ -217,6 +222,31 @@ describe("AgentRunReview: what the linters contribute", () => {
     expect(findings).toEqual([]);
     expect(problems).toEqual([
       expect.stringContaining("The linters did not run"),
+    ]);
+  });
+
+  // T25a: what the agent claimed and the diff did not support is not a
+  // Finding, but a person is told it was left out.
+  it("passes on the Findings the Code Review Agent made that the diff did not support", async () => {
+    const claim =
+      "The Code Review Agent's SEC-02 Finding at server/todos.ts:15 was not recorded: the diff does not show that code at server/todos.ts:15.";
+    const { review, run } = setup({ notRecorded: [claim] });
+
+    const { findings, problems } = await review.reviewRun(run);
+
+    expect(findings).toEqual([]);
+    expect(problems).toEqual([claim]);
+  });
+
+  it("tells a person when the diff was too big to read whole", async () => {
+    const { review, run } = setup({
+      diff: "diff --git a/a.ts b/a.ts\n+x\n…(the diff is 412345 bytes; cut here)\n",
+    });
+
+    const { problems } = await review.reviewRun(run);
+
+    expect(problems).toEqual([
+      "The diff of this Run is 412345 bytes, more than a review reads: the Code Review Agent read the first part only.",
     ]);
   });
 
