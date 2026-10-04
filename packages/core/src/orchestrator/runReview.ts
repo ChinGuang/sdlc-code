@@ -87,6 +87,7 @@ export class AgentRunReview implements RunReview {
       problems.push(
         `The Code Review Agent cited ${unknown}, which this Review Standard does not have.`,
       );
+    problems.push(...reviewed.notRecorded);
     return {
       findings: [...fromLinters, ...reviewed.findings],
       stopReason: reviewed.loop.stopReason,

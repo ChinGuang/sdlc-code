@@ -57,6 +57,8 @@ function setup(
     lint?: LintRunOutcome;
     userStandards?: string | null;
     agentFindings?: ReportedFinding[];
+    /** What the agent reported that the diff did not support (T25a). */
+    notRecorded?: string[];
     stopReason?: "answered" | "tokenBudget";
   } = {},
 ) {
@@ -99,6 +101,7 @@ function setup(
           source: "codeReview" as const,
         })),
         unknownRuleIds: [],
+        notRecorded: options.notRecorded ?? [],
         loop: {
           stopReason: options.stopReason ?? "answered",
           answer: "Reviewed.",
@@ -218,6 +221,19 @@ describe("AgentRunReview: what the linters contribute", () => {
     expect(problems).toEqual([
       expect.stringContaining("The linters did not run"),
     ]);
+  });
+
+  // T25a: what the agent claimed and the diff did not support is not a
+  // Finding, but a person is told it was left out.
+  it("passes on the Findings the Code Review Agent made that the diff did not support", async () => {
+    const claim =
+      "The Code Review Agent's SEC-02 Finding at server/todos.ts:15 was not recorded: the diff does not show that code at server/todos.ts:15.";
+    const { review, run } = setup({ notRecorded: [claim] });
+
+    const { findings, problems } = await review.reviewRun(run);
+
+    expect(findings).toEqual([]);
+    expect(problems).toEqual([claim]);
   });
 
   it("says so when a tool failed without reporting anything", async () => {
