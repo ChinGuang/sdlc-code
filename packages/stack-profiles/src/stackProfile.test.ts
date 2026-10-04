@@ -166,6 +166,26 @@ describe("templateFacts (T24d)", () => {
     expect(exported("src/api.ts", "getHealth")).toBe(true);
   });
 
+  // T25b: the facts tell the frontend to use these; they must be there.
+  it("names the screen-test helpers the template ships, and ships them", () => {
+    const helpers = file("src/testing/screens.tsx");
+    const example = file("src/testing/screenTests.example.test.tsx");
+
+    for (const name of [
+      "stubApi",
+      "renderRoute",
+      "currentPath",
+      "typeInto",
+      "press",
+    ]) {
+      expect(facts).toContain(name);
+      expect(helpers).toMatch(new RegExp(`^export function ${name}\\b`, "m"));
+      // The example shows each one in use.
+      expect(example).toContain(name);
+    }
+    expect(file("src/testSetup.ts")).toContain("vi.unstubAllGlobals()");
+  });
+
   it("names files and tests the template ships", () => {
     for (const path of facts.match(/\b(?:server|src)\/[\w./]+\.tsx?\b/g) ?? [])
       expect(files.map((one) => one.path)).toContain(path);

@@ -264,10 +264,8 @@ describe("ChatAgentLoop: the task checks the answer (T24j)", () => {
 
     const result = await loop.run({
       ...task,
-      check: async () => {
-        checks++;
-        return "Still failing.";
-      },
+      // Something new each time: a failure that is the same again is another case.
+      check: async () => `Still failing (${++checks}).`,
     });
 
     expect(checks).toBe(MAX_CHECKS);
@@ -275,6 +273,50 @@ describe("ChatAgentLoop: the task checks the answer (T24j)", () => {
       stopReason: "answered",
       answer: "Done for good.",
     });
+  });
+
+  // T25b: two Steps spent 25 and 18 minutes on a test they could not fix; a
+  // failure the agent did not change is no use to send again.
+  it("lets an answer stand when its check fails the same way again", async () => {
+    const { loop } = makeLoop([
+      { content: "Done." },
+      { content: "Fixed it." },
+      { content: "Should not be asked." },
+      memoryReply,
+    ]);
+    let checks = 0;
+
+    const result = await loop.run({
+      ...task,
+      check: async () => {
+        checks++;
+        return "1. src/Create.test.tsx: expect is not defined.";
+      },
+    });
+
+    expect(checks).toBe(2);
+    expect(result).toMatchObject({
+      stopReason: "answered",
+      answer: "Fixed it.",
+      iterations: 2,
+    });
+  });
+
+  it("sends a failure back again once it has changed", async () => {
+    const { loop } = makeLoop([
+      { content: "Done." },
+      { content: "Fixed one." },
+      { content: "Fixed the other." },
+      memoryReply,
+    ]);
+    const says = ["1. first problem", "1. a different problem", null];
+
+    const result = await loop.run({
+      ...task,
+      check: async () => says.shift() ?? null,
+    });
+
+    expect(result).toMatchObject({ answer: "Fixed the other.", iterations: 3 });
   });
 
   // The T24j review: a check must never leave a Step worse off than none.

@@ -101,6 +101,19 @@ export const REACT_NODE: StackProfile = {
         /^\s*import\s+(?:[^'"]*\s+from\s+)?["']@testing-library\/jest-dom["']/,
       says: 'Remove this import: src/testSetup.ts already loads the Testing Library matchers (toBeInTheDocument and the rest) for every test, through "@testing-library/jest-dom/vitest".',
     },
+    {
+      // Found in T25: three tries at mocking useNavigate cost a Step each.
+      files: /\.test\.tsx?$/,
+      forbidden: /\bvi\.(mock|doMock)\(\s*["']react-router(-dom)?["']/,
+      says: "Do not mock react-router-dom (vi.mock is hoisted above the imports it needs): render the screen with renderRoute from src/testing/screens.tsx and check currentPath() after it navigates.",
+    },
+    {
+      // Found in T25: the demo's tests called userType and userClick, which
+      // were never defined.
+      files: /\.test\.tsx?$/,
+      forbidden: /["']@testing-library\/user-event["']/,
+      says: "@testing-library/user-event is not installed (no new dependencies): use typeInto and press from src/testing/screens.tsx.",
+    },
   ],
   reviewStandard: BASELINE_RULES,
   writablePaths: {
@@ -138,12 +151,12 @@ export const REACT_NODE: StackProfile = {
       ],
       frontend: [
         "src/App.test.tsx and src/screens/HealthScreen.test.tsx are the template's tests: add to them, and keep what they check passing.",
-        'Screen tests (src/**/*.test.tsx) run in jsdom with Testing Library, its matchers loaded by src/testSetup.ts for every test: never import "@testing-library/jest-dom" in a test, as it needs a global expect that is not there. Stub the API with vi.stubGlobal("fetch", …) as src/screens/HealthScreen.test.tsx does, and render a routed screen inside a MemoryRouter as src/App.test.tsx does.',
+        'Screen tests (src/**/*.test.tsx) run in jsdom with Testing Library, its matchers loaded by src/testSetup.ts for every test: never import "@testing-library/jest-dom" in a test, as it needs a global expect that is not there. @testing-library/user-event is not installed: use typeInto and press.',
+        'Test a screen with the helpers in src/testing/screens.tsx: stubApi answers its requests from a table ("GET /todos", in the API Contract\'s paths, no /api), renderRoute mounts it on its own route, currentPath() says where the router is, typeInto and press act as a person does. src/testing/screenTests.example.test.tsx is a worked example of a form that saves and navigates and of a screen that reads route params, with loading, error and success: copy it rather than inventing the test.',
+        "Never fake useNavigate or mock react-router-dom (vi.mock is hoisted and breaks the test): navigate for real and look at currentPath(). Never build a Response by hand for a fetch: stubApi does.",
         "src/api.ts is the only way the screens talk to the API: add functions beside getJson and getHealth, and keep both.",
         'getJson(path) adds the /api prefix and only reads: call it with the API Contract\'s path as it is, getJson("/todos"), never "/api/todos". For a write, add a function to src/api.ts that calls fetch(`/api${path}`, …) the same way.',
-        "src/App.tsx holds every screen as a <Route>; the Router is in src/main.tsx, so a test renders App inside a MemoryRouter.",
-        // Found in T25: an Update Todo screen test looped on this.
-        'A screen that reads its route\'s params (useParams) is tested through its route, or the params are empty: <MemoryRouter initialEntries={["/edit/1"]}><Routes><Route path="/edit/:id" element={<EditScreen />} /></Routes></MemoryRouter>.',
+        'src/App.tsx holds every screen as a <Route>; the Router is in src/main.tsx. A screen that reads its route\'s params (useParams) is tested through its route with renderRoute(<EditScreen />, { route: "/edit/:id", at: "/edit/1" }), or the params are empty.',
       ],
     },
   },

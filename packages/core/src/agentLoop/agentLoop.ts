@@ -201,6 +201,7 @@ export class ChatAgentLoop implements AgentLoop {
       lastPromptTokens: 0,
       checks: 0,
       sentBack: null,
+      lastProblems: null,
     };
 
     try {
@@ -273,6 +274,11 @@ export class ChatAgentLoop implements AgentLoop {
           return;
         const problems = await check(state.answer);
         if (problems === null) return;
+        // The same failure again: the agent could not fix it, and another
+        // round would cost its turns and a check for nothing (T25b). The
+        // answer stands; the Test Run judges it, and an Escalation follows.
+        if (problems === state.lastProblems) return;
+        state.lastProblems = problems;
         state.checks++;
         // Not an answer yet: the Step goes on. If its turns run out before
         // another answer, this one stands (see run), as it would have
@@ -435,6 +441,8 @@ type LoopState = Omit<AgentLoopResult, "workingMemory"> & {
   checks: number;
   /** The last answer the check sent back, until another one comes. */
   sentBack: string | null;
+  /** What the check last said, to tell a failure fixed from one repeated. */
+  lastProblems: string | null;
 };
 
 const STOP_REASON_TEXT: Record<StopReason, string> = {

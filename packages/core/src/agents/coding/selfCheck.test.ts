@@ -123,6 +123,34 @@ describe("cheapFindings (T24j)", () => {
     ]);
   });
 
+  // T25: three tries at mocking useNavigate cost a Step each, and the demo's
+  // tests called userType and userClick, which were never defined.
+  it("names a mocked router and an uninstalled user-event, and what to use", () => {
+    const files = withFile(
+      "src/screens/CreateTodoScreen.test.tsx",
+      [
+        'import userEvent from "@testing-library/user-event";',
+        'vi.mock("react-router-dom", () => ({ useNavigate: () => vi.fn() }));',
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      cheapFindings(files, REACT_NODE, "frontend").map(
+        (finding) => finding.summary,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /:1: @testing-library\/user-event is not installed .* typeInto and press/,
+        ),
+        expect.stringMatching(
+          /:2: Do not mock react-router-dom .* renderRoute .* currentPath\(\)/,
+        ),
+      ]),
+    );
+  });
+
   it("finds nothing in the template itself", () => {
     expect(cheapFindings(template, REACT_NODE, "backend")).toEqual([]);
     expect(cheapFindings(template, REACT_NODE, "frontend")).toEqual([]);
