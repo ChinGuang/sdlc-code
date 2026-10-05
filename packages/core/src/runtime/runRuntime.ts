@@ -372,6 +372,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
       runs,
       slices,
       tasks,
+      escalations,
       workspaces: workspacesFor(run),
       repoDir: repoDir(run.id),
       pusher: new TokenGitPusher({ token: githubToken }),

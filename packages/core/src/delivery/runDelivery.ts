@@ -6,7 +6,10 @@
  * "Open draft PR" ticked, or failed in auto mode — opens a Draft PR instead,
  * and only ever with code that passed a Test Run: the unfinished Slice's
  * Workspaces are discarded before anything is pushed. The run branch itself
- * needs no repair, because only a passing Test Run ever moves it.
+ * needs no repair, because only a passing Test Run ever moves it. That also
+ * means a Slice that passed and was then sent back (by Code Review) keeps its
+ * Slice Commits on the branch: the pull request says so (T25d), and why the
+ * Run stopped, from the Escalation it was aborted at.
  *
  * Nothing is pushed when there is no Slice Commit, or when the person said not
  * to. A Run's work then stays in its local repository, where it already is.
@@ -17,7 +20,9 @@ import {
   type GitPusher,
   type PullRequest,
 } from "@sdlc-code/clients";
-import type { Run, Slice } from "../domain/entities.js";
+import type { Escalation, Run, Slice } from "../domain/entities.js";
+import type { EscalationTrigger } from "../domain/runLifecycle.js";
+import type { EscalationStore } from "../persistence/escalationStore.js";
 import type { RunStore } from "../persistence/runStore.js";
 import type { SliceStore } from "../persistence/sliceStore.js";
 import type { TaskStore } from "../persistence/taskStore.js";
@@ -55,6 +60,8 @@ export type RunDeliveryOptions = {
   runs: RunStore;
   slices: SliceStore;
   tasks: TaskStore;
+  /** Why a Run that was aborted at an Escalation stopped. */
+  escalations: EscalationStore;
   /** The Run's local repository: what is pushed, and what is tidied first. */
   workspaces: WorkspaceManager;
   pusher: GitPusher;
@@ -88,7 +95,7 @@ export class GitHubRunDelivery implements RunDelivery {
     if (commits.length === 0)
       return { status: "keptLocal", reason: "noSliceCommit" };
 
-    const content = this.#pullRequestContent(run, reason);
+    const content = this.#pullRequestContent(run, reason, commits);
     await this.#beginBaseIfMissing(run);
     await pusher.push({
       repoDir,
@@ -169,7 +176,11 @@ export class GitHubRunDelivery implements RunDelivery {
   }
 
   /** What the pull request says, read from the Run's own record. */
-  #pullRequestContent(run: Run, reason: DeliveryReason): RunOutcome {
+  #pullRequestContent(
+    run: Run,
+    reason: DeliveryReason,
+    commits: readonly string[],
+  ): RunOutcome {
     const planned = this.#options.slices.listSlices(run.id);
     const passed = planned.filter((slice) => slice.status === "passed");
     const summary = `${passed.length} of ${planned.length} Slices of "${oneLine(run.projectRequest)}" were built and tested in a sandbox.`;
@@ -185,18 +196,32 @@ export class GitHubRunDelivery implements RunDelivery {
     const unfinished = planned.find(
       (slice) => slice.status !== "passed" && slice.status !== "skipped",
     );
+    const escalations = this.#options.escalations.listEscalations(run.id);
+    // A Slice that passed and was sent back is not "passed" any more, yet its
+    // Slice Commits are on the branch. They are the ones after the last
+    // finished Slice's commit: Slices are built in order, so nothing else is.
+    const lastFinished = Math.max(
+      ...passed.map((slice) => commits.indexOf(slice.commitSha ?? "")),
+      -1,
+    );
     return {
       outcome: reason.ended,
       runId: run.id,
       requestTitle: run.projectRequest,
       summary,
-      stopReason: run.failure?.summary ?? "The Run was stopped.",
+      stopReason: stopReason(run, reason.ended, escalations),
       passedSlices: passed.map((slice) => slice.title),
       totalSlices: planned.length,
       failedSlice: unfinished
         ? {
             name: unfinished.title,
-            issueReports: issueLines(run.failure?.reports ?? []),
+            issueReports: issueLines([
+              ...(run.failure?.reports ?? []),
+              ...escalations
+                .filter((escalation) => escalation.slice === unfinished.title)
+                .flatMap((escalation) => escalation.reports),
+            ]),
+            pushedCommits: commits.length - 1 - lastFinished,
           }
         : null,
       workingMemory: this.#workingMemory(run.id, unfinished),
@@ -223,8 +248,62 @@ export class GitHubRunDelivery implements RunDelivery {
   }
 }
 
+/** What a person is told about an Escalation's trigger. */
+const TRIGGER_TEXT: Record<EscalationTrigger, string> = {
+  retryBudget: "the Retry Budget was spent",
+  tokenBudget: "the Token Budget was spent",
+  loop: "the same failure came back after a fix",
+  undecidableOwner: "no agent could be blamed for the failure",
+};
+
+/**
+ * Why the Run stopped. A failure says so itself; a Run aborted at an
+ * Escalation is described by the last one (the one the abort answered), with
+ * the Brief's account of what was failing when there is one.
+ */
+function stopReason(
+  run: Run,
+  ended: "aborted" | "failed",
+  escalations: readonly Escalation[],
+): string {
+  if (run.failure) return run.failure.summary;
+  // Only the Escalation a person answered with "abort" is where it stopped: an
+  // earlier one that was retried, or one still open, is not.
+  const last = escalations.at(-1);
+  const atEscalation = ended === "aborted" && last?.choice === "abort";
+  const where = last?.slice ? ` on "${last.slice}"` : "";
+  const lines = [
+    atEscalation
+      ? `Aborted by a person at an Escalation${where}: ${TRIGGER_TEXT[last.trigger]}.`
+      : ended === "aborted"
+        ? "Aborted by a person."
+        : "The Run failed.",
+  ];
+  const failing = atEscalation ? last.brief?.analysis?.failing : undefined;
+  if (failing) lines.push(`What was failing: ${failing}`);
+  if (escalations.length > 0)
+    lines.push(
+      `The Run was escalated ${escalations.length} time${escalations.length === 1 ? "" : "s"} in all.`,
+    );
+  return lines.join("\n\n");
+}
+
 /** Issue Reports as stored: only their text matters to a reader. */
 function issueLines(reports: readonly unknown[]): string[] {
+  const lines = reportLines(reports);
+  // The same failure is reported at every attempt, and every Escalation.
+  const unique = [...new Set(lines)];
+  return unique.length > MAX_REPORTS
+    ? [
+        ...unique.slice(0, MAX_REPORTS),
+        `…and ${unique.length - MAX_REPORTS} more`,
+      ]
+    : unique;
+}
+
+const MAX_REPORTS = 10;
+
+function reportLines(reports: readonly unknown[]): string[] {
   return reports.flatMap((report) => {
     if (typeof report !== "object" || report === null) return [];
     const { failingTest, step, error } = report as {
