@@ -306,7 +306,7 @@ stateDiagram-v2
 
 ## 3b. Stopping early — what goes into the Draft PR (sequence)
 
-Applies to an auto-mode failure and to an abort with "Open draft PR" ticked, whether at an Escalation or by Cancel run at any time. A pull request already open (at the PR Gate) stays open; nothing more is pushed. Only Slice Commits are pushed; the unfinished Slice's worktrees are discarded and never merged into the run branch.
+Applies to an auto-mode failure and to an abort with "Open draft PR" ticked, whether at an Escalation or by Cancel run at any time. A pull request already open (at the PR Gate) stays open; nothing more is pushed. Only Slice Commits are pushed; the unfinished Slice's worktrees are discarded and never merged into the run branch. A Slice that passed and was sent back keeps the Slice Commits it already has on the branch; the description names them (T25d).
 
 The run branch needs no repair: only a passing Test Run ever moves it, so it is already at the last Slice Commit. That is why the implementation discards the worktrees and pushes, without a reset.
 
@@ -334,7 +334,7 @@ sequenceDiagram
     O->>G: empty Target Repo (409)? push its base branch from the Run's start commit
     O->>G: push run branch
     O->>G: open draft PR "[Aborted] or [Failed] title — N of M slices"
-    Note over O,G: description = passed Slices, failed Slice + Issue Reports,<br/>Working Memory. No code from the unfinished Slice.
+    Note over O,G: description = the Escalation it stopped at and why, finished Slices,<br/>the unfinished Slice (with its pushed commits, if any) + Issue Reports,<br/>Working Memory folded. No unsaved work from the unfinished Slice.
     G-->>O: draft PR number
   else checkbox unticked or no Slice Commit
     O->>O: nothing pushed, run branch stays local

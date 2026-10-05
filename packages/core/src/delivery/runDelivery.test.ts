@@ -11,6 +11,7 @@ import {
 } from "@sdlc-code/clients";
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "../persistence/database.js";
+import { SqliteEscalationStore } from "../persistence/escalationStore.js";
 import { SqliteRunStore } from "../persistence/runStore.js";
 import { SqliteSliceStore } from "../persistence/sliceStore.js";
 import { SqliteTaskStore } from "../persistence/taskStore.js";
@@ -28,6 +29,7 @@ function setup(
   const runs = new SqliteRunStore(store);
   const slices = new SqliteSliceStore(store);
   const tasks = new SqliteTaskStore(store);
+  const escalations = new SqliteEscalationStore(store);
   const run = runs.createRun({
     projectRequest: "Build a todo app where a user can add and delete todos.",
     mode: "gated",
@@ -94,6 +96,7 @@ function setup(
     runs,
     slices,
     tasks,
+    escalations,
     workspaces,
     pusher,
     github,
@@ -104,6 +107,7 @@ function setup(
     runs,
     slices,
     tasks,
+    escalations,
     run,
     steps,
     pushes,
@@ -212,8 +216,195 @@ describe("GitHubRunDelivery: a Run that stopped early (diagram 3b)", () => {
     expect(pull?.draft).toBe(true);
     expect(pull?.body).toContain("- [x] Walking Skeleton");
     expect(pull?.body).toContain("- [ ] Todos (not included)");
+    expect(pull?.body).toContain("nothing of Todos is");
     expect(pull?.body).toContain("Todos > empty state: expected 1");
     expect(pull?.body).toContain("Still failing after 3 retries");
+  });
+
+  // T25d: what a person reads in the Draft PR of a Run aborted at an Escalation.
+  describe("a Run aborted at an Escalation", () => {
+    function abortedAt(context: ReturnType<typeof setup>) {
+      const { second } = oneOfTwo(context);
+      const first = context.escalations.openEscalation(context.run.id, {
+        trigger: "loop",
+        summary: "The same failure came back after a fix",
+        slice: "Todos",
+        reports: [{ failingTest: "Todos > empty state", error: "expected 1" }],
+      });
+      context.escalations.resolveEscalation(first.id, {
+        choice: "retryWithHint",
+        hint: "use pending",
+      });
+      const last = context.escalations.openEscalation(context.run.id, {
+        trigger: "tokenBudget",
+        summary: "The Run's Token Budget is spent.",
+        slice: "Todos",
+        reports: [{ failingTest: "Todos > empty state", error: "expected 1" }],
+      });
+      context.escalations.resolveEscalation(last.id, { choice: "abort" });
+      return { second, last };
+    }
+
+    it("says which Escalation it stopped at, instead of 'The Run was stopped'", async () => {
+      const context = setup();
+      abortedAt(context);
+
+      await context.delivery.deliver(context.run.id, {
+        ended: "aborted",
+        openDraftPr: true,
+      });
+
+      const body = context.opened[0]!.body;
+      expect(body).toContain(
+        'Aborted by a person at an Escalation on "Todos": the Token Budget was spent.',
+      );
+      expect(body).toContain("escalated 2 times in all");
+      expect(body).not.toContain("The Run was stopped");
+    });
+
+    it("carries what the Brief said was failing", async () => {
+      const context = setup();
+      const { last } = abortedAt(context);
+      context.escalations.setBrief(last.id, {
+        facts: [],
+        analysis: {
+          failing: "The empty state never renders.",
+          tried: "",
+          cause: "",
+          choice: "retryWithHint",
+          hint: null,
+        },
+        withoutAnalysis: null,
+      });
+
+      await context.delivery.deliver(context.run.id, {
+        ended: "aborted",
+        openDraftPr: true,
+      });
+
+      expect(context.opened[0]!.body).toContain(
+        "What was failing: The empty state never renders.",
+      );
+    });
+
+    it("lists the Issue Reports behind its Escalations once each", async () => {
+      const context = setup();
+      abortedAt(context);
+
+      await context.delivery.deliver(context.run.id, {
+        ended: "aborted",
+        openDraftPr: true,
+      });
+
+      const body = context.opened[0]!.body;
+      expect(body).toContain("- Todos > empty state: expected 1");
+      expect(body.split("- Todos > empty state: expected 1")).toHaveLength(2);
+      expect(body).not.toContain("No failing test was recorded");
+    });
+
+    // Cancel run, any time: an Escalation answered earlier is not where it stopped.
+    it("does not blame an Escalation that was retried", async () => {
+      const context = setup();
+      oneOfTwo(context);
+      const retried = context.escalations.openEscalation(context.run.id, {
+        trigger: "tokenBudget",
+        summary: "spent",
+        slice: "Todos",
+      });
+      context.escalations.resolveEscalation(retried.id, {
+        choice: "retryWithHint",
+      });
+
+      await context.delivery.deliver(context.run.id, {
+        ended: "aborted",
+        openDraftPr: true,
+      });
+
+      const body = context.opened[0]!.body;
+      expect(body).toContain("Aborted by a person.");
+      expect(body).not.toContain("at an Escalation");
+      expect(body).toContain("escalated 1 time in all");
+    });
+
+    it("says a Run that failed failed, not that a person aborted it", async () => {
+      const context = setup();
+      oneOfTwo(context);
+      const escalation = context.escalations.openEscalation(context.run.id, {
+        trigger: "loop",
+        summary: "same failure",
+        slice: "Todos",
+      });
+      context.escalations.resolveEscalation(escalation.id, {
+        choice: "abort",
+      });
+
+      await context.delivery.deliver(context.run.id, {
+        ended: "failed",
+        openDraftPr: true,
+      });
+
+      expect(context.opened[0]!.body).toContain("The Run failed.");
+      expect(context.opened[0]!.body).not.toContain("Aborted by a person");
+    });
+
+    it("says a person aborted it when it stopped at no Escalation", async () => {
+      const context = setup();
+      oneOfTwo(context);
+
+      await context.delivery.deliver(context.run.id, {
+        ended: "aborted",
+        openDraftPr: true,
+      });
+
+      expect(context.opened[0]!.body).toContain("Aborted by a person.");
+    });
+  });
+
+  // T25d: a Slice that passed and was sent back keeps its commits on the branch,
+  // so a pull request that says "not included" would be telling a lie.
+  it("says a Slice sent back after it passed has its commits in the pull request", async () => {
+    const context = setup({ commits: ["commit-1", "commit-2", "commit-3"] });
+    const { second } = oneOfTwo(context);
+    // It passed (commit-2), was sent back, passed again (commit-3) and was sent
+    // back once more: the Slice no longer names a commit, both are on the branch.
+    context.slices.moveSlice(second.id, "testing");
+    context.slices.moveSlice(second.id, "passed", "commit-2");
+    context.slices.moveSlice(second.id, "building");
+
+    await context.delivery.deliver(context.run.id, {
+      ended: "aborted",
+      openDraftPr: true,
+    });
+
+    const pull = context.opened[0]!;
+    expect(pull.title).toMatch(/ — 1 of 2 slices, 1 unfinished$/);
+    expect(pull.body).toContain(
+      "- [ ] Todos (unfinished; 2 commits that passed testing included)",
+    );
+    expect(pull.body).not.toContain("(not included)");
+  });
+
+  // The count is of what follows the last finished Slice, not of what is left
+  // over: a finished Slice that passed twice leaves its first commit behind it.
+  it("does not count a finished Slice's earlier commit as the unfinished Slice's", async () => {
+    const context = setup({ commits: ["commit-1", "commit-2"] });
+    const [first] = context.slices.saveSlices(context.run.id, [
+      { title: "Walking Skeleton", isWalkingSkeleton: true },
+      { title: "Todos", isWalkingSkeleton: false },
+    ]);
+    // It passed with commit-1, was sent back, and finished with commit-2.
+    context.slices.moveSlice(first!.id, "building");
+    context.slices.moveSlice(first!.id, "testing");
+    context.slices.moveSlice(first!.id, "passed", "commit-2");
+
+    await context.delivery.deliver(context.run.id, {
+      ended: "aborted",
+      openDraftPr: true,
+    });
+
+    const pull = context.opened[0]!;
+    expect(pull.body).toContain("- [ ] Todos (not included)");
+    expect(pull.title).not.toContain("unfinished");
   });
 
   it("titles a Draft PR with how far the Run got", async () => {

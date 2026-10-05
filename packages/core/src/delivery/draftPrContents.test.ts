@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../persistence/database.js";
+import { SqliteEscalationStore } from "../persistence/escalationStore.js";
 import { SqliteRunStore } from "../persistence/runStore.js";
 import { SqliteSliceStore } from "../persistence/sliceStore.js";
 import { SqliteTaskStore } from "../persistence/taskStore.js";
@@ -113,6 +114,7 @@ async function setup() {
     runs,
     slices,
     tasks: new SqliteTaskStore(store),
+    escalations: new SqliteEscalationStore(store),
     workspaces,
     pusher,
     github,
