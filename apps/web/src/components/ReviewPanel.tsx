@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { useState } from "react";
 import type { RunsApi } from "../api/client.js";
 import type { RunDetail, RunEvent, Severity } from "../api/types.js";

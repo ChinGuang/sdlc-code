@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: MPL-2.0
 // ESLint flat config. The "no-restricted-syntax" rules enforce CODING_STANDARDS.md;
-// tests/codingStandards.test.ts proves they fire.
+// tests/codingStandards.test.ts proves they fire. The "spdx/header" rule keeps the
+// licence line on every source file (T26b); tests/spdxHeader.test.ts proves it.
 import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
+import spdx from "./eslint-rules/spdxHeader.js";
 
 export default tseslint.config(
   {
@@ -61,6 +64,11 @@ export default tseslint.config(
       ],
       "@typescript-eslint/consistent-type-imports": "error",
     },
+  },
+  {
+    files: ["**/*.{ts,tsx,js,mjs}"],
+    plugins: { spdx },
+    rules: { "spdx/header": "error" },
   },
   {
     files: ["apps/web/**/*.{ts,tsx}"],

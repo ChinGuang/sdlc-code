@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import { IllegalTransitionError } from "../domain/illegalTransitionError.js";
 import { SqliteSliceStore, type SliceStore } from "./sliceStore.js";

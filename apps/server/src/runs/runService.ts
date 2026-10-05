@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What the HTTP API can do with Runs (T21). Controllers depend on this, never
  * on the runtime, so every route can be tested without a model, a sandbox or a

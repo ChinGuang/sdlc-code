@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Server-Sent Events parsing and response assembly for streamed chat completions.
  * Shapes verified against Token Factory on 2026-09-19 (see fixtures/streamToolCall.sse).

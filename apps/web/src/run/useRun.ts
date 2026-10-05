@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * One Run, kept live: read once, then followed on its event stream. Status and
  * tokens change in place as their events arrive; what an event only hints at

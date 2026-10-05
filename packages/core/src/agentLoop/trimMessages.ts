@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Keeps a Step's prompt from growing quadratically. Every turn re-sends the
  * whole conversation, so a 45-turn Step with twenty file contents in it pays

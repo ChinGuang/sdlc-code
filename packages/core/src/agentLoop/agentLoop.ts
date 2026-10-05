@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The agent loop: one agent working on one Task until it hands back a result
  * (one Step). Follows the rules from spike T03 (docs/spikes/nemotron-tools.md):

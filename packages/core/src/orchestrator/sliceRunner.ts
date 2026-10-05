@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Builds one Slice (UML diagram 6): each side's Coding Agent writes in its own
  * Workspace at the same time, the Workspaces merge, the Testing Agent runs the

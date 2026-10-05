@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { useEffect, useMemo, useState } from "react";
 import { HttpRunsApi, type RunsApi } from "./api/client.js";
 import { Layout } from "./Layout.js";

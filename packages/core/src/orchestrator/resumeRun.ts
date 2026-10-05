@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Picking a Run back up (UML diagram 9). A Run stops for ordinary reasons — a
  * spent Token Budget, a closed laptop, a killed process — and everything it

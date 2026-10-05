@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Prints each role's model, thinking and capabilities, and checks the models
  * against Token Factory. Run: pnpm --filter @sdlc-code/core config:check

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A Run's Approved Documents, stored as the Design Phase stores them, for tests
  * that need documents to read rather than a design to make.

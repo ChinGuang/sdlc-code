@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The stored form of a design: one document per kind (T07 DocumentStore).
  * The System Design is Markdown for humans at the Design Gate; the Slice Plan

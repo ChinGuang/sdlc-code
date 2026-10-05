@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Run page's decisions: a tab for each Gate, the Escalation dialog that
  * opens by itself, and the Run as a decision left it.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import type { ApprovedDocuments } from "../agents/coding/codingContext.js";
 import { goodDesign } from "../agents/systemDesign/fixtures/goodDesign.js";

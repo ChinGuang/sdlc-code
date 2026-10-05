@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What a Stack Profile's lint script reports (T19). Like the test script, it
  * prints noisy output and then one marker line with JSON, so the result can be

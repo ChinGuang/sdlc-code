@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { Injectable } from "@nestjs/common";
 import { AGENT_ROLES } from "@sdlc-code/core";
 

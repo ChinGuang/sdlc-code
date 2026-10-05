@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The review seam over a real database: which Rules a Run reviews against, what
  * the linters contribute, what the agent is told, and what is said out loud

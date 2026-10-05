@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The phase stepper as each kind of Run shows it: done up to where it is, the
  * gates skipped in auto mode, and a stopped Run marked where it stopped.

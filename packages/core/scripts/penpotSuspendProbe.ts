@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Measures what the spike deferred to T10: how the Penpot MCP behaves while the
  * plugin tab is backgrounded, and how quickly it recovers when refocused.

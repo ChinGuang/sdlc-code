@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A Coding Agent's own check before its Step ends (T24j). Agents handed in
  * code that did not compile (an invalid `<htmlFor>` JSX tag, a missing

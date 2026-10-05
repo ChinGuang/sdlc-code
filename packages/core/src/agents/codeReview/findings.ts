@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Findings (CONTEXT.md): a Rule violation, from a linter or the Code Review
  * Agent, always citing a Rule ID. Only blocking Findings send work back; the

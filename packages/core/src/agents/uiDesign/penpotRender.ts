@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Turns a UI Spec into Penpot plugin code. The model designs the layout as
  * data; this module writes the JavaScript that runs in the user's browser, so

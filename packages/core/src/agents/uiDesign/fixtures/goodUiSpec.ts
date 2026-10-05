@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { goodDesign } from "../../systemDesign/fixtures/goodDesign.js";
 import type { UiSpecContext } from "../validateUiSpec.js";
 import type { UiSpec } from "../uiSpec.js";

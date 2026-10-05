@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Runs the agent loop once against Token Factory with read-only repo tools.
  * Run: pnpm --filter @sdlc-code/core agent:smoke

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Title and description of the pull request a Run opens: a ready PR when the Run
  * completes (PR Gate), a Draft PR when it is aborted or fails (UML diagram 3b).

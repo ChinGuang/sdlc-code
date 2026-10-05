@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Backend and frontend both add dependencies and scripts to package.json in
  * the same Slice. Their lines sit next to each other, so git reports a

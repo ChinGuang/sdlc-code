@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Board 03: a Verdict on every document in review before anything is sent,
  * comments with every change asked for, and the Stale warning shown before a

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Parses Mermaid in Node. Mermaid's sanitiser (DOMPurify) wants a DOM when it
  * loads, so a tiny linkedom DOM is lent to it while the module loads (once per

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Delivery over a real database, with a fake GitHub and a fake Workspace
  * manager: what reaches the Target Repo, and what never does (UML diagram 3b).

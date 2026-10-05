@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A few screens need no router library: the page is picked from the URL's hash,
  * so it works when Vite or any static server serves index.html, and a link to

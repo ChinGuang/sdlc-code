@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Orchestrator (CONTEXT.md, UML diagrams 3, 5–7): steps a Run from its
  * Project Request to reviewing, stopping wherever a person decides.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What a unified diff shows, line by line (T25a). The Code Review Agent's
  * Findings are checked against it: a Finding about a file or a line the diff

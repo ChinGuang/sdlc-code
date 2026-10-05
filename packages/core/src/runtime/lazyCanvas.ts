@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A UiCanvas that connects to Penpot the first time a Run actually draws
  * something (T21). The server starts before any browser tab exists, and a Run

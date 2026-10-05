@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Proves the ESLint rules that enforce CODING_STANDARDS.md (SC-2, SC-3)
  * fire on violations and stay quiet on compliant code.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What the decision screens show and check, worked out without rendering: the
  * Design Gate's Verdicts and its Stale warning, the PR Gate's Findings, and

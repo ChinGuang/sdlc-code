@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 export * from "./agentRoles.js";
 export * from "./runtime/lazyCanvas.js";
 export * from "./runtime/runtimeEvents.js";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Thin wrapper over the Penpot MCP tools used by the UI Design Agent.
  * Transport-agnostic: takes a `callTool` function (the MCP SDK client's callTool in production).

@@ -188,4 +188,4 @@ Every dependency's licence was checked, and the terms of the services this tool 
 
 ## License
 
-[Mozilla Public License 2.0](LICENSE).
+[Mozilla Public License 2.0](LICENSE). Every source file starts with an `SPDX-License-Identifier: MPL-2.0` line; `pnpm lint` fails without it and `pnpm lint --fix` adds it.

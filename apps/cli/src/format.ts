@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What the CLI prints, worked out without printing it (board 06). Colour is a
  * parameter: a terminal gets it, a pipe, a file or NO_COLOR does not.

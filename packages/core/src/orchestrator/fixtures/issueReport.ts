@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Test helper: an Issue Report with the fields a test cares about. */
 import type { IssueReport } from "../../agents/testing/issueReports.js";
 

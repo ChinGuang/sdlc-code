@@ -97,7 +97,9 @@ Source: [GitHub Terms of Service](https://docs.github.com/en/site-policy/github-
 
 ## 5. Source-file notices
 
-An SPDX identifier line (`SPDX-License-Identifier: MPL-2.0`) at the top of every source file, and a lint rule that keeps it there, is the follow-up to this task.
+Every `.ts`, `.tsx`, `.js` and `.mjs` source file of the repository starts with `// SPDX-License-Identifier: MPL-2.0` (below a shebang, where there is one). The `spdx/header` rule in `eslint-rules/spdxHeader.js` fails `pnpm lint` for a file without it, and `eslint --fix` adds it, so a new file costs one command. `tests/spdxHeader.test.ts` proves the rule.
+
+Not covered: the starter template (`packages/stack-profiles/templates`), which is copied into generated applications, has no per-file line until its licence is decided (section 1); and JSON, Markdown and configuration files, which cannot carry one. The `LICENSE` file and the `license` field of every `package.json` cover those.
 
 ## 6. Open points
 

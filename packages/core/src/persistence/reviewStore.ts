@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { Finding } from "../agents/codeReview/findings.js";
 import type { AgentLoopResult } from "../agentLoop/agentLoop.js";
 import {

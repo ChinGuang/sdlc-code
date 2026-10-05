@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Runs the System Design Agent once against Token Factory and writes the three
  * documents to a temp folder.

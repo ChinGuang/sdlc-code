@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Parser fixtures are real Test Run output from Nebius Sandboxes, recorded by
  * `pnpm --filter @sdlc-code/core fixtures:testing`.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Runs waiting for a person, for the decision screens' tests: at the Design
  * Gate, at the PR Gate, and escalated.

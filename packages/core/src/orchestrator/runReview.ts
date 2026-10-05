@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The review a Run gets before anyone is asked to look at its pull request
  * (T19, UML diagram 8): the Stack Profile's linters in the sandbox, then the

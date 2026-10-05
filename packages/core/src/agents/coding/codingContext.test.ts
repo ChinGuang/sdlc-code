@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { REACT_NODE } from "@sdlc-code/stack-profiles";
 import { describe, expect, it } from "vitest";
 import { goodDesign } from "../systemDesign/fixtures/goodDesign.js";

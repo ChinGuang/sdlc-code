@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Chat completions against Nebius Token Factory (OpenAI-compatible API):
  * tools, structured output, streaming, usage and model listing.

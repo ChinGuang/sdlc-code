@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Records what real Test Runs print, as fixtures for the Testing Agent's
  * parser (T16): a passing Slice, failing unit tests on both sides, a failing

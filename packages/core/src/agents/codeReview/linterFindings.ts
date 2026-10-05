@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What the linters found, as Findings (T19, diagram 8 step 2). Each complaint
  * cites one of the Stack Profile's LINT Rules, and the tool's own rule name

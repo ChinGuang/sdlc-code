@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import { SqliteDocumentStore } from "./documentStore.js";
 import { SqliteGateStore, type GateStore } from "./gateStore.js";

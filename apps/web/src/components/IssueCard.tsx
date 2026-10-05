@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { RunEvent } from "../api/types.js";
 import { openIssues } from "../run/view.js";
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import type { DocumentKind } from "../domain/documentLifecycle.js";
 import { IllegalTransitionError } from "../domain/illegalTransitionError.js";

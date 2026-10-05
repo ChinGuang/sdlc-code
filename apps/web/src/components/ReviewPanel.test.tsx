@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Board 04: every Finding of the last review with the Rule it cites, and the
  * PR Gate's two answers.

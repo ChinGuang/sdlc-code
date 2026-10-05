@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Schema migrations, applied in order. Never edit a released migration: append a
  * new one. The applied count is stored in SQLite's `PRAGMA user_version`.

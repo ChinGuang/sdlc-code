@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The layered Review Standard (CONTEXT.md): the Stack Profile's baseline Rules,
  * extended or overridden by the user's own, which they write in an `AGENTS.md`

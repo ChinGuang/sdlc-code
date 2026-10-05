@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { ChatMessage } from "@sdlc-code/clients";
 import { describe, expect, it } from "vitest";
 import { trimToolResults } from "./trimMessages.js";

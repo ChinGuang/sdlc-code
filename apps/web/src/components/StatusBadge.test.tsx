@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Every Run status as a person reads it: blue while agents work, amber or
  * purple while a person is needed, red when it stopped.

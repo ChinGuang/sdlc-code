@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import "reflect-metadata";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";

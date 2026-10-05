@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { ChatRequest, ChatResponse } from "@sdlc-code/clients";
 import { describe, expect, it } from "vitest";
 import { SqliteRunStore } from "../persistence/runStore.js";

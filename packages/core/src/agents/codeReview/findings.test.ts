@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { Rule } from "@sdlc-code/stack-profiles";
 import { describe, expect, it } from "vitest";
 import {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Resuming, against a real git repository and a real database: what a Run that
  * was interrupted mid-Step looks like afterwards.

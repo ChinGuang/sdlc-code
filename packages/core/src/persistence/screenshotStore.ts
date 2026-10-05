@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The screens as they were drawn (T24e): the PNG the UI Design Agent exports
  * of each, kept under its Run so a person sees them at the Design Gate and a

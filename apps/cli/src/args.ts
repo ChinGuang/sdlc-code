@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The command line, split into what was said and how: positional words and
  * `--flags`, each flag either a switch or a value. No library, because the

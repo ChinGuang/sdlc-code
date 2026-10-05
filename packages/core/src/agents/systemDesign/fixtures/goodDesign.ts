@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { Design } from "../design.js";
 
 /** A valid design for a small todo app; tests break one rule at a time. */

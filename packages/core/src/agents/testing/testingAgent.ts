@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Testing Agent (CONTEXT.md): runs a Slice's merged code in the sandbox
  * and hands the Orchestrator Issue Reports, never another agent.

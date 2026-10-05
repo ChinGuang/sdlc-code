@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { Module } from "@nestjs/common";
 import { HealthModule } from "./health/health.module.js";
 import { RunsModule } from "./runs/runs.module.js";

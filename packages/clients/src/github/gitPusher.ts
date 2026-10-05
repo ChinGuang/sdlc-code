@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Pushes a local run branch (Slice Commits) to the Target Repo with the PAT.
  * The PAT goes to git through GIT_CONFIG_* env vars as an HTTP header, so it

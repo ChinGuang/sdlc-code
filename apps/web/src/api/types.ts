@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The shapes the local server answers with (apps/server/src/runs/runService.ts).
  * Written out here rather than imported, because the dashboard is a client of

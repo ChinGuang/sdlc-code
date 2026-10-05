@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A Coding Agent's view of its Workspace (CONTEXT.md): it reads the whole
  * application and writes only its own part of it. Every path is checked here,

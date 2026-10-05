@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Design Phase (UML diagram 5): the System Design Agent writes the System
  * Design, Slice Plan and API Contract, the UI Design Agent the UI Spec and the

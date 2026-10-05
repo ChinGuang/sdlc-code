@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What a Coding Agent is told (T15): its Task, the Approved Documents, the
  * Issue Reports to fix and its Working Memory, plus design material the model

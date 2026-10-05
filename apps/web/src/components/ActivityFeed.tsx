@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { RunEvent, RunSlice } from "../api/types.js";
 import { describe } from "../run/view.js";
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Runs API over real HTTP, with a fake RunService: what each route accepts,
  * what it answers, and the event stream as a client actually reads it.

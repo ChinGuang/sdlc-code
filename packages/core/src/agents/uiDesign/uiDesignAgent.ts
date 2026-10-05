@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The UI Design Agent (CONTEXT.md): writes the UI Spec for the Approved
  * Documents and draws every screen on the Run's Penpot page.

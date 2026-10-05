@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Runs against real git in temp folders: merges, conflicts, resets, discards. */
 import { execFileSync } from "node:child_process";
 import {

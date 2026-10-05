@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The CLI's calls to the local server (apps/server). Like the dashboard, it is
  * a client of the HTTP API and writes out the shapes it reads rather than

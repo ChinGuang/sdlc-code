@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { Slice, SliceStatus } from "../domain/entities.js";
 import { assertSliceMove } from "../domain/sliceLifecycle.js";
 import { inTransaction } from "./database.js";

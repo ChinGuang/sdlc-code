@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Delivering a Run's work as a pull request (T20, UML diagrams 3b and 8).
  *

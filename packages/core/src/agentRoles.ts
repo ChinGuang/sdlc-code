@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { DocumentKind } from "./domain/documentLifecycle.js";
 
 /** The agents that take part in a Run (see CONTEXT.md). */

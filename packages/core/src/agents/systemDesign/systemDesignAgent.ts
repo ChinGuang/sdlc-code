@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The System Design Agent (CONTEXT.md): turns a Project Request into the System
  * Design, Slice Plan and API Contract. Each part is submitted and validated by

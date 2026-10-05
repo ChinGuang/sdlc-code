@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * One real Run, end to end, from a terminal. The wiring lives in the runtime
  * (src/runtime/runRuntime.ts), which the local server uses too; this script is

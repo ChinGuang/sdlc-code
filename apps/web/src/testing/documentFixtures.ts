@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Design documents as the agents write them (see packages/core's
  * designDocuments and the UI Design Agent), for the readable views' tests.

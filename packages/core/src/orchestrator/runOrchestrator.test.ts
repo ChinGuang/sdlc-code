@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Orchestrator end to end over a real database, the real Design Gate and
  * Design Phase, with scripted design agents and a scripted Slice runner:

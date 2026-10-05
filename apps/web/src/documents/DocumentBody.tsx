@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A design document as it is read, with the text the agents wrote one tab
  * away (T24b; board 03). Whatever cannot be read as its kind is shown raw,

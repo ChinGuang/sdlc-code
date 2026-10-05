@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A Stack Profile (CONTEXT.md): the starter template a Run builds in, how it is
  * tested, and its baseline Review Standard. One exists at launch.

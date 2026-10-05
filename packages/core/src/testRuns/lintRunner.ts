@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Lint Runs (T19): the linters of diagram 8, step 1, run in the sandbox on the
  * Slice Commits. It is a Test Run's shape — start from the Stack Profile's Base

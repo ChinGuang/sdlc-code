@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { beforeAll, describe, expect, it } from "vitest";
 import { goodDesign } from "./fixtures/goodDesign.js";
 import { MERMAID_LOAD_TIMEOUT, warmMermaid } from "./fixtures/warmMermaid.js";

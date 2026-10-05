@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Domain checks on a UI Spec: it must agree with the Approved Documents, since
  * the Coding Agents build from both (CONTEXT.md "API Contract", "UI Spec").

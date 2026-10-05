@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { REACT_NODE, type TemplateFile } from "@sdlc-code/stack-profiles";
 import { describe, expect, it } from "vitest";
 import {

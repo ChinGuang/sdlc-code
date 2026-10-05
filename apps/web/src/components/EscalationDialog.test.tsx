@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Board 05: what stopped the Run, and the four ways on. Aborting carries the
  * Draft PR checkbox as the person left it.
