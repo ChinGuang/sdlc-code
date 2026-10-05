@@ -52,6 +52,11 @@ export type CheapCheck = {
   files: RegExp;
   /** What none of them may hold, matched line by line. */
   forbidden: RegExp;
+  /**
+   * What a hint may not ask for, matched in its sentences, when `forbidden`
+   * reads a whole line of code and would miss a hint's wording of it.
+   */
+  mention?: RegExp;
   /** What to change, said to the Coding Agent. */
   says: string;
 };
@@ -99,6 +104,7 @@ export const REACT_NODE: StackProfile = {
       files: /\.test\.tsx?$/,
       forbidden:
         /^\s*import\s+(?:[^'"]*\s+from\s+)?["']@testing-library\/jest-dom["']/,
+      mention: /@testing-library\/jest-dom(?!\/vitest)/,
       says: 'Remove this import: src/testSetup.ts already loads the Testing Library matchers (toBeInTheDocument and the rest) for every test, through "@testing-library/jest-dom/vitest".',
     },
     {
@@ -112,6 +118,7 @@ export const REACT_NODE: StackProfile = {
       // were never defined.
       files: /\.test\.tsx?$/,
       forbidden: /["']@testing-library\/user-event["']/,
+      mention: /@testing-library\/user-event/,
       says: "@testing-library/user-event is not installed (no new dependencies): use typeInto and press from src/testing/screens.tsx.",
     },
   ],

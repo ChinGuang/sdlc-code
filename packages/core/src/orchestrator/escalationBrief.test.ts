@@ -3,13 +3,14 @@ import {
   type ChatRequest,
   type ChatResponse,
 } from "@sdlc-code/clients";
-import type { TemplateFile } from "@sdlc-code/stack-profiles";
+import { REACT_NODE, type TemplateFile } from "@sdlc-code/stack-profiles";
 import { describe, expect, it } from "vitest";
 import { goodDesign } from "../agents/systemDesign/fixtures/goodDesign.js";
 import { goodUiSpec } from "../agents/uiDesign/fixtures/goodUiSpec.js";
 import type { Escalation, Run } from "../domain/entities.js";
 import {
   briefFacts,
+  contradiction,
   lookTokens,
   ModelEscalationBriefer,
   WRITE_BRIEF,
@@ -114,6 +115,7 @@ const input = (fields: Partial<BriefInput> = {}): BriefInput => ({
 function brieferAnswering(
   reply: Partial<ChatResponse> | Error,
   budget: { left: number } = { left: 1_000_000 },
+  template: TemplateFile[] = TEMPLATE,
 ) {
   const requests: ChatRequest[] = [];
   let spent = 0;
@@ -139,7 +141,8 @@ function brieferAnswering(
       remaining: () => budget.left - spent,
       spend: (tokens) => void (spent += tokens),
     },
-    template: TEMPLATE,
+    template,
+    profile: REACT_NODE,
     mergedFiles: async () => MERGED,
   });
   return { briefer, requests, spent: () => spent };
@@ -258,6 +261,48 @@ describe("briefFacts", () => {
   });
 });
 
+describe("contradiction", () => {
+  const checks = REACT_NODE.cheapChecks;
+
+  it.each([
+    'Add import "@testing-library/jest-dom" at the top of the test.',
+    // A warning about something else does not excuse it.
+    "Keep the jest-dom import @testing-library/jest-dom, do not touch other files.",
+    "Add import '@testing-library/jest-dom' without changing the setup.",
+    "Do not remove the @testing-library/jest-dom import.",
+    "Do not forget to import '@testing-library/jest-dom' in the test.",
+    "Install @testing-library/user-event and use userEvent.click.",
+    "Call jest.fn() for the handler.",
+    'Mock react-router-dom with vi.mock("react-router-dom") in the test.',
+    "Type the form with @testing-library/user-event's userEvent... then import it from '@testing-library/user-event'.",
+  ])("finds a hint that asks for it: %s", (hint) => {
+    expect(contradiction(hint, checks)).not.toBeNull();
+  });
+
+  it.each([
+    "Use vi.fn, not jest.fn.",
+    'Remove the import of "@testing-library/jest-dom": src/testSetup.ts loads it.',
+    "Do not mock react-router-dom; navigate for real.",
+    "Restore createApp and route in server/app.ts.",
+    "jest.fn should be replaced by vi.fn.",
+    "",
+  ])(
+    "lets a hint through that warns against it or never mentions it: %s",
+    (hint) => {
+      expect(contradiction(hint, checks)).toBeNull();
+    },
+  );
+
+  it("reads each sentence on its own, so a warning in one does not excuse another", () => {
+    expect(
+      contradiction(
+        "Never use user-event for clicks. Then import { userEvent } from '@testing-library/user-event'.",
+        checks,
+      ),
+    ).not.toBeNull();
+  });
+});
+
 describe("ModelEscalationBriefer", () => {
   it("forces one write_brief call that reads the code, the notes and the documents", async () => {
     const { briefer, requests, spent } = brieferAnswering(written(ANSWER));
@@ -358,6 +403,83 @@ describe("ModelEscalationBriefer", () => {
     };
     expect(tool.properties.choice.enum).not.toContain("skipSlice");
     expect(brief.analysis).toBeNull();
+  });
+
+  // T25e: the brief blamed the System Design for the sandbox's missing
+  // OpenSSL, and offered a hint that kept the import that caused the error.
+  it("tells the look the template's facts and its files, as the Coding Agents are told", async () => {
+    const { briefer, requests } = brieferAnswering(written(ANSWER));
+
+    await briefer.brief(input());
+
+    const message = requests[0]!.messages[1]!.content as string;
+    expect(message).toContain("The template's facts");
+    expect(message).toContain(REACT_NODE.templateFacts.builds.both[1]);
+    // The report names a server file, so the backend's facts: not the frontend's.
+    expect(message).toContain(REACT_NODE.templateFacts.builds.backend[0]);
+    expect(message).not.toContain(REACT_NODE.templateFacts.builds.frontend[0]);
+    expect(message).toContain("Files that came with the template");
+    expect(message).toContain("- server/app.test.ts");
+    expect(message).toContain("- README.md");
+  });
+
+  it("tells the look both sides' facts when the reports do not say which side", async () => {
+    const { briefer, requests } = brieferAnswering(written(ANSWER));
+
+    await briefer.brief(input({ reports: [] }));
+
+    const message = requests[0]!.messages[1]!.content as string;
+    expect(message).toContain(REACT_NODE.templateFacts.builds.backend[0]);
+    expect(message).toContain(REACT_NODE.templateFacts.builds.frontend[0]);
+  });
+
+  it("says how many template files it does not list", async () => {
+    const many = Array.from({ length: 90 }, (_, index) => ({
+      path: `src/generated/file${index}.ts`,
+      contents: "",
+    }));
+    const { briefer, requests } = brieferAnswering(
+      written(ANSWER),
+      undefined,
+      many,
+    );
+
+    await briefer.brief(input());
+
+    const message = requests[0]!.messages[1]!.content as string;
+    expect(message).toContain("- src/generated/file79.ts");
+    expect(message).not.toContain("- src/generated/file80.ts");
+    expect(message).toContain("- …and 10 more");
+  });
+
+  it("keeps a hint that asks for what the template forbids, with a warning to check it", async () => {
+    const { briefer } = brieferAnswering(
+      written({
+        ...ANSWER,
+        hint: 'Keep the import of "@testing-library/jest-dom" in the test, and add the missing export.',
+      }),
+    );
+
+    const brief = await briefer.brief(input());
+
+    expect(brief.analysis?.hint).toContain("Keep the import");
+    expect(brief.facts.at(-1)).toMatch(
+      /^Check the suggested hint before sending it.*src\/testSetup\.ts already loads/,
+    );
+  });
+
+  it("keeps a hint that warns against what the template forbids", async () => {
+    const { briefer } = brieferAnswering(
+      written({
+        ...ANSWER,
+        hint: "Use vi.mock and vi.fn from vitest, not jest.mock. Restore createApp in server/app.ts.",
+      }),
+    );
+
+    const brief = await briefer.brief(input());
+
+    expect(brief.analysis?.hint).toMatch(/^Use vi\.mock/);
+    expect(brief.facts.join("\n")).not.toContain("Check the suggested hint");
   });
 
   it("keeps a hint only for retry with hint", async () => {
