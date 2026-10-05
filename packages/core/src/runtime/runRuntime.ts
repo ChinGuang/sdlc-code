@@ -465,6 +465,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
         request: requestOptionsFor(config.roles.orchestrator),
         budget: budgetFor(run),
         template: templateFiles(profile),
+        profile,
         mergedFiles: (sliceId) => workspacesFor(run).mergedFiles(sliceId),
       }),
     onBriefProblem: (runId, problem) =>
