@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import swc from "unplugin-swc";
 import { defineProject } from "vitest/config";
 

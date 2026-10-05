@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Owner resolution (CONTEXT.md "Owner", UML diagram 7): who fixes an Issue
  * Report, decided by comparing its evidence against the Approved Documents in

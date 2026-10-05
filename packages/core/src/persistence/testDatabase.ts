@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Test helper: an in-memory database with one Run, and deterministic ids and clock. */
 import { openDatabase, type Database } from "./database.js";
 import { SqliteRunStore } from "./runStore.js";

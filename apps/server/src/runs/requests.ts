@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What each route accepts, checked before anything reaches a Run (T21). A body
  * that does not fit is a 400 naming every problem, so a client fixes it in one

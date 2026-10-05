@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The tools a Coding Agent calls: files in its Workspace, and, for a model
  * with the `penpotMcp` capability, a read-only look at the live design.

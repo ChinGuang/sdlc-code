@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Slice plan: approved only once its document is, and the current Slice's
  * lanes saying what each Coding Agent is doing, which a running Task alone

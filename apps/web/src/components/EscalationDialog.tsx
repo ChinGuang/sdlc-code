@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { RunsApi } from "../api/client.js";
 import type {

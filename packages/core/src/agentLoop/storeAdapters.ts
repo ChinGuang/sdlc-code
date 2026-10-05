@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Connects the agent loop to persistence: Transcript → Step events, Token Budget → Run. */
 import type { RunStore } from "../persistence/runStore.js";
 import { NotFoundError } from "../persistence/storeOptions.js";

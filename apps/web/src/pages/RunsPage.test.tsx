@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Board 01: the runs table as the server lists Runs, and the New run form,
  * which starts a Run and opens it, or shows why the server refused.

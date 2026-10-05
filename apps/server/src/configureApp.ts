@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * How the server is set up around its modules, in one place, so the tests
  * exercise the same configuration main.ts starts with rather than a copy.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Connects to the Penpot MCP server (the plugin running in the user's browser)
  * over streamable HTTP. The URL embeds a user token, so it is never logged:

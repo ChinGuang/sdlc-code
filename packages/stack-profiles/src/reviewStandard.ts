@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The baseline Review Standard of a Stack Profile (CONTEXT.md "Review Standard"):
  * the Rules the Code Review Agent cites. T19 runs ESLint and tsc first, so

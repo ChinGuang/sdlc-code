@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Each design document read as what it is, not as the JSON the agents wrote,
  * with the text itself one tab away, and a document of the wrong shape shown

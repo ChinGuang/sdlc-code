@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Runs the whole Design Phase once against the real services: the System Design
  * Agent on Token Factory, then the UI Design Agent, which draws the screens on

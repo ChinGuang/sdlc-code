@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What the screens show for a Run, worked out from what the server says. Pure
  * functions, so every label and colour a person reads is decided in one place

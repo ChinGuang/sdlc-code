@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Lists NVIDIA models available to the configured key. Run: pnpm models:list */
 import { TokenFactoryChatClient, type ChatClient } from "../src/index.js";
 import { requireEnv } from "./requireEnv.js";

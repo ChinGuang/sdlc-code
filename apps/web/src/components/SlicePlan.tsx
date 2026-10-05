@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { RunDetail } from "../api/types.js";
 import { currentSlice, lanes, sliceNote } from "../run/view.js";
 

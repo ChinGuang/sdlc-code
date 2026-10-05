@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Domain entities from UML diagram 2 that the Orchestrator persists. The rest
  * arrive with the tasks that define them, as new migrations: Stack Profile (T12),

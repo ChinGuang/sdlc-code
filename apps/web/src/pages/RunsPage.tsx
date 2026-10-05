@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, type RunsApi } from "../api/client.js";
 import type { RunMode, RunSummary } from "../api/types.js";

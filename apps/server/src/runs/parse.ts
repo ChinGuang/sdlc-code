@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A request body checked against its schema, or a 400 that names every problem
  * with the field it is in.

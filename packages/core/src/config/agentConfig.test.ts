@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { ModelInfo } from "@sdlc-code/clients";
 import { describe, expect, it } from "vitest";
 import {

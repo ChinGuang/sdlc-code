@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The dashboard's HTTP client over a fake fetch and a fake EventSource: where
  * it sends each request, what it makes of a refusal, and how it follows a

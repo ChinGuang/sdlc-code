@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The dashboard's two screens, picked by the URL's hash.
  */

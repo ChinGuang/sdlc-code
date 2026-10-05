@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * `sdlccode` against a mock server over real HTTP: what each command sends,
  * what it prints, and the exit code a script can rely on (0 done, 1 refused,

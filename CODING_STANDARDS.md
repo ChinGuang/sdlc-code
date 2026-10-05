@@ -69,4 +69,5 @@ Prettier with default settings for code and config (`pnpm format:check`). Line e
 | SC-2 no `private` / parameter properties | ESLint `no-restricted-syntax` on `[accessibility="private"]` (fields, methods, accessors, abstract members) and `TSParameterProperty` |
 | SC-3 public methods are arrow properties | ESLint `no-restricted-syntax` on methods declared directly in a class declaration or expression that `implements` an interface; constructors, getters/setters, static, protected and `#private` methods, and methods of `@Controller` classes, are excluded. A service written without `implements` is caught by SC-1 in review. |
 | SC-1, SC-4, SC-5 | Code review |
+| Licence line: every `.ts`, `.tsx`, `.js`, `.mjs` file starts with `// SPDX-License-Identifier: MPL-2.0` (below a shebang) | ESLint `spdx/header` (`eslint-rules/spdxHeader.js`, proved in `tests/spdxHeader.test.ts`); `pnpm lint --fix` adds it. The starter template is not covered. |
 | Formatting | `pnpm format:check` in CI (`.github/workflows/ci.yml`) |

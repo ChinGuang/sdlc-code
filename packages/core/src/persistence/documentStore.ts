@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { documentOwner, type AgentRole } from "../agentRoles.js";
 import {
   documentsMadeStale,

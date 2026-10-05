@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** The local SQLite database, via better-sqlite3 (ADR 0003). */
 import BetterSqlite3 from "better-sqlite3";
 import { MIGRATIONS } from "./migrations.js";

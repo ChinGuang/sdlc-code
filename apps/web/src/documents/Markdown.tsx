@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Enough Markdown for what the System Design Agent writes: headings,
  * paragraphs, lists, code and Mermaid diagrams. It builds React elements and

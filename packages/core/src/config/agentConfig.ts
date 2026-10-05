@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Which model each agent role uses, whether it thinks, and what each model can accept
  * (Model Capabilities, CONTEXT.md). Defaults follow grilling Q5 and spike T03.

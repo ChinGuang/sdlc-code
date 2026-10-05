@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import { SqliteSnapshotStore, type SnapshotStore } from "./snapshotStore.js";
 import { databaseWithRun } from "./testDatabase.js";

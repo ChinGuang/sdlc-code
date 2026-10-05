@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * One Test Run can fail in several ways at once; each Issue Report has its
  * Owner, and the Slice takes one next step (UML diagrams 6 and 7):

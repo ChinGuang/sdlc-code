@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Server-sent events read from a stream of text (the WHATWG format): Node has
  * no EventSource of its own, and a terminal needs only the named messages.

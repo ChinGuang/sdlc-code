@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What a Run carries from one Step to the next, written down (CONTEXT.md
  * "Checkpoint", UML diagram 9). The Orchestrator kept this in memory, so a Run

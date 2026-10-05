@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { RunSummary } from "../api/types.js";
 import { statusBadge } from "../run/view.js";
 

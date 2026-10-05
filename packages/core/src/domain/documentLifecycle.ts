@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Document lifecycle (UML diagram 4) and the Stale cascade, as pure functions. */
 import { IllegalTransitionError } from "./illegalTransitionError.js";
 

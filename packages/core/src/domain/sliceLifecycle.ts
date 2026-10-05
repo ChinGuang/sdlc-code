@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Slice progress inside the Run's "building" status (UML diagram 3, Building):
  * in progress → testing → committed, back to building when an issue is routed,

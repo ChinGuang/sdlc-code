@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What happens after a Task's Issue Reports are routed back to it (CONTEXT.md
  * "Retry Budget", "Loop", "Token Budget"; UML diagram 7): retry, or escalate.

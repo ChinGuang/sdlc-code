@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Escalation Brief (T24c): what went wrong, in plain words, for the person
  * who must decide. Facts are found in code, so a brief has them even when no

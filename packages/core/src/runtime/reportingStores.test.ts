@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The events a Run's own stores report, over a real database: a status for
  * every move a Run makes, and a Step event for every Step, in order.

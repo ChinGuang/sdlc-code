@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Workspaces (CONTEXT.md, ADR 0001): local git is the source of truth. A Run
  * has one bare repository whose run branch holds only Slice Commits, one

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * JSON.parse with one narrow repair: the closing brackets at the very end.
  * Nemotron on Token Factory sometimes serialises nested tool arguments with one

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Minimal client for Nebius Token Factory Sandboxes (ConTree API).
  * Spike quality: covers only what a Test Run needs.

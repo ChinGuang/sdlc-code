@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Text for a model prompt that came from the application under test or from
  * an agent, inside a fence the prompt tells the model is data. The text

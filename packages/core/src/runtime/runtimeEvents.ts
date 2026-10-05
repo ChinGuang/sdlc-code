@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What a Run does, as it happens (T21). One stream of small events, so the
  * terminal can print them and the server can push them to a dashboard without

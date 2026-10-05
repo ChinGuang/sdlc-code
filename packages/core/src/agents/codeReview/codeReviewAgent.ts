@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Code Review Agent (CONTEXT.md, UML diagram 8): reads what the Run changed
  * and reports Findings against the layered Review Standard and the Approved

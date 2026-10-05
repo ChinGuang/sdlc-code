@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Design Gate (UML diagram 5): the human's Verdict on each design document.
  * Approving all of them starts the build; any changes requested send comments

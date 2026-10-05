@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Slice runner against real git Workspaces and a real database, with
  * scripted Coding and Testing Agents: pass, retry, Loop, budgets, Owners.

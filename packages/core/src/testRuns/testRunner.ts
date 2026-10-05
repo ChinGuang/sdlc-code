@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Test Runs (CONTEXT.md): one disposable sandbox run of a Slice's merged code,
  * started from the Stack Profile's Base Snapshot with only the changed files

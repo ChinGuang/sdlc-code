@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Stores that say what changed as it changes (T21). A Run's status moves many
  * times inside one `advance` — designing, building, reviewing — and its Steps

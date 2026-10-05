@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Base Snapshots (CONTEXT.md): each Stack Profile's template, with its
  * dependencies installed, saved once as a sandbox image. Every Test Run starts

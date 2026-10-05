@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The runtime's handling of its keys, without calling anything real: it checks
  * them before opening anything, and none of them can leave it on an event, a

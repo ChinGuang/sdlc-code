@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What the Run API's own errors mean in HTTP: no such Run is 404, a Run that is
  * not where a request needs it is 409, and a server that cannot run anything

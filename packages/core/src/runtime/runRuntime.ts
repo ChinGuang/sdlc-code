@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * One place that wires a real Run: the stores, the clients, the agents and the
  * Orchestrator (T21). The terminal script and the local server both use it, so

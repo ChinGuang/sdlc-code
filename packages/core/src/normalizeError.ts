@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Text as it reads once what changes between runs is taken out: what makes
  * one failure the same as the next (a Loop, a check that failed again), in

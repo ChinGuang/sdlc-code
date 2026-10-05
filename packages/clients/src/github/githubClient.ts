@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * GitHub REST client for delivering a Run into the Target Repo: check access,
  * create a branch, open a pull request (ready or draft).

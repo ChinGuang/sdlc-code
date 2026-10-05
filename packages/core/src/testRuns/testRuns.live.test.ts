@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Real Test Runs on Nebius Sandboxes: builds the React + Node Base Snapshot
  * (once; the image id is kept in a database in the temp folder), then runs the

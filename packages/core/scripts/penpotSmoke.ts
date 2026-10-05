@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Draws a fixed UI Spec on its own page in your Penpot file, without the model:
  * checks the MCP connection, the renderer and the exports.

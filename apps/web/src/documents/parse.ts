@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The design documents as a person reads them (T24b), from the text the
  * agents wrote: the Slice Plan, the API Contract (OpenAPI), the UI Spec and

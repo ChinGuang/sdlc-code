@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Protects the application's package.json from a Coding Agent rewriting it.
  * Seen live: an agent wrote the whole manifest back with vitest downgraded to

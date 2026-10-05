@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Run Overview kept live by its event stream: status and tokens change as
  * their events arrive, the Activity feed grows, Issues appear and clear, and

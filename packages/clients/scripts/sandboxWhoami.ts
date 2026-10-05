@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Shows which Sandbox permissions the configured key has. Run: pnpm sandbox:whoami */
 import { NebiusSandboxClient, type SandboxClient } from "../src/index.js";
 import { requireEnv } from "./requireEnv.js";

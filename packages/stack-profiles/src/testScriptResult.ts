@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What a Stack Profile's test script reports. The script prints human-readable
  * logs, then one marker line with JSON, so a Test Run can read the outcome from

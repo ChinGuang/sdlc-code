@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Issue Reports (CONTEXT.md): what a Test Run found, as structured failures
  * the Orchestrator routes. Each names the failing test or step, the error,

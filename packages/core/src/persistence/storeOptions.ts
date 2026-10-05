@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { randomUUID } from "node:crypto";
 import type { Database } from "./database.js";
 

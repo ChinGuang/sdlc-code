@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The events every Run has produced since the server started, numbered in the
  * order they happened (T21). A client following a Run reads them as a stream;

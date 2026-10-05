@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The stored design documents, read back into what agents use. The Slice Plan,
  * API Contract and UI Spec are stored as JSON for this (designDocuments.ts);

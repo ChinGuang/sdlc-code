@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { existsSync, readFileSync } from "node:fs";
 import {
   AgentConfigError,

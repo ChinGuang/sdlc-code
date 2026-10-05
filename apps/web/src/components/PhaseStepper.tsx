@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { RunDetail } from "../api/types.js";
 import { phases, type PhaseState } from "../run/view.js";
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What the System Design Agent hands back: the System Design (Mermaid), the
  * Slice Plan and the API Contract (OpenAPI). The agent submits each part with its

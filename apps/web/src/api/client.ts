@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The dashboard's calls to the local server. Every request goes to /api, which
  * Vite forwards to the server in development, and the server's own message is

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { Escalation, EscalationBrief } from "../domain/entities.js";
 import type {
   EscalationChoice,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Backend and Frontend Coding Agents (CONTEXT.md): each builds its side of
  * a Slice in its own Workspace, at the same time as the other. The agent

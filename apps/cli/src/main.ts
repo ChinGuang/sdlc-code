@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { HttpServerApi } from "./api.js";
 import { runCli } from "./cli.js";
 import { COLOUR, PLAIN } from "./format.js";

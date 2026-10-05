@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * `sdlccode`: a Run from the terminal (T24, board 06). A thin client of the
  * local server, as the dashboard is: it starts Runs, follows them, and

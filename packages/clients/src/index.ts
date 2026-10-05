@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 export * from "./github/githubClient.js";
 export * from "./github/gitPusher.js";
 export * from "./penpot/penpotClient.js";

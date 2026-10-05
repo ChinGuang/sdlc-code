@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Tools an agent can call. Each tool declares its input once, as a zod schema:
  * the model sees it as JSON Schema, and arguments are validated against it

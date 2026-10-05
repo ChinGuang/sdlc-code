@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import { parseArgs, parseTokens, UsageError } from "./args.js";
 import { createSseParser, type SseMessage } from "./sse.js";

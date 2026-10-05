@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A stand-in for apps/server over real HTTP: it records every request and
  * answers from what a test gives it, so the CLI's own HTTP client, SSE reader

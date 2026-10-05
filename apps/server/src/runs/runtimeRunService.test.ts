@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The service over real stores and a scripted Orchestrator: a request answers at
  * once, the Run advances in the background, and what it does arrives in order.

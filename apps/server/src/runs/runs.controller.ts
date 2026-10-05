@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Runs API (T21): start and list Runs, read one, answer its Gates and its
  * Escalation, and follow what it does as a stream of Server-Sent Events.

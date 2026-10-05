@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import type { ChatRequest, ChatResponse, ToolCall } from "@sdlc-code/clients";
 import { PenpotError } from "@sdlc-code/clients";
 import { describe, expect, it } from "vitest";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Getting an application's files into the sandbox: which files may go, where
  * they land, and uploading each distinct content once.

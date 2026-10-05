@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The one promise a Draft PR makes, checked against real git: what is pushed
  * holds every Slice Commit and nothing else (T20, UML diagram 3b). A faked

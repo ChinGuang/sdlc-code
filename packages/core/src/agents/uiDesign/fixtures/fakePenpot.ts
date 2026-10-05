@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A small stand-in for the Penpot plugin API, enough to run the code
  * penpotRender.ts generates. Tests execute the real generated code against it,

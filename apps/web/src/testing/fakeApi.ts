@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * A RunsApi for tests: Runs it is given, and an event stream a test pushes to,
  * as the server would.

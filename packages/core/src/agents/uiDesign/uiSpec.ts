@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The UI Spec (CONTEXT.md): the text description of every screen, and the
  * source of truth for frontend work. Each screen also carries its layout as

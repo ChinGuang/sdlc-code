@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Runs the template's own test script, end to end, against a copy in a temp
  * folder. It installs dependencies, so it is opt-in:

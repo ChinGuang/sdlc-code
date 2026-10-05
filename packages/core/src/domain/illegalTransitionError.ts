@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** A lifecycle event that the Run, Document or Slice diagram has no arrow for. */
 export class IllegalTransitionError extends Error {
   constructor(entity: string, status: string, event: string) {

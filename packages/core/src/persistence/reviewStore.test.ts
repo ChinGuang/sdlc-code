@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import type { Finding } from "../agents/codeReview/findings.js";
 import { SqliteReviewStore, type ReviewStore } from "./reviewStore.js";

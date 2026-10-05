@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * What each agent working on a Slice last wrote (CONTEXT.md "Working
  * Memory"): what it tried. The Escalation dialog and the Escalation Brief

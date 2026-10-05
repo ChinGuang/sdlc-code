@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Test helper: a SandboxClient that records what it was asked and runs nothing. */
 import type {
   OperationResponse,

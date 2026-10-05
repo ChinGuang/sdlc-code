@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Runs git for the Workspace manager: never interactive, never the user's
  * hooks, and the same bytes on disk as in the repository on every platform.

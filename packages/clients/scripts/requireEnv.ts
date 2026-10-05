@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /** Reads a required environment variable or exits with a clear message. */
 export function requireEnv(name: string): string {
   const value = process.env[name];

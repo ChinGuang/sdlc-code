@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Checks the GitHub PAT against a Target Repo. Run:
  *   pnpm --filter @sdlc-code/clients github:access ChinGuang/sdlc-code-demo-todo

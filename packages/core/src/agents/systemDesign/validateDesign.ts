@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Domain checks on a design (spike T03 rule 5: validate in code), one function
  * per part so each submit tool reports only its own problems. Each problem is

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 /**
  * The Orchestrator's judgement on an Issue Report the Approved Documents do
  * not settle (diagram 7, questions 1–3). One forced tool call with three flat
