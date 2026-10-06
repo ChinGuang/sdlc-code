@@ -11,7 +11,12 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 
-export type Recorded = { method: string; path: string; body: unknown };
+export type Recorded = {
+  method: string;
+  path: string;
+  body: unknown;
+  authorization: string | undefined;
+};
 
 export type Route = (request: {
   method: string;
@@ -37,7 +42,12 @@ export async function mockServer(route: Route) {
       });
       const body = text ? (JSON.parse(text) as unknown) : undefined;
       const path = req.url ?? "/";
-      requests.push({ method: req.method ?? "GET", path, body });
+      requests.push({
+        method: req.method ?? "GET",
+        path,
+        body,
+        authorization: req.headers.authorization,
+      });
       const answer = route({ method: req.method ?? "GET", path, body });
       if (!answer) {
         res.writeHead(404, { "content-type": "application/json" });

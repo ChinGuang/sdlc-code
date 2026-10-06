@@ -83,7 +83,9 @@ Options:
   --version    Show the version
 
 Environment:
-  SDLC_API_URL        The server (default http://127.0.0.1:4317)
+  SDLC_API_URL        The server (default http://127.0.0.1:4317; for one served
+                      with its dashboard, its address followed by /api)
+  SDLC_ACCESS_TOKEN   The access token of a server that is on a network
   SDLC_DASHBOARD_URL  The dashboard (default http://localhost:5173)`;
 
 /** Flags that take a value; every other flag is a switch. */

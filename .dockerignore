@@ -1,0 +1,15 @@
+# Never in the image: secrets, other people's Runs, and what is rebuilt inside.
+.env
+.env.*
+**/.env
+**/.env.*
+.sdlc-runs
+sdlc-code.config.json
+.git
+.claude
+**/node_modules
+**/dist
+**/*.db
+**/*.db-*
+*.tsbuildinfo
+packages/stack-profiles/templates/**/node_modules

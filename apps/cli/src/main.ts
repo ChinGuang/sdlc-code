@@ -16,6 +16,7 @@ process.exitCode = await runCli(
   {
     api: new HttpServerApi({
       baseUrl: process.env.SDLC_API_URL ?? "http://127.0.0.1:4317",
+      accessToken: process.env.SDLC_ACCESS_TOKEN,
     }),
     paint: colour(process.stdout),
     errPaint: colour(process.stderr),

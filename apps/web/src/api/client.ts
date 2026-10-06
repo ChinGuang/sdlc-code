@@ -29,8 +29,15 @@ export class ApiError extends Error {
   }
 }
 
+/** Whether the server asks for an access token, and whether this browser has given it. */
+export type Session = { required: boolean; signedIn: boolean };
+
 /** What the screens need from the server; tests pass their own. */
 export interface RunsApi {
+  /** A local server asks for nothing; one on a network asks for its token (S2). */
+  session: () => Promise<Session>;
+  /** Gives the server its access token; it answers with a cookie, not a copy. */
+  signIn: (token: string) => Promise<void>;
   listRuns: () => Promise<RunSummary[]>;
   getRun: (runId: string) => Promise<RunDetail>;
   startRun: (request: StartRunRequest) => Promise<RunSummary>;
@@ -77,6 +84,8 @@ export type HttpRunsApiOptions = {
   eventSource?: (url: string) => EventSource;
   /** How long to wait before opening a stream the browser gave up on. */
   reconnectDelayMs?: number;
+  /** Called when the server turns a request away for want of a sign-in (S2). */
+  onUnauthorized?: () => void;
   /** How long a stream may say nothing, pings included, before it is dead. */
   staleAfterMs?: number;
 };
@@ -90,6 +99,7 @@ export class HttpRunsApi implements RunsApi {
   #eventSource: (url: string) => EventSource;
   #reconnectDelayMs: number;
   #staleAfterMs: number;
+  #onUnauthorized: () => void;
 
   constructor(options: HttpRunsApiOptions = {}) {
     this.#base = options.base ?? "/api";
@@ -98,7 +108,26 @@ export class HttpRunsApi implements RunsApi {
     this.#reconnectDelayMs = options.reconnectDelayMs ?? 2000;
     // The server pings every 15 s: three missed are a dead stream.
     this.#staleAfterMs = options.staleAfterMs ?? 45_000;
+    this.#onUnauthorized = options.onUnauthorized ?? (() => {});
   }
+
+  session = async (): Promise<Session> => {
+    const response = await this.#fetch(`${this.#base}/session`).catch(
+      () => null,
+    );
+    // Only a missing /session means a local server with nothing to sign in to;
+    // any other failure asks for the token rather than letting anyone in.
+    // No answer at all is a server that is down: the page says so, and nothing
+    // of the Runs can leak from it.
+    if (!response || response.status === 404)
+      return { required: false, signedIn: true };
+    if (!response.ok) return { required: true, signedIn: false };
+    return (await response.json()) as Session;
+  };
+
+  signIn = async (token: string): Promise<void> => {
+    await this.#call("POST", "/session", { token });
+  };
 
   listRuns = (): Promise<RunSummary[]> => this.#call("GET", "/runs");
 
@@ -224,6 +253,8 @@ export class HttpRunsApi implements RunsApi {
     });
     const text = await response.text();
     const parsed = text ? (JSON.parse(text) as unknown) : null;
+    // The cookie ran out, or the token changed: ask for it again.
+    if (response.status === 401 && path !== "/session") this.#onUnauthorized();
     if (!response.ok) {
       const { message, problems } = (parsed ?? {}) as {
         message?: string;

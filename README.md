@@ -89,6 +89,7 @@ Secrets are read from the environment (`.env` is git-ignored; `.env.example` sho
 | `SDLC_MODEL_<ROLE>` | Optional: a model id for one role, e.g. `SDLC_MODEL_CODE_REVIEW` |
 | `SDLC_DATA_DIR` | Optional: where Runs are kept (default `.sdlc-runs/` in the repository) |
 | `SDLC_CODE_PORT`, `SDLC_API_URL`, `SDLC_DASHBOARD_URL` | Optional: ports and addresses of the server, CLI and dashboard |
+| `SDLC_CODE_HOST`, `SDLC_ACCESS_TOKEN`, `SDLC_WEB_DIR`, `SDLC_SECURE_COOKIE` | Only for running on a network ([docs/deploy.md](docs/deploy.md)): a host other than `127.0.0.1` needs the token (16 characters or more) |
 
 Change a role's model or reasoning in `sdlc-code.config.json` (copy [`sdlc-code.config.example.json`](sdlc-code.config.example.json)); `config:check` prints what each role will use. Restart the server after changing `.env` or the config file.
 
@@ -153,12 +154,16 @@ The same request twice (a todo app), each into a new empty repository, in [docs/
 
 Between the Runs the platform fixed what the first one found (the sandbox image, the lint, false review Findings, the Escalation Brief, a dashboard that went stale after a restart, the Draft PR text). What still costs most is the **Frontend Coding Agent's screen tests**: about 80% of the tokens in the first Run. Neither Run reached the PR Gate; a third, smaller Run is the way to show that.
 
+## Running it on a server
+
+By default the server listens on `127.0.0.1` and needs no sign-in. A container image (`docker build -t sdlc-code .`) runs the server and the dashboard together on a network address; it refuses to start there without an access token, and then every request needs it. It is a one-user tool with no accounts, and it was run and tested with Docker locally, not deployed to a cloud: see [docs/deploy.md](docs/deploy.md) for what it does, what it does not, and the one thing a server cannot change (the Penpot tab).
+
 ## Limits
 
 - **One Stack Profile** (React 19 + Vite + Tailwind, Express 4, Prisma 6 on SQLite, Vitest). Others are a new Profile, not new code in the agents.
 - **Early Access and a browser tab.** Sandboxes were Early Access when this was built, and Penpot MCP needs the Penpot tab open in your browser for the whole design.
 - **A Run is expensive and not predictable.** Expect millions of tokens for a small app, and Escalations that need you. The Token Budget stops a Run rather than letting it run on.
-- **Local only.** The server listens on `127.0.0.1` and has no sign-in: it is a single developer's tool, not a hosted service.
+- **One user.** The server listens on `127.0.0.1` and needs no sign-in; on a network it needs one shared access token and has no accounts. It is a single developer's tool, not a hosted service.
 
 ## Development
 

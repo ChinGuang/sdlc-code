@@ -10,6 +10,7 @@ import {
   type IssueSummary,
   type RunDetail,
   type RunSummary,
+  type ServerApi,
 } from "./api.js";
 import { runCli } from "./cli.js";
 import { PLAIN } from "./format.js";
@@ -230,6 +231,55 @@ describe("sdlccode: help and mistakes", () => {
     expect(err[0]).toMatch(
       /did not answer as an sdlc-code server does; check SDLC_API_URL/,
     );
+  });
+
+  // S2: a server on a network turns away a request without its token.
+  describe("an access token", () => {
+    const routes: Route = (request) =>
+      request.path === "/runs"
+        ? { json: [] }
+        : request.path.includes("/events")
+          ? { events: [], end: true }
+          : undefined;
+
+    it("is sent as a Bearer header on a request and on the event stream", async () => {
+      const server = await mockServer(routes);
+      servers.push(server);
+      const api: ServerApi = new HttpServerApi({
+        baseUrl: server.url,
+        accessToken: "the-access-token",
+      });
+
+      await api.listRuns();
+      await api.follow(ID, 0, () => "stop");
+
+      expect(server.requests.map((r) => r.authorization)).toEqual([
+        "Bearer the-access-token",
+        "Bearer the-access-token",
+      ]);
+    });
+
+    // CODING_STANDARDS.md SC-5: a client that holds a secret does not show it.
+    it("is not exposed by the client that holds it", () => {
+      const api: ServerApi = new HttpServerApi({
+        baseUrl: "http://127.0.0.1:1",
+        accessToken: "the-access-token",
+      });
+
+      expect(Object.keys(api).join()).not.toContain("the-access-token");
+      expect(JSON.stringify(api)).not.toContain("the-access-token");
+      expect("accessToken" in api).toBe(false);
+    });
+
+    it("is not sent when there is none", async () => {
+      const server = await mockServer(routes);
+      servers.push(server);
+      const api: ServerApi = new HttpServerApi({ baseUrl: server.url });
+
+      await api.listRuns();
+
+      expect(server.requests[0]?.authorization).toBeUndefined();
+    });
   });
 
   it("prints its version and its commands", async () => {
