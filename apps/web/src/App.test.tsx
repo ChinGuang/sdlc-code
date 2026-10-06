@@ -36,7 +36,7 @@ describe("App", () => {
     render(<App api={api} />);
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "Runs" }),
+      await screen.findByRole("heading", { level: 1, name: "Runs" }),
     ).toBeInTheDocument();
     expect(await screen.findByText("Todo app")).toBeInTheDocument();
     expect(screen.getByText("sdlc-code")).toBeInTheDocument();

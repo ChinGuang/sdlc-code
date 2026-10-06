@@ -239,15 +239,19 @@ export interface ServerApi {
 export type HttpServerApiOptions = {
   /** e.g. http://127.0.0.1:4317 */
   baseUrl: string;
+  /** The server's access token, when it is on a network and asks for one (S2). */
+  accessToken?: string;
   fetch?: typeof fetch;
 };
 
 export class HttpServerApi implements ServerApi {
   #base: string;
+  #accessToken: string | null;
   #fetch: typeof fetch;
 
   constructor(options: HttpServerApiOptions) {
     this.#base = options.baseUrl.replace(/\/+$/, "");
+    this.#accessToken = options.accessToken || null;
     this.#fetch = options.fetch ?? ((...args) => fetch(...args));
   }
 
@@ -359,7 +363,10 @@ export class HttpServerApi implements ServerApi {
   /** A request, or the one error that says the server is not there. */
   async #send(path: string, init: RequestInit): Promise<Response> {
     try {
-      return await this.#fetch(`${this.#base}${path}`, init);
+      const headers = new Headers(init.headers);
+      if (this.#accessToken)
+        headers.set("authorization", `Bearer ${this.#accessToken}`);
+      return await this.#fetch(`${this.#base}${path}`, { ...init, headers });
     } catch {
       throw new ApiError(
         0,

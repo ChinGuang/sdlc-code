@@ -83,6 +83,8 @@ export function fakeApi(options: {
       calls.decisions.push({ prGate: decision });
       return answer();
     },
+    session: async () => ({ required: false, signedIn: true }),
+    signIn: async () => {},
     serverUp: async () => true,
     followRun: (_runId, after, onEvent, onReconnect) => {
       calls.followedFrom.push(after);
