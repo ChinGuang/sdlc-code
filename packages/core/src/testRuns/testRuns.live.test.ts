@@ -68,12 +68,43 @@ describe.runIf(live)("Test Runs on Nebius Sandboxes", () => {
 
       expect(outcome.status, JSON.stringify(outcome, null, 2)).toBe("passed");
       if (outcome.status === "broken") return;
-      expect(outcome.result.steps.map((step) => step.name)).toEqual([
-        ...TEST_STEPS,
-      ]);
+      // A Test Run has no typecheck: that is a Coding Agent's own check (T24j).
+      expect(outcome.result.steps.map((step) => step.name)).toEqual(
+        TEST_STEPS.filter((name) => name !== "typecheck"),
+      );
       expect(outcome.evidence.changedFiles).toEqual([]);
       // The Base Snapshot already has the dependencies.
       expect(outcome.result.steps[0]!.output).toContain("already installed");
+    },
+  );
+
+  // S1: a screen that throws as the app loads passes every unit test of the
+  // others, and fails in the browser.
+  it(
+    "names the browser test a broken app fails",
+    { timeout: 1_200_000 },
+    async () => {
+      const main = templateFiles(REACT_NODE).find(
+        (file) => file.path === "src/main.tsx",
+      )!;
+      const outcome = await runner!.runTests({
+        profile: REACT_NODE,
+        files: [
+          ...templateFiles(REACT_NODE).filter((file) => file !== main),
+          {
+            path: main.path,
+            contents: `throw new Error("boom while loading");\n${main.contents}`,
+          },
+        ],
+      });
+
+      expect(outcome.status, JSON.stringify(outcome, null, 2)).toBe("failed");
+      if (outcome.status === "broken") return;
+      expect(failureSignature(outcome.result)).toEqual([
+        "e2e: app.spec.ts > the app renders without an uncaught error and reaches its API",
+      ]);
+      const e2e = outcome.result.steps.find((step) => step.name === "e2e");
+      expect(e2e?.failures[0]?.message).toContain("boom while loading");
     },
   );
 

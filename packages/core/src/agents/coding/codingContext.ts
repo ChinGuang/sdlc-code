@@ -198,7 +198,7 @@ ${SIDE_WORK[side]}
 How to work:
 - The application's files are listed below. Read the ones you will change and the ones they use (read_file), and reuse the helpers it already has. Do not list or re-read what the list and your notes already tell you.
 - You may write only: ${profile.writablePaths[side].join(", ")}. The other Coding Agent writes the rest at the same time; read its files, never change them.
-- Every change comes with Vitest tests beside it. You cannot run them yourself: when you reply, your side is typechecked and its own tests run, and anything that fails comes back to you, by file and line, to fix before you reply again. Then a Test Run installs, tests, boots and smoke-tests the merged Slice, and any failure comes back to you as an Issue Report.
+- Every change comes with Vitest tests beside it. You cannot run them yourself: when you reply, your side is typechecked and its own tests run, and anything that fails comes back to you, by file and line, to fix before you reply again. Then a Test Run installs, tests, boots, smoke-tests and opens the merged Slice in a browser, and any failure comes back to you as an Issue Report.
 - Never write secrets or real credentials; configuration comes from environment variables, with placeholders in .env.example.
 - Keep files small and focused. Make small edits with edit_file, and write whole files only when creating them.
 - Write only source code and configuration. Notes, summaries and plans go in your reply, never into a file.

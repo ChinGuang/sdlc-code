@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/main.ts",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "db:generate": "prisma generate",
     "db:push": "prisma db push --skip-generate",
     "sdlc:test": "node scripts/sdlcTest.mjs",
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
+    "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/express": "^5.0.0",

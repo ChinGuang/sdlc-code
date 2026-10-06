@@ -447,7 +447,7 @@ sequenceDiagram
   O->>DB: Checkpoint
   O->>T: Task: test merged Slice
   T->>S: branch Base Snapshot, upload changed files
-  T->>S: run install, unit tests, boot server, smoke tests
+  T->>S: run install, unit tests, boot server, smoke tests, browser test (e2e)
   S-->>T: exit codes, logs
   alt all passed
     T-->>O: pass

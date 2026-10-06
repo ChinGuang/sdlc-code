@@ -4,8 +4,10 @@
  *
  *   SDLC_RESULT {"profile":"react-node","passed":true,"steps":[…]}
  *
- * Steps: install → unit tests → boot the API → smoke tests → stop.
- * `--install-only` stops after install: it builds a Base Snapshot.
+ * Steps: install → unit tests → boot the API → smoke tests → browser tests
+ * (e2e) → stop. Install also fetches the browser the e2e step drives.
+ * `--install-only` stops after install: it builds a Base Snapshot, with the
+ * browser and its system libraries in it (the only run that needs root).
  * `--check <side>` installs, typechecks and runs that side's tests (T24j).
  * Every step is bounded by a timeout, a failing step stops the run, and the
  * script always prints its result. Exit code 0 means every step passed.
@@ -31,10 +33,20 @@ const PORT = Number(process.env.PORT ?? 3100);
 /** Tests and smoke checks share a database of their own, never the dev one. */
 const DATABASE_URL = process.env.DATABASE_URL ?? "file:./sdlc-test.db";
 const BOOT_TIMEOUT_MS = 30_000;
-const STEP_TIMEOUT_MS = { install: 600_000, typecheck: 300_000, unit: 600_000 };
+const STEP_TIMEOUT_MS = {
+  install: 600_000,
+  // The browser is a ~115 MB download: with npm install it stays inside the
+  // Base Snapshot build's 900 s.
+  browser: 240_000,
+  typecheck: 300_000,
+  unit: 600_000,
+  e2e: 240_000,
+};
 const DEFAULT_STEP_TIMEOUT_MS = 120_000;
 const OUTPUT_TAIL = 2000;
 const VITEST_REPORT = ".sdlc/vitest.json";
+/** Written by Playwright's json reporter (playwright.config.ts). */
+const PLAYWRIGHT_REPORT = ".sdlc/playwright.json";
 /** What node_modules was installed from; install again when it changes. */
 const INSTALL_STAMP = "node_modules/.sdlc-installed";
 const INSTALL_ONLY = process.argv.includes("--install-only");
@@ -217,22 +229,79 @@ function vitestFailures() {
   }
 }
 
+/** The failing browser tests Playwright reported, for an Issue Report (T16). */
+function playwrightFailures() {
+  if (!existsSync(PLAYWRIGHT_REPORT)) return [];
+  try {
+    const report = JSON.parse(readFileSync(PLAYWRIGHT_REPORT, "utf8"));
+    const failures = [];
+    const visit = (suite, titles) => {
+      const path = suite.title ? [...titles, suite.title] : titles;
+      for (const spec of suite.specs ?? [])
+        for (const test of spec.tests ?? []) {
+          const failed = (test.results ?? []).find(
+            (result) => result.status !== "passed" && result.status !== "skipped",
+          );
+          if (!failed) continue;
+          failures.push({
+            test: [...path, spec.title].join(" > "),
+            // Relative to testDir in the report; the application's own path here.
+            file: `e2e/${spec.file ?? suite.file ?? ""}`,
+            message: (failed.error?.message ?? failed.errors?.[0]?.message ?? "")
+              .replace(/\u001b\[[0-9;]*m/g, "")
+              .slice(0, 1000),
+          });
+        }
+      for (const child of suite.suites ?? []) visit(child, path);
+    };
+    // The top-level suites are the spec files; their title is the file's name.
+    for (const suite of report.suites ?? []) visit(suite, []);
+    return failures;
+  } catch {
+    return [];
+  }
+}
+
 let server;
 let passed = true;
 
 try {
   // A Base Snapshot has the template's dependencies; a Slice that adds one
-  // changes package.json, and only then does the install run again.
+  // changes package.json, and only then does npm install run again. The browser
+  // the e2e step drives is looked for every time, and is already there unless
+  // this is the Base Snapshot build: only that run (--install-only) fetches the
+  // browser's system libraries (apt needs root and the network).
   passed = await step("install", async () => {
     const wanted = manifestHash();
-    if (existsSync(INSTALL_STAMP) && readFileSync(INSTALL_STAMP, "utf8") === wanted)
-      return { ok: true, output: "dependencies already installed from this package.json" };
-    const installed = await asStep("npm", ["install", "--no-audit", "--no-fund"], {
-      timeoutMs: STEP_TIMEOUT_MS.install,
-    });
-    // Hashed again: the first install writes package-lock.json.
-    if (installed.ok) writeFileSync(INSTALL_STAMP, manifestHash());
-    return installed;
+    let output = "dependencies already installed from this package.json\n";
+    if (!(existsSync(INSTALL_STAMP) && readFileSync(INSTALL_STAMP, "utf8") === wanted)) {
+      const installed = await asStep("npm", ["install", "--no-audit", "--no-fund"], {
+        timeoutMs: STEP_TIMEOUT_MS.install,
+      });
+      if (!installed.ok) return installed;
+      // Hashed again: the first install writes package-lock.json.
+      writeFileSync(INSTALL_STAMP, manifestHash());
+      output = installed.output;
+    }
+    // A Coding Agent's own check never opens a browser.
+    if (CHECKING) return { ok: true, output };
+    const browser = await asStep(
+      "npx",
+      [
+        "playwright",
+        "install",
+        ...(INSTALL_ONLY ? ["--with-deps"] : []),
+        "--only-shell",
+        "chromium",
+      ],
+      { timeoutMs: STEP_TIMEOUT_MS.browser },
+    );
+    // Both are cut, so the browser's banner never pushes npm's lines out of
+    // the step's output tail.
+    return {
+      ok: browser.ok,
+      output: `${output.slice(-1000)}\n${browser.output.slice(-800)}`,
+    };
   });
 
   // The Prisma client's types come from the schema, so the typecheck needs it.
@@ -330,6 +399,18 @@ try {
         String(missing.status),
       );
       return { ok: healthy && notFound, output: lines.join("\n") };
+    });
+
+  // The app in a real browser, in front of the API that is already up: the
+  // Vite dev server (playwright.config.ts) proxies /api to PORT.
+  if (passed && !INSTALL_ONLY && !CHECKING)
+    passed = await step("e2e", async () => {
+      rmSync(PLAYWRIGHT_REPORT, { force: true });
+      mkdirSync(dirname(PLAYWRIGHT_REPORT), { recursive: true });
+      const tested = await asStep("npx", ["playwright", "test"], {
+        timeoutMs: STEP_TIMEOUT_MS.e2e,
+      });
+      return { ...tested, failures: playwrightFailures() };
     });
 } finally {
   if (!INSTALL_ONLY && !CHECKING)

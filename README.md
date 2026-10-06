@@ -30,7 +30,7 @@ A multi-agent developer tool that turns a plain-language product request into a 
 | **System Design Agent** | The architecture, Mermaid UML diagrams, the Slice Plan (a Walking Skeleton first) and the API Contract (OpenAPI). |
 | **UI Design Agent** | Designs the screens in Penpot through Penpot MCP and writes the UI Spec, with a screenshot of each screen. |
 | **Backend and Frontend Coding Agents** | Build one Slice at the same time, bound by the API Contract, each in its own git worktree, each with tests. |
-| **Testing Agent** | Runs the merged Slice in a sandbox (install, tests, boot, smoke tests) and turns what fails into Issue Reports with the cause the tools printed. |
+| **Testing Agent** | Runs the merged Slice in a sandbox (install, tests, boot, smoke tests, and a browser test of the app in headless Chromium) and turns what fails into Issue Reports with the cause the tools printed. |
 | **Code Review Agent** | Linters first (ESLint and the TypeScript compiler), then a review of the diff against a layered Review Standard. Every Finding cites a Rule ID and a line the diff shows. |
 
 - **Gates.** The Design Gate (after the documents) and the PR Gate (after review) are on by default. An *auto* Run skips them.
@@ -135,7 +135,7 @@ What the choice rests on is measured, not assumed: all four Nemotron models avai
 **Nebius Sandboxes** run everything that executes generated code, so none of it runs on your machine:
 
 - **Base Snapshot.** The Stack Profile's template with its dependencies installed is built once as a sandbox image (keyed by the image tag and a hash of the template), so a Test Run starts from it and installs only what a Slice added.
-- **Test Run.** Install, unit tests, boot the API and smoke-test it, starting from the Base Snapshot; the test script's result comes back as one machine-readable line.
+- **Test Run.** Install, unit tests, boot the API and smoke-test it, then open the app in headless Chromium (Playwright; the browser is in the Base Snapshot), starting from the Base Snapshot; the test script's result comes back as one machine-readable line.
 - **Lint Run.** ESLint and the TypeScript compiler over the Slice Commits, in the same way.
 - **Files go in, nothing is trusted to stay.** Processes do not survive between sandbox runs, so a smoke test starts and stops its server within one run; the source of truth stays in local git. Secrets are never sent into a sandbox. The measurements are in [the sandbox spike](docs/spikes/sandbox.md).
 

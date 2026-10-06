@@ -284,6 +284,36 @@ describe("templateFacts (T24d)", () => {
     expect(vite).toContain('name: "screens"');
   });
 
+  // S1: the Test Run ends in a real browser, and the agents are told so.
+  it("ships the browser smoke test the Test Run ends with, and says what it needs", () => {
+    const script = file("scripts/sdlcTest.mjs");
+    const vite = file("vite.config.ts");
+    const manifest = JSON.parse(file("package.json")) as {
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+
+    expect(file("e2e/app.spec.ts")).toContain("pageerror");
+    expect(file("playwright.config.ts")).toContain('testDir: "e2e"');
+    expect(manifest.devDependencies).toHaveProperty("@playwright/test");
+    expect(manifest.scripts["test:e2e"]).toBe("playwright test");
+    expect(file("tsconfig.json")).toContain('"e2e"');
+    // After the API's smoke tests, before the API is stopped.
+    const order = ['step("smoke"', 'step("e2e"', 'step("stop"'].map((step) =>
+      script.indexOf(step),
+    );
+    expect(order.every((at) => at > 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // The proxy follows the PORT the Test Run boots the API on.
+    expect(vite).toContain("process.env.PORT");
+    expect(facts).toContain("e2e/app.spec.ts");
+    expect(facts).toContain("never write a port there");
+    // Neither side may weaken it.
+    const writable = Object.values(REACT_NODE.writablePaths).flat();
+    expect(writable).not.toContain("e2e/");
+    expect(writable).not.toContain("playwright.config.ts");
+  });
+
   it("gives the TypeScript settings and the shared test database", () => {
     const tsconfig = file("tsconfig.json");
 

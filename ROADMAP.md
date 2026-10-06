@@ -127,7 +127,7 @@ In the plan's order. Dates are from [docs/PLAN.md](docs/PLAN.md); M4 and M5 over
 
 ### Stretch, only after T25
 
-Playwright tests in the Stack Profile · deploying the server on Nebius AI Cloud · zip export with no Target Repo · self-hosted Penpot · parallel Slices · the sandbox tools as an MCP server.
+**S1a (in review): a browser test ends every Test Run.** The template ships Playwright and one browser test (the app renders at `/` without an uncaught error and reaches its API through the Vite proxy); the Base Snapshot holds Chromium; the test script has an `e2e` step after the smoke tests, whose failures are Issue Reports like any other. Spike: [docs/spikes/playwright-sandbox.md](docs/spikes/playwright-sandbox.md). S1b, the agents writing browser tests per Slice, is not done (see the spike's notes). The rest: deploying the server on Nebius AI Cloud · zip export with no Target Repo · self-hosted Penpot · parallel Slices · the sandbox tools as an MCP server.
 
 ---
 

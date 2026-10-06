@@ -162,8 +162,13 @@ function fromFailure(
   failure: TestFailure,
   profile: StackProfile,
 ): Draft {
+  // The failing test's own file, unless no side may write it (a browser test
+  // of the template's): then the file the failure names, which has an owner.
+  const testFile = appPath(failure.file);
   const file =
-    appPath(failure.file) ?? appFileIn(failure.message, profile).file;
+    testFile && ownerOf(testFile, profile)
+      ? testFile
+      : (appFileIn(failure.message, profile).file ?? testFile);
   const lines = stripAnsi(failure.message)
     .split("\n")
     .map((line) => line.trim());
@@ -308,6 +313,9 @@ function appFileIn(
     for (const token of line.split(/[\s()'"`]+/)) {
       const path = token
         .replace(/^file:\/\//, "")
+        // A browser's stack names the dev server's URL: "http://127.0.0.1:5199/src/main.tsx?t=1:1:7".
+        .replace(/^https?:\/\/[^/]+\//, "")
+        .replace(/\?[^:]*(?=:\d|$)/, "")
         .replace(new RegExp(`^${SANDBOX_APP_DIR}/`), "")
         // "…/App.tsx." ends a sentence; "…/app.ts:9:29" names a line.
         .replace(/[.,;:]+$/, "")

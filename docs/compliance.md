@@ -47,7 +47,7 @@ The development tools (TypeScript, Vitest, ESLint, Prettier, Vite, `tsx`) are MI
 
 ### What the generated applications use
 
-The template's dependencies are installed into the applications the agents write, in the sandbox, not into this repository: React, `react-router-dom`, Express, `zod`, Vite, Vitest, Tailwind CSS, Testing Library (MIT); Prisma (Apache-2.0); TypeScript (Apache-2.0). They carry no copyleft obligation for the generated code.
+The template's dependencies are installed into the applications the agents write, in the sandbox, not into this repository: React, `react-router-dom`, Express, `zod`, Vite, Vitest, Tailwind CSS, Testing Library (MIT); Prisma (Apache-2.0); TypeScript (Apache-2.0); Playwright (Apache-2.0), whose Chromium build is downloaded into the sandbox image by `playwright install` and is not distributed with this repository. They carry no copyleft obligation for the generated code.
 
 ## 3. Services this tool calls
 
