@@ -210,6 +210,11 @@ export interface RunService {
     version: number,
     order: number,
   ) => { bytes: Buffer; mimeType: string };
+  /**
+   * The Run's code as of its last Slice Commit, as a zip (S3). A conflict when
+   * no Slice has passed: the template alone is not a result.
+   */
+  exportCode: (runId: string) => Promise<{ bytes: Buffer; filename: string }>;
   decideDesign: (runId: string, verdicts: DesignVerdict[]) => RunDetail;
   /** Designs a gated Run again after its design failed. */
   retryDesign: (runId: string) => RunDetail;

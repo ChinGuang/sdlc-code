@@ -4,6 +4,9 @@
  * what it prints, and the exit code a script can rely on (0 done, 1 refused,
  * 2 mistyped).
  */
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   HttpServerApi,
@@ -154,7 +157,10 @@ const ESCALATED: RunDetail = {
 };
 
 const servers: Array<{ close: () => Promise<void> }> = [];
+const folders: string[] = [];
 afterEach(async () => {
+  for (const folder of folders.splice(0))
+    rmSync(folder, { recursive: true, force: true });
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
 
@@ -231,6 +237,72 @@ describe("sdlccode: help and mistakes", () => {
     expect(err[0]).toMatch(
       /did not answer as an sdlc-code server does; check SDLC_API_URL/,
     );
+  });
+
+  // S3: the way out of a Run with no Target Repo.
+  describe("export", () => {
+    const zip = (name: string) => ({
+      json: null,
+      raw: "PK fake zip bytes",
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": `attachment; filename="${name}"`,
+      },
+    });
+
+    it("saves the zip under the name the server gave, beside where it runs", async () => {
+      const folder = mkdtempSync(join(tmpdir(), "sdlc-export-"));
+      folders.push(folder);
+      const { run, out } = await cli(DETAIL, (request) =>
+        request.path === `/runs/${ID}/export`
+          ? zip("sdlc-run-abc.zip")
+          : undefined,
+      );
+      const before = process.cwd();
+      process.chdir(folder);
+      try {
+        expect(await run("export", "27f388")).toBe(0);
+      } finally {
+        process.chdir(before);
+      }
+
+      expect(readFileSync(join(folder, "sdlc-run-abc.zip"), "utf8")).toBe(
+        "PK fake zip bytes",
+      );
+      expect(out.join("\n")).toMatch(/Saved 17 bytes to .*sdlc-run-abc\.zip/);
+    });
+
+    it("saves it where --out says, and never over a file that is there", async () => {
+      const folder = mkdtempSync(join(tmpdir(), "sdlc-export-"));
+      folders.push(folder);
+      const file = join(folder, "mine.zip");
+      const { run, err } = await cli(DETAIL, (request) =>
+        request.path === `/runs/${ID}/export` ? zip("x.zip") : undefined,
+      );
+
+      expect(await run("export", "27f388", "--out", file)).toBe(0);
+      expect(readFileSync(file, "utf8")).toBe("PK fake zip bytes");
+
+      expect(await run("export", "27f388", "--out", file)).toBe(1);
+      expect(err.join("\n")).toMatch(/exists already; name another file/);
+    });
+
+    it("says what the server said when there is no code yet", async () => {
+      const { run, err } = await cli(DETAIL, (request) =>
+        request.path === `/runs/${ID}/export`
+          ? {
+              status: 409,
+              json: {
+                message:
+                  "Run has no passed Slice yet, so there is no code to export.",
+              },
+            }
+          : undefined,
+      );
+
+      expect(await run("export", "27f388")).toBe(1);
+      expect(err.join("\n")).toMatch(/no passed Slice yet/);
+    });
   });
 
   // S2: a server on a network turns away a request without its token.

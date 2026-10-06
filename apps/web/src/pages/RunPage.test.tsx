@@ -61,6 +61,28 @@ describe("RunPage: the Run as it is read", () => {
   });
 });
 
+describe("RunPage: the code to download (S3)", () => {
+  it("links the zip of the code once a Slice has passed", async () => {
+    await open();
+
+    const link = screen.getByRole("link", { name: "Download code (zip)" });
+
+    expect(link).toHaveAttribute("href", `/api/runs/${DETAIL.id}/export`);
+    expect(link).toHaveAttribute("download");
+  });
+
+  it("offers nothing before any Slice has passed: the template is not a result", async () => {
+    await open({
+      ...DETAIL,
+      slices: DETAIL.slices.map((slice) => ({ ...slice, commitSha: null })),
+    });
+
+    expect(
+      screen.queryByRole("link", { name: "Download code (zip)" }),
+    ).toBeNull();
+  });
+});
+
 describe("RunPage: live from the stream", () => {
   it("moves its status badge and stepper as status events arrive", async () => {
     const { push } = await open();

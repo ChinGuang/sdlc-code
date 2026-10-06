@@ -828,3 +828,101 @@ describe("git output parsing", () => {
     ]);
   });
 });
+
+/** The file names in a zip, read from its central directory. */
+function zipNames(zip: Buffer): string[] {
+  const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  if (end < 0) throw new Error("not a zip");
+  const count = zip.readUInt16LE(end + 10);
+  let at = zip.readUInt32LE(end + 16);
+  const names: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const name = zip.readUInt16LE(at + 28);
+    const extra = zip.readUInt16LE(at + 30);
+    const comment = zip.readUInt16LE(at + 32);
+    names.push(zip.toString("utf8", at + 46, at + 46 + name));
+    at += 46 + name + extra + comment;
+  }
+  return names;
+}
+
+describe("GitWorkspaceManager.exportArchive (S3)", () => {
+  it("is nothing before a Slice has passed: the template alone is not a result", async () => {
+    const { manager } = await setup();
+
+    expect(await manager.exportArchive()).toBeNull();
+  });
+
+  it("is the code as of the last Slice Commit, as a zip with no git history", async () => {
+    const { manager } = await setup();
+    const { backend, frontend } = await builtSlice(manager);
+    const merged = await manager.mergeSlice("slice-1", [backend, frontend]);
+    if (merged.status !== "merged") throw new Error("the Slice did not merge");
+    await manager.commitSlice(merged, PASSED, "Slice 1: Todos");
+
+    const zip = await manager.exportArchive();
+
+    expect(zip).not.toBeNull();
+    expect(zip!.subarray(0, 2).toString()).toBe("PK");
+    const names = zipNames(zip!);
+    // What the Slice built, beside what the template gave it.
+    expect(names).toEqual(
+      expect.arrayContaining(["server/todos.ts", "src/TodoList.tsx"]),
+    );
+    expect(names.some((name) => name.startsWith(".git"))).toBe(false);
+  });
+
+  it("does not hold a Workspace's unsaved or unmerged work", async () => {
+    const { manager } = await setup();
+    const { backend, frontend } = await builtSlice(manager);
+    const merged = await manager.mergeSlice("slice-1", [backend, frontend]);
+    if (merged.status !== "merged") throw new Error("the Slice did not merge");
+    await manager.commitSlice(merged, PASSED, "Slice 1: Todos");
+    const later = await manager.openWorkspace("slice-2", "backend");
+    write(later, "server/unfinished.ts", "export const x = 1;\n");
+    await manager.saveWorkspace(later, "Backend: unfinished");
+
+    const names = zipNames((await manager.exportArchive())!);
+
+    expect(names).not.toContain("server/unfinished.ts");
+  });
+});
+
+describe("GitWorkspaceManager.exportArchive: what the application says about itself (S3)", () => {
+  async function committedWith(files: Record<string, string>) {
+    const { manager } = await setup();
+    const backend = await manager.openWorkspace("slice-1", "backend");
+    for (const [path, contents] of Object.entries(files))
+      write(backend, path, contents);
+    await manager.saveWorkspace(backend, "Backend");
+    const merged = await manager.mergeSlice("slice-1", [backend]);
+    if (merged.status !== "merged") throw new Error("the Slice did not merge");
+    await manager.commitSlice(merged, PASSED, "Slice 1");
+    return manager;
+  }
+
+  // A generated application's own .gitattributes must not shape what is given.
+  it("gives every file, whatever the application's .gitattributes says", async () => {
+    const manager = await committedWith({
+      ".gitattributes": "* export-ignore\n",
+      "server/todos.ts": "export const todos = [];\n",
+    });
+
+    const names = zipNames((await manager.exportArchive())!);
+
+    expect(names).toEqual(
+      expect.arrayContaining(["server/todos.ts", ".gitattributes"]),
+    );
+  });
+
+  it("does not expand export-subst placeholders in the application's files", async () => {
+    const manager = await committedWith({
+      ".gitattributes": "server/id.ts export-subst\n",
+      "server/id.ts": 'export const id = "$Format:%H$";\n',
+    });
+
+    const zip = (await manager.exportArchive())!;
+
+    expect(zip.includes(Buffer.from("$Format:%H$"))).toBe(true);
+  });
+});

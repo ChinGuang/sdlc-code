@@ -14,6 +14,7 @@ import {
   SqliteEscalationStore,
   SqliteRunStore,
   SqliteSliceStore,
+  ExportTooLargeError,
   FileScreenshotStore,
   SqliteReviewStore,
   SqliteTaskStore,
@@ -60,7 +61,12 @@ afterEach(() => {
 
 function setup(
   steps: Step[] = [],
-  options: { failResume?: ReadonlySet<string>; refuse?: Error } = {},
+  options: {
+    failResume?: ReadonlySet<string>;
+    refuse?: Error;
+    /** What the runtime exports for any Run: null when no Slice has passed. */
+    exported?: Buffer | null | Error;
+  } = {},
 ) {
   const db = openDatabase(":memory:");
   const store = { db };
@@ -161,6 +167,10 @@ function setup(
         hadCheckpoint: false,
       };
     },
+    exportCode: async () => {
+      if (options.exported instanceof Error) throw options.exported;
+      return options.exported ?? null;
+    },
     redact: (text) => text.replaceAll("secret-key", "[redacted]"),
     close: async () => {
       closed++;
@@ -197,6 +207,41 @@ const request = {
   mode: "gated" as const,
   tokenBudget: 1_000_000,
 };
+
+describe("RuntimeRunService.exportCode (S3)", () => {
+  it("names the zip after the Run, and gives the code the runtime made", async () => {
+    const { api } = setup([], { exported: Buffer.from("PK zip") });
+    const run = await api.startRun(request);
+
+    const exported = await api.exportCode(run.id);
+
+    expect(exported.filename).toBe(`sdlc-run-${run.id.slice(0, 8)}.zip`);
+    expect(exported.bytes.toString()).toBe("PK zip");
+  });
+
+  it("says a code too big to hold is a conflict, with the reason a person can act on", async () => {
+    const { api } = setup([], {
+      exported: new ExportTooLargeError("The code is 300 MB: clone it."),
+    });
+    const run = await api.startRun(request);
+
+    await expect(api.exportCode(run.id)).rejects.toThrow(
+      new RunConflictError("The code is 300 MB: clone it."),
+    );
+  });
+
+  it("is a conflict when no Slice has passed, and not found for no such Run", async () => {
+    const { api } = setup([], { exported: null });
+    const run = await api.startRun(request);
+
+    await expect(api.exportCode(run.id)).rejects.toBeInstanceOf(
+      RunConflictError,
+    );
+    await expect(api.exportCode("nope")).rejects.toBeInstanceOf(
+      RunNotFoundError,
+    );
+  });
+});
 
 describe("RuntimeRunService: starting and advancing", () => {
   it("answers a new Run at once, and advances it in the background", async () => {

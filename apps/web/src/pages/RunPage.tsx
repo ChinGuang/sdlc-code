@@ -120,6 +120,16 @@ export function RunPage({
               Decide…
             </button>
           )}
+          {/* The way out of a Run with no Target Repo, and a copy of one with. */}
+          {detail.slices.some((slice) => slice.commitSha) && (
+            <a
+              className="button small-button"
+              href={api.exportUrl(runId)}
+              download
+            >
+              Download code (zip)
+            </a>
+          )}
           {!FINISHED.has(detail.status) && (
             <CancelRun run={detail} api={api} onDecided={accept} />
           )}

@@ -109,7 +109,13 @@ pnpm --filter @sdlc-code/cli sdlccode abort <run>                       # with a
 pnpm --filter @sdlc-code/cli sdlccode --help
 ```
 
-Without `--repo` the Slice Commits stay in the Run's local repository. A Run's files, database and workspaces are in `.sdlc-runs/`.
+Without `--repo` the Slice Commits stay in the Run's local repository, and the way out is a zip of the code as of the last Slice that passed:
+
+```bash
+pnpm --filter @sdlc-code/cli sdlccode export <run> [--out my-app.zip]
+```
+
+The dashboard's Run page has the same as *Download code (zip)* once a Slice has passed. The zip has the application's files with no git history (the Run's repository, with it, is `.sdlc-runs/<run>/repo.git`: `git clone` it for the history). A Run's files, database and workspaces are in `.sdlc-runs/`.
 
 ## How Nemotron is used
 

@@ -94,6 +94,15 @@ function fakeService(overrides: Partial<RunService> = {}) {
         content: "openapi: 3.1.0",
       };
     },
+    exportCode: async (id) => {
+      calls.push(["exportCode", [id]]);
+      if (id === "empty")
+        throw new RunConflictError(`Run ${id} has no passed Slice yet.`);
+      return {
+        bytes: Buffer.from("PK fake zip"),
+        filename: "sdlc-run-abc.zip",
+      };
+    },
     getScreenshot: (id, version, order) => {
       calls.push(["getScreenshot", [id, version, order]]);
       if (order > 1) throw new ScreenshotNotFoundError(id, version, order);
@@ -278,6 +287,36 @@ describe("GET /runs and /runs/:id", () => {
       "\x89PNG fake",
     );
     expect(calls).toContainEqual(["getScreenshot", [RUN_ID, 2, 1]]);
+  });
+
+  it("serves the code as a download", async () => {
+    const { service, calls } = fakeService();
+    const url = await start(service);
+
+    const response = await fetch(`${url}/runs/${RUN_ID}/export`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/zip");
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="sdlc-run-abc.zip"',
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(Buffer.from(await response.arrayBuffer()).toString()).toBe(
+      "PK fake zip",
+    );
+    expect(calls).toContainEqual(["exportCode", [RUN_ID]]);
+  });
+
+  it("answers 409 when no Slice has passed, and says why", async () => {
+    const { service } = fakeService();
+    const url = await start(service);
+
+    const response = await fetch(`${url}/runs/empty/export`);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      message: expect.stringMatching(/no passed Slice/),
+    });
   });
 
   it("answers 400 for a screenshot that is not a number, and 404 for one not kept", async () => {

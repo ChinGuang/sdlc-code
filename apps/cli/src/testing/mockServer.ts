@@ -23,7 +23,13 @@ export type Route = (request: {
   path: string;
   body: unknown;
 }) =>
-  | { status?: number; json: unknown; raw?: string }
+  | {
+      status?: number;
+      json: unknown;
+      raw?: string;
+      /** Replaces the JSON content type, e.g. for a download. */
+      headers?: Record<string, string>;
+    }
   | {
       events: Array<{ type: string; [field: string]: unknown }>;
       /** Close the stream after them, as a server that stopped would. */
@@ -70,6 +76,7 @@ export async function mockServer(route: Route) {
       }
       res.writeHead(answer.status ?? 200, {
         "content-type": "application/json",
+        ...answer.headers,
       });
       res.end(answer.raw ?? JSON.stringify(answer.json));
     },

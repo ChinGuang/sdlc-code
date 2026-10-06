@@ -12,6 +12,7 @@
 import {
   documentsMadeStale,
   IllegalTransitionError,
+  ExportTooLargeError,
   isAgentRole,
   lastWorkingMemory,
   sideAtFault,
@@ -54,6 +55,7 @@ export type ServiceRuntime = Pick<
   | "escalations"
   | "reviews"
   | "screenshots"
+  | "exportCode"
   | "orchestrator"
   | "startRun"
   | "resume"
@@ -115,6 +117,25 @@ export class RuntimeRunService implements RunService, RunLifecycle {
     const image = this.#runtime().screenshots.read(run.id, version, order);
     if (!image) throw new ScreenshotNotFoundError(run.id, version, order);
     return image;
+  };
+
+  exportCode = async (
+    runId: string,
+  ): Promise<{ bytes: Buffer; filename: string }> => {
+    const run = this.#run(runId);
+    const bytes = await this.#runtime()
+      .exportCode(run.id)
+      .catch((error: unknown) => {
+        // Said as it is: the person is told to clone the Run's repository.
+        if (error instanceof ExportTooLargeError)
+          throw new RunConflictError(error.message);
+        throw error;
+      });
+    if (!bytes)
+      throw new RunConflictError(
+        `Run ${run.id} has no passed Slice yet, so there is no code to export.`,
+      );
+    return { bytes, filename: `sdlc-run-${run.id.slice(0, 8)}.zip` };
   };
 
   getDocument = (runId: string, kind: DocumentKind): DocumentView => {
