@@ -160,6 +160,10 @@ The same request twice (a todo app), each into a new empty repository, in [docs/
 
 Between the Runs the platform fixed what the first one found (the sandbox image, the lint, false review Findings, the Escalation Brief, a dashboard that went stale after a restart, the Draft PR text). What still costs most is the **Frontend Coding Agent's screen tests**: about 80% of the tokens in the first Run. Neither Run reached the PR Gate; a third, smaller Run is the way to show that.
 
+## Self-hosted Penpot
+
+Penpot Cloud is the default. To keep the designs on your own machine, `deploy/penpot/` runs Penpot's official Docker Compose stack (its MCP server included) bound to `127.0.0.1`, and sdlc-code needs only a different `PENPOT_MCP_URL`. Started and connected to with sdlc-code's own client; the drawing itself was not tried on it: [docs/penpot-self-hosted.md](docs/penpot-self-hosted.md).
+
 ## Running it on a server
 
 By default the server listens on `127.0.0.1` and needs no sign-in. A container image (`docker build -t sdlc-code .`) runs the server and the dashboard together on a network address; it refuses to start there without an access token, and then every request needs it. It is a one-user tool with no accounts, and it was run and tested with Docker locally, not deployed to a cloud: see [docs/deploy.md](docs/deploy.md) for what it does, what it does not, and the one thing a server cannot change (the Penpot tab).

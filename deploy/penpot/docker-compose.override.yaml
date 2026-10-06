@@ -1,0 +1,35 @@
+# Compose reads this beside docker-compose.yaml (Penpot's own file, unchanged)
+# and applies it on top. It does what a machine you also work on needs:
+#   - the web UI and the mail catcher listen on this machine only;
+#   - the secret key and the database password come from .env, not the file;
+#   - Penpot's anonymous telemetry is off.
+# Anything that makes Penpot reachable from other machines is yours to add:
+# see docs/penpot-self-hosted.md.
+
+services:
+  penpot-frontend:
+    ports: !override
+      - "127.0.0.1:9001:8080"
+
+  penpot-mailcatch:
+    ports: !override
+      - "127.0.0.1:1080:1080"
+
+  penpot-backend:
+    environment:
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set PENPOT_SECRET_KEY in .env (see penpot.env.example)}
+      PENPOT_DATABASE_PASSWORD: ${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD in .env}
+      PENPOT_TELEMETRY_ENABLED: "false"
+
+  penpot-admin-console:
+    environment:
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set PENPOT_SECRET_KEY in .env}
+      PENPOT_DATABASE_PASSWORD: ${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD in .env}
+
+  penpot-exporter:
+    environment:
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set PENPOT_SECRET_KEY in .env}
+
+  penpot-postgres:
+    environment:
+      - POSTGRES_PASSWORD=${PENPOT_DB_PASSWORD:?set PENPOT_DB_PASSWORD in .env}

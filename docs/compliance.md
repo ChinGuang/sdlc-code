@@ -82,6 +82,10 @@ Sources: [Penpot terms](https://penpot.app/terms), [Penpot MCP server](https://p
 - The MCP URL contains the user's token: the user is responsible for it (§3.6 to §3.8). The tool never logs it.
 - Plugins are not vetted by Penpot and may be removed by it (§4.6): the design phase depends on the MCP plugin staying available.
 
+### Self-hosted Penpot (optional, S4)
+
+`deploy/penpot/docker-compose.yaml` is Penpot's published compose file, unchanged (MPL-2.0, like Penpot itself). It pulls Penpot's images (`penpotapp/*`), `postgres:15`, `valkey/valkey:8.1` and `sj26/mailcatcher`, each under its own licence, at run time; none is part of this repository. The override turns Penpot's telemetry off. The terms above (Penpot Cloud) do not apply to a Penpot you run yourself; its licence is the MPL-2.0 of its source.
+
 ### GitHub (delivery)
 
 Source: [GitHub Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).

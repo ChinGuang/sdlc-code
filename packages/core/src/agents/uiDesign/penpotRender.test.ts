@@ -10,6 +10,7 @@ import {
   CONNECTION_CHECK_CODE,
   describeScreenCode,
   ensurePageCode,
+  penpotOrigin,
   penpotPageUrl,
   runPageName,
   screenCode,
@@ -331,6 +332,34 @@ describe("sweepBoardsCode", () => {
     expect(await runPenpotCode(fake, sweepBoardsCode(PAGE, []))).toEqual({
       removed: [],
     });
+  });
+});
+
+describe("penpotOrigin (S4)", () => {
+  it("is the host the MCP URL points at, whether Penpot Cloud or self-hosted", () => {
+    expect(
+      penpotOrigin("https://design.penpot.app/mcp/stream?userToken=abc"),
+    ).toBe("https://design.penpot.app");
+    expect(penpotOrigin("http://localhost:9001/mcp/stream?userToken=abc")).toBe(
+      "http://localhost:9001",
+    );
+  });
+
+  it("is what PENPOT_ORIGIN says, without a trailing slash, when it is set", () => {
+    expect(
+      penpotOrigin(
+        "http://penpot-frontend:8080/mcp/stream",
+        "https://pp.example.com/",
+      ),
+    ).toBe("https://pp.example.com");
+  });
+
+  it("is nothing for a URL that is not one, and never carries the token", () => {
+    expect(penpotOrigin(undefined)).toBeNull();
+    expect(penpotOrigin("not a url")).toBeNull();
+    expect(
+      penpotOrigin("http://localhost:9001/mcp/stream?userToken=secret"),
+    ).not.toContain("secret");
   });
 });
 

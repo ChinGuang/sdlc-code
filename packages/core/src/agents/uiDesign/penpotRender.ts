@@ -90,6 +90,24 @@ return { removed: stale.map((board) => board.name) };
 `;
 }
 
+/**
+ * Where Penpot is, from the MCP URL it was reached by: the same host serves the
+ * workspace, on Penpot Cloud and on a self-hosted one (S4). PENPOT_ORIGIN
+ * overrides it, for an MCP URL that goes through another address. Null when
+ * the URL is not one; it is never printed, as it holds the user token.
+ */
+export function penpotOrigin(
+  mcpUrl: string | undefined,
+  override?: string,
+): string | null {
+  if (override) return override.replace(/\/+$/, "");
+  try {
+    return mcpUrl ? new URL(mcpUrl).origin : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The workspace link to a Run's page, for the Design Gate (ADR 0002). */
 export function penpotPageUrl(
   origin: string,

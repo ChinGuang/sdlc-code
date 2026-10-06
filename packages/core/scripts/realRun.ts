@@ -22,6 +22,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import {
   createRunRuntime,
+  penpotOrigin,
   penpotPageUrl,
   type DocumentKind,
   type RuntimeEvent,
@@ -218,7 +219,7 @@ async function decideDesign(): Promise<void> {
     : null;
   if (page?.page.fileId)
     console.log(
-      `  Penpot: ${penpotPageUrl(process.env.PENPOT_ORIGIN ?? "https://design.penpot.app", page.page.fileId, page.page.pageId)}`,
+      `  Penpot: ${penpotPageUrl(penpotOrigin(process.env.PENPOT_MCP_URL, process.env.PENPOT_ORIGIN) ?? "https://design.penpot.app", page.page.fileId, page.page.pageId)}`,
     );
 
   const verdicts = [];

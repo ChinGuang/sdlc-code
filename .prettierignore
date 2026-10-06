@@ -4,3 +4,5 @@ docs/
 *.md
 packages/stack-profiles/templates/
 .claude/
+# Penpot's own compose file, kept exactly as upstream publishes it (deploy/penpot).
+deploy/penpot/docker-compose.yaml
