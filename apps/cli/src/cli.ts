@@ -4,6 +4,8 @@
  * local server, as the dashboard is: it starts Runs, follows them, and
  * answers the Gates and Escalations they wait at.
  */
+import { writeFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 import {
   ApiError,
   type DocumentKind,
@@ -71,6 +73,7 @@ Commands:
   escalation skip <run> [--budget 3M]
   retry-design <run>                        Design again after a gated Run's design failed
   abort <run> [--no-draft-pr]               Stop a Run, whatever it is doing
+  export <run> [--out file.zip]             Save the Run's code (as of its last passed Slice) as a zip
 
 <run> is a Run's id or its first characters, e.g. 27f388.
 <document> is system-design, slice-plan, api-contract, ui-spec or penpot.
@@ -89,7 +92,7 @@ Environment:
   SDLC_DASHBOARD_URL  The dashboard (default http://localhost:5173)`;
 
 /** Flags that take a value; every other flag is a switch. */
-const VALUED = new Set(["repo", "budget", "side"]);
+const VALUED = new Set(["repo", "budget", "side", "out"]);
 
 /** Parses argv and runs a command; resolves to the process exit code. */
 export async function runCli(
@@ -142,6 +145,8 @@ async function command(parsed: Parsed, io: CliIo, deps: CliDeps) {
       return status(parsed, io, deps);
     case "abort":
       return abort(parsed, io, deps);
+    case "export":
+      return exportCode(parsed, io, deps);
     case "retry-design":
       return retryDesign(parsed, io, deps);
     case "gate":
@@ -667,6 +672,33 @@ async function retryDesign(parsed: Parsed, io: CliIo, deps: CliDeps) {
   await deps.api.retryDesign(runId);
   io.out(`${deps.paint.green("✓")} Designing #${shortId(runId)} again.`);
   await follow(runId, io, deps);
+}
+
+/** The code of a Run, saved as a zip: the way out of a Run with no Target Repo (S3). */
+async function exportCode(parsed: Parsed, io: CliIo, deps: CliDeps) {
+  onlyFlags(parsed, ["out"]);
+  const { api, paint } = deps;
+  const runId = await findRun(api, parsed.words[1]);
+  const { bytes, filename } = await api.exportCode(runId);
+  const out = parsed.flags.get("out");
+  // Never a path the server named: only its file name, beside where this runs.
+  const target = resolve(typeof out === "string" ? out : basename(filename));
+  await writeFile(target, bytes, { flag: "wx" }).catch((error: unknown) => {
+    throw new ApiError(
+      0,
+      (error as { code?: string }).code === "EEXIST"
+        ? `${target} exists already; name another file with --out.`
+        : `Could not write ${target}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+  io.out(
+    `${paint.green("✓")} Saved ${bytes.byteLength.toLocaleString("en")} bytes to ${target}`,
+  );
+  io.out(
+    paint.muted(
+      "  The code as of the last Slice that passed, with no git history: unzip it and run npm install.",
+    ),
+  );
 }
 
 async function abort(parsed: Parsed, io: CliIo, deps: CliDeps) {

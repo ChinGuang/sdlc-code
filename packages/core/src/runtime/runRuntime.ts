@@ -168,6 +168,11 @@ export interface RunRuntime {
   startRun: (request: NewRunRequest) => Promise<Run>;
   /** Makes an interrupted Run safe to continue (T18). */
   resume: (runId: string) => Promise<ResumedRun>;
+  /**
+   * The Run's code as of its last Slice Commit, as a zip (S3); null when no
+   * Slice has passed. For a Run with no Target Repo this is the whole result.
+   */
+  exportCode: (runId: string) => Promise<Buffer | null>;
   /** Where this Run's files are, and the repository its Slices commit to. */
   runDir: (runId: string) => string;
   repoDir: (runId: string) => string;
@@ -562,6 +567,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
         tasks,
         workspaces: workspacesFor(runOf(runId)),
       }),
+    exportCode: (runId) => workspacesFor(runOf(runId)).exportArchive(),
     runDir,
     repoDir,
     redact,

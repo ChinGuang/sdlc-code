@@ -97,6 +97,12 @@ export interface WorkspaceManager {
    */
   sliceCommits: () => Promise<string[]>;
   /**
+   * The code as of the last Slice Commit, as a zip (S3): the files of the
+   * application, with no git history. Null when no Slice has passed, so there
+   * is nothing but the template to give.
+   */
+  exportArchive: () => Promise<Buffer | null>;
+  /**
    * The Workspace for one Coding Agent in a Slice. A new one starts at the
    * last Slice Commit; an existing one is returned as the agent left it.
    */
@@ -163,6 +169,17 @@ const DEFAULT_AUTHOR: GitAuthor = {
   name: "sdlc-code",
   email: "sdlc-code@users.noreply.github.com",
 };
+
+/** The most code an export buffers: a zip of it is built and sent from memory. */
+const MAX_EXPORT_BYTES = 200_000_000;
+
+/** The code is too big to give as one download; the Run's repository is the way. */
+export class ExportTooLargeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExportTooLargeError";
+  }
+}
 
 /** Workspace branches live beside the run branch, never under it. */
 const WORKSPACE_REFS = "refs/heads/sdlc-workspace/";
@@ -246,6 +263,37 @@ export class GitWorkspaceManager implements WorkspaceManager {
       `${await this.#commitOf(START_REF)}..${await this.lastSliceCommit()}`,
     ]);
     return commits.stdout.split("\n").filter(Boolean);
+  };
+
+  exportArchive = async (): Promise<Buffer | null> => {
+    if ((await this.sliceCommits()).length === 0) return null;
+    const commit = await this.lastSliceCommit();
+    // The archive is held whole in memory, so an application of more than a
+    // few hundred MB is for git to give, not for this to buffer.
+    const listing = await this.#run(this.#repoDir, [
+      "ls-tree",
+      "-r",
+      "-l",
+      commit,
+    ]);
+    const bytes = listing.stdout
+      .split("\n")
+      .reduce((total, line) => total + (Number(line.split(/\s+/)[3]) || 0), 0);
+    if (bytes > MAX_EXPORT_BYTES)
+      throw new ExportTooLargeError(
+        `The code is ${Math.round(bytes / 1e6)} MB, over the ${MAX_EXPORT_BYTES / 1e6} MB an export holds in memory: clone the Run's repository (${this.#repoDir}) instead.`,
+      );
+    // What the generated application's own .gitattributes says (export-ignore,
+    // export-subst) must not change what is given: info/attributes outranks it.
+    const info = join(this.#repoDir, "info");
+    mkdirSync(info, { recursive: true });
+    writeFileSync(join(info, "attributes"), "* -export-ignore -export-subst\n");
+    const archive = await this.#run(this.#repoDir, [
+      "archive",
+      "--format=zip",
+      commit,
+    ]);
+    return archive.bytes;
   };
 
   openWorkspace = async (

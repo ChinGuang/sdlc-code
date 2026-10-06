@@ -43,6 +43,8 @@ export interface RunsApi {
   startRun: (request: StartRunRequest) => Promise<RunSummary>;
   /** Where a screen as drawn is, for an <img>: the server serves the image. */
   screenshotUrl: (runId: string, version: number, order: number) => string;
+  /** Where the Run's code, as of its last passed Slice, downloads as a zip (S3). */
+  exportUrl: (runId: string) => string;
   /** A document in full; the Run's detail only lists them. */
   getDocument: (runId: string, kind: DocumentKind) => Promise<DocumentView>;
   /** Designs a gated Run again after its design failed. */
@@ -136,6 +138,9 @@ export class HttpRunsApi implements RunsApi {
 
   startRun = (request: StartRunRequest): Promise<RunSummary> =>
     this.#call("POST", "/runs", request);
+
+  exportUrl = (runId: string): string =>
+    `${this.#base}${runPath(runId)}/export`;
 
   screenshotUrl = (runId: string, version: number, order: number): string =>
     `${this.#base}${runPath(runId)}/screenshots/${version}/${order}`;

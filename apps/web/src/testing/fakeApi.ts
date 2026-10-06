@@ -55,6 +55,7 @@ export function fakeApi(options: {
       (async () => {
         throw new Error("not in this test");
       }),
+    exportUrl: (runId) => `/api/runs/${runId}/export`,
     screenshotUrl: (runId, version, order) =>
       `/fake/${runId}/screenshots/${version}/${order}`,
     getDocument: async (_runId, kind) => {

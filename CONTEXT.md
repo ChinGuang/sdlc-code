@@ -90,6 +90,8 @@ _Avoid_: "subagent" as a synonym for a specific agent role.
 
 **Lint Run** — One sandbox run of a Stack Profile's lint script (ESLint and the TypeScript compiler) over the Slice Commits, whose complaints become Findings. Like a Test Run it only executes; the files come from the Workspace.
 
+**Export** — The code of a Run as of its last Slice Commit, as a zip with no git history: what a Run with no Target Repo gives instead of a pull request. Nothing before the first passed Slice (the template alone is not a result), and nothing of the unfinished Slice. It holds what the Slice Commits hold, exactly as the pull request would: the application's own `.gitattributes` does not change it, and only `.env` files are kept out of a Slice's commits, so look through it before sharing. Over 200 MB it is refused, and the Run's repository is cloned instead.
+
 **Access Token** — The one shared secret a server needs when it listens beyond loopback (`SDLC_ACCESS_TOKEN`, 16 characters or more). The server refuses to start on a network address without it; with it, every request but the liveness check must carry it, as a Bearer header or as the session cookie the dashboard's sign-in sets. There are no accounts: whoever holds it can start Runs and spend the keys the server holds.
 
 **Target Repo** — The user's existing GitHub repository the Run delivers into via a feature branch and pull request.

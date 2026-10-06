@@ -57,6 +57,10 @@ Not done: a revocable session (the cookie is a fixed value derived from the toke
 
 What would be needed, in outline: a small VM (2 vCPU, 4 GB is enough for the server; the sandboxes run in Token Factory, not here), Docker on it, the `docker run` above with the keys from the cloud's secret store, a persistent disk for `/data`, and an HTTPS front (a reverse proxy on the VM or a load balancer) in front of port 4317, with the firewall open to 443 only. Check Nebius's documentation for the current commands and prices; they were not looked up for this note.
 
+## Getting the code out
+
+A Run on a server with no Target Repo keeps its code inside the container's `/data` volume. Download it from the Run page (*Download code (zip)*) or with `sdlccode export <run>` (`SDLC_API_URL` and `SDLC_ACCESS_TOKEN` as above); the endpoint is behind the access token like the rest. The page's link works with the sign-in cookie, so with only a Bearer token (a script) use the command line.
+
 ## Build check
 
 `docker build` is not part of CI yet. To check the image after a change: build it, run it with a token, and see `GET /api/session` answer `{"required":true,"signedIn":false}`, `GET /api/runs` answer 401 without the token, and the container's health status turn `healthy`.

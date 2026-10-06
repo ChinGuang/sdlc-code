@@ -9,6 +9,7 @@
  *   POST /runs/:id/design-gate    Verdicts on the documents in review
  *   POST /runs/:id/escalation     one of the four choices
  *   POST /runs/:id/pr-gate        approve, or request changes
+ *   GET  /runs/:id/export         the code as of the last Slice Commit, as a zip
  *   POST /runs/:id/abort          abort at an Escalation, with or without a Draft PR
  *   GET  /runs/:id/events         SSE; ?after=<seq>, or the Last-Event-ID a
  *                                 browser sends when it reconnects, replays
@@ -105,6 +106,21 @@ export class RunsController {
     const wanted = parse(ScreenshotParams, { version, order });
     const image = this.#runs.getScreenshot(id, wanted.version, wanted.order);
     return new StreamableFile(image.bytes, { type: image.mimeType });
+  }
+
+  /**
+   * The Run's code as of its last Slice Commit, as a zip (S3). The only way
+   * out for a Run with no Target Repo, and a copy for one with.
+   */
+  @Get(":id/export")
+  @Header("X-Content-Type-Options", "nosniff")
+  @Header("Cache-Control", "no-store")
+  async exportCode(@Param("id") id: string): Promise<StreamableFile> {
+    const { bytes, filename } = await this.#runs.exportCode(id);
+    return new StreamableFile(bytes, {
+      type: "application/zip",
+      disposition: `attachment; filename="${filename}"`,
+    });
   }
 
   @Get(":id/documents/:kind")

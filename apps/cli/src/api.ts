@@ -224,6 +224,10 @@ export interface ServerApi {
     decision: PullRequestDecision,
   ) => Promise<RunDetail>;
   abortRun: (runId: string, openDraftPrOnAbort: boolean) => Promise<RunDetail>;
+  /** The Run's code as of its last Slice Commit, as a zip (S3). */
+  exportCode: (
+    runId: string,
+  ) => Promise<{ bytes: Uint8Array; filename: string }>;
   /**
    * Calls `onEvent` for each of the Run's events after `after`, until
    * `onEvent` returns "stop", `until` is aborted, or the stream ends.
@@ -292,6 +296,20 @@ export class HttpServerApi implements ServerApi {
 
   abortRun = (runId: string, openDraftPrOnAbort: boolean): Promise<RunDetail> =>
     this.#call("POST", `${runPath(runId)}/abort`, { openDraftPrOnAbort });
+
+  exportCode = async (
+    runId: string,
+  ): Promise<{ bytes: Uint8Array; filename: string }> => {
+    const response = await this.#send(`${runPath(runId)}/export`, {});
+    if (!response.ok) throw await refusal(response);
+    const named = /filename="([^"]+)"/.exec(
+      response.headers.get("content-disposition") ?? "",
+    );
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      filename: named?.[1] ?? `sdlc-run-${runId.slice(0, 8)}.zip`,
+    };
+  };
 
   follow = async (
     runId: string,
