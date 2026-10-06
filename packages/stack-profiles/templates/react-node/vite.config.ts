@@ -4,10 +4,11 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [react()],
   // The API runs beside the dev server; the app only ever calls /api (STRUCT-01).
+  // It listens on PORT (3000 unless a Test Run says otherwise): keep it so.
   server: {
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:3000",
+        target: `http://127.0.0.1:${process.env.PORT ?? 3000}`,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
     },

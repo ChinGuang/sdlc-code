@@ -106,6 +106,92 @@ describe("issueReports from recorded Test Runs", () => {
     ]);
   });
 
+  // S1: a browser test names its own spec file, which neither side owns, so the
+  // report suspects no one and the Orchestrator decides.
+  it("failing e2e: the browser test and its error, suspected on no side", () => {
+    const reports = issueReports(
+      {
+        status: "failed",
+        evidence: evidence("log"),
+        result: {
+          profile: "react-node",
+          passed: false,
+          durationMs: 1000,
+          steps: [
+            {
+              name: "e2e",
+              ok: false,
+              durationMs: 900,
+              output: "1 failed",
+              failures: [
+                {
+                  test: "app.spec.ts > the app renders without an uncaught error and reaches its API",
+                  file: "e2e/app.spec.ts",
+                  message:
+                    'Error: expect(received).toEqual(expected)\n\n- Expected\n+ Received\n\n+ "boom from main"',
+                },
+              ],
+            },
+          ],
+        },
+      },
+      REACT_NODE,
+    );
+
+    expect(reports).toEqual([
+      expect.objectContaining({
+        step: "e2e",
+        failingTest:
+          "app.spec.ts > the app renders without an uncaught error and reaches its API",
+        file: "e2e/app.spec.ts",
+        suspectedOwner: null,
+      }),
+    ]);
+    expect(reports[0]!.error).toMatch(/expect\(received\)/);
+    expect(toCodingIssue(reports[0]!).summary).toMatch(
+      /^app\.spec\.ts > the app renders.*\(e2e\/app\.spec\.ts\)/,
+    );
+  });
+
+  // The browser's stack names the dev server's URL; the file it names is the
+  // app's, so the report goes to the side that wrote it.
+  it("failing e2e: an uncaught error in the app is suspected on the side that owns the file", () => {
+    const [report] = issueReports(
+      {
+        status: "failed",
+        evidence: evidence("log"),
+        result: {
+          profile: "react-node",
+          passed: false,
+          durationMs: 1000,
+          steps: [
+            {
+              name: "e2e",
+              ok: false,
+              durationMs: 900,
+              output: "1 failed",
+              failures: [
+                {
+                  test: "app.spec.ts > the app renders",
+                  file: "e2e/app.spec.ts",
+                  message:
+                    'Error: expect(received).toEqual(expected)\n\n+ Received\n+ "Error: boom while loading\\n    at http://127.0.0.1:5199/src/screens/TodoScreen.tsx?t=1760000000:12:9"',
+                },
+              ],
+            },
+          ],
+        },
+      },
+      REACT_NODE,
+    );
+
+    expect(report).toMatchObject({
+      step: "e2e",
+      file: "src/screens/TodoScreen.tsx",
+      suspectedOwner: "frontendCoding",
+    });
+  });
+
   it("crash on boot: the thrown error and the file that threw", () => {
     const reports = reportsFor("crashOnBoot");
 

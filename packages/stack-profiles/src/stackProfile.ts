@@ -148,6 +148,7 @@ export const REACT_NODE: StackProfile = {
         'Stack: React 19, react-router-dom 7, Vite 6, Tailwind 3; Express 4, Prisma 6 on SQLite, zod 3; TypeScript 5 as ES modules. The template writes relative imports with .js ("./app.js"); do the same.',
         'Tests run on Vitest 3 without globals: every test file imports what it uses (describe, it, expect, vi, beforeEach, afterEach) from "vitest". Never Jest: no jest.mock, jest.fn or jest.Mock.',
         "TypeScript is strict, with verbatimModuleSyntax and noUncheckedIndexedAccess: import a type with `import type`, and treat an indexed read (list[0], record[key]) as possibly undefined.",
+        "Every Test Run ends by opening the app in a real browser (Playwright, e2e/app.spec.ts, through the Vite dev server): the app must render at / without an uncaught error, and /api must reach the API through the dev server's proxy, which vite.config.ts points at the PORT the Test Run sets, so never write a port there. e2e/ and playwright.config.ts are the template's: you cannot change them, and you do not write browser tests.",
       ],
       backend: [
         "server/app.test.ts is the template's test: add to it, and keep what it checks passing.",

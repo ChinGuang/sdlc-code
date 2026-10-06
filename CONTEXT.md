@@ -96,7 +96,7 @@ _Avoid_: "subagent" as a synonym for a specific agent role.
 
 **Workspace** — Where one Coding Agent writes code for a Task. Backend and Frontend Coding Agents each have their own Workspace within a Slice; the Orchestrator merges them.
 
-**Test Run** — One execution of a Slice's merged code in the sandbox: install, tests, boot, smoke tests. The sandbox only executes; it never holds the source of truth.
+**Test Run** — One execution of a Slice's merged code in the sandbox: install, tests, boot, smoke tests, and a browser test (the template's `e2e/app.spec.ts` in headless Chromium, which the Base Snapshot holds): the app renders without an uncaught error and reaches its API through the dev server's proxy. The sandbox only executes; it never holds the source of truth.
 
 **Base Snapshot** — A cached sandbox state per Stack Profile with the template and dependencies already installed. Every Test Run starts from it and adds only the changed code.
 

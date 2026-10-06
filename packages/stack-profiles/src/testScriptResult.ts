@@ -16,6 +16,8 @@ export const TEST_STEPS = [
   "unit",
   "boot",
   "smoke",
+  // The app in a real browser, after the API's smoke tests (S1).
+  "e2e",
   "stop",
 ] as const;
 export type TestStepName = (typeof TEST_STEPS)[number];
