@@ -66,7 +66,13 @@ import {
   memoryFromCheckpoint,
   type RunMemoryState,
 } from "./runCheckpoint.js";
-import type { SliceCheckpoint, SliceHint, SliceRunner } from "./sliceRunner.js";
+import { nextBatch } from "./sliceBatch.js";
+import type {
+  SliceCheckpoint,
+  SliceHint,
+  SliceOutcome,
+  SliceRunner,
+} from "./sliceRunner.js";
 import type { RunDelivery } from "../delivery/runDelivery.js";
 import {
   asCodingIssue,
@@ -146,6 +152,11 @@ export interface RunOrchestrator {
 }
 
 export type RunOrchestratorOptions = {
+  /**
+   * How many independent Slices are built at the same time (S5). One, the
+   * default, builds them one after another as before.
+   */
+  maxParallelSlices?: number;
   runs: RunStore;
   documents: DocumentStore;
   slices: SliceStore;
@@ -355,7 +366,8 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       resolution.choice === "editDocuments"
         ? this.#editsToMake(runId, resolution.edits)
         : [];
-    const current = this.#currentSlice(runId);
+    const current =
+      this.#sliceOf(runId, escalation) ?? this.#currentSlice(runId);
 
     escalations.resolveEscalation(escalation.id, {
       choice: resolution.choice,
@@ -621,15 +633,26 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     this.#checkpoint(run.id);
   }
 
-  /** Builds Slices until the Run leaves building. */
+  /**
+   * Builds the next Slice, and with it the Slices the plan says are independent
+   * of what is unbuilt, up to `maxParallelSlices` at the same time (S5; one by
+   * default). Each is its own Slice run, so one that passes is kept whatever the
+   * others do; of those that do not, the first in plan order is the one that
+   * stops the Run, and the rest go again when the Run does.
+   */
   async #build(run: Run): Promise<void> {
     const { runs } = this.#options;
-    const current = this.#currentSlice(run.id);
+    const documents = loadApprovedDocuments(this.#options.documents, run.id);
+    const batch = nextBatch(
+      this.#options.slices.listSlices(run.id),
+      documents.slicePlan,
+      this.#options.maxParallelSlices ?? 1,
+    );
+    const [current] = batch;
     if (!current) {
       runs.applyEvent(run.id, { type: "allSlicesCommitted" });
       return;
     }
-    const documents = loadApprovedDocuments(this.#options.documents, run.id);
     const plan = documents.slicePlan.find(
       (planned) => planned.title === current.title,
     );
@@ -643,38 +666,69 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       return;
     }
     const memory = this.#memoryOf(run.id);
-    // Kept until the Slice's first retry or its end, so a restart before
-    // then gives the attempt the same hint for the same sides (T24i).
-    const hint = memory.hints.get(current.id);
+    // One runner for the batch: its Slices share the turns they take at the run branch.
     const runner = await this.#options.sliceRunner(run, (checkpoint) =>
       this.#sliceCheckpoint(run.id, checkpoint),
     );
-    const outcome = await runner.runSlice({
-      runId: run.id,
-      slice: current,
-      plan,
-      profile: this.#options.profile(run),
-      projectRequest: run.projectRequest,
-      documents,
-      capabilities: this.#options.capabilities,
-      screenImages: memory.screenImages,
-      penpotPage: this.#options.penpotPage(run),
-      history: memory.histories.get(current.id),
-      hint,
-    });
-    memory.hints.delete(current.id);
+    const settled = await Promise.allSettled(
+      batch.map((slice) => {
+        // nextBatch only adds a Slice the plan names, and the first was checked.
+        const planned = documents.slicePlan.find(
+          (one) => one.title === slice.title,
+        );
+        if (!planned)
+          throw new Error(`Slice "${slice.title}" is not in the Slice Plan.`);
+        return runner.runSlice({
+          runId: run.id,
+          slice,
+          plan: planned,
+          profile: this.#options.profile(run),
+          projectRequest: run.projectRequest,
+          documents,
+          capabilities: this.#options.capabilities,
+          screenImages: memory.screenImages,
+          penpotPage: this.#options.penpotPage(run),
+          history: memory.histories.get(slice.id),
+          // Kept until the Slice's first retry or its end, so a restart before
+          // then gives the attempt the same hint for the same sides (T24i).
+          hint: memory.hints.get(slice.id),
+        });
+      }),
+    );
+    // Every Slice's outcome is kept before any of them is acted on.
+    const driver: Array<{
+      slice: Slice;
+      outcome: Exclude<SliceOutcome, { status: "passed" }>;
+    }> = [];
+    for (const [index, result] of settled.entries()) {
+      const slice = batch[index]!;
+      if (result.status === "rejected") continue;
+      memory.hints.delete(slice.id);
+      if (result.value.status === "passed") {
+        memory.histories.delete(slice.id);
+        continue;
+      }
+      memory.histories.set(slice.id, result.value.history);
+      driver.push({ slice, outcome: result.value });
+    }
+    this.#checkpoint(run.id);
+    // A Run stopped or broken: the first thing that went wrong, as before.
+    const rejected = settled.find((result) => result.status === "rejected");
+    if (rejected) throw rejected.reason;
+    const [first] = driver;
+    if (!first) return;
+    const { slice, outcome } = first;
     switch (outcome.status) {
-      case "passed":
-        memory.histories.delete(current.id);
-        this.#checkpoint(run.id);
-        return;
       case "escalated":
-        memory.histories.set(current.id, outcome.history);
-        this.#checkpoint(run.id);
-        this.#limit(run, outcome.trigger, outcome.summary, outcome.reports);
+        this.#limit(
+          run,
+          outcome.trigger,
+          outcome.summary,
+          outcome.reports,
+          slice,
+        );
         return;
       case "designIssue":
-        memory.histories.set(current.id, outcome.history);
         for (const { owner, reports } of outcome.revisions)
           this.#reopen(run.id, {
             agentRole: owner,
@@ -720,8 +774,9 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     for (const task of tasks.listTasks(runId))
       for (const step of tasks.listSteps(task.id))
         if (step.status === "running") tasks.discardStep(step.id);
-    const current = this.#currentSlice(runId);
-    if (current) this.#failTasks(runId, current.id);
+    for (const slice of this.#options.slices.listSlices(runId))
+      if (slice.status !== "passed" && slice.status !== "skipped")
+        this.#failTasks(runId, slice.id);
   }
 
   /** What the person ticked when they aborted; the default is to offer one. */
@@ -744,10 +799,13 @@ export class AgentRunOrchestrator implements RunOrchestrator {
     trigger: EscalationTrigger,
     summary: string,
     reports: readonly IssueReport[],
+    stopped?: Slice,
   ): void {
     const { runs, escalations } = this.#options;
     const next = runs.applyEvent(run.id, { type: "limitHit", trigger });
-    const current = this.#currentSlice(run.id);
+    // With Slices built at the same time, the one that stopped the Run is not
+    // always the first unfinished one.
+    const current = stopped ?? this.#currentSlice(run.id);
     if (next.status === "escalated") {
       const escalation = escalations.openEscalation(run.id, {
         trigger,
@@ -813,6 +871,21 @@ export class AgentRunOrchestrator implements RunOrchestrator {
       if (error instanceof MissingDocumentError) return null;
       throw error;
     }
+  }
+
+  /** The Slice an Escalation was about, which with parallel Slices (S5) need not be the first unfinished. */
+  #sliceOf(runId: string, escalation: Escalation): Slice | null {
+    if (escalation.slice === null) return null;
+    return (
+      this.#options.slices
+        .listSlices(runId)
+        .find(
+          (slice) =>
+            slice.title === escalation.slice &&
+            slice.status !== "passed" &&
+            slice.status !== "skipped",
+        ) ?? null
+    );
   }
 
   /** The first Slice that has not passed or been skipped, in plan order. */

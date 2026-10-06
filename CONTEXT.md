@@ -22,6 +22,8 @@ Glossary for the multi-agent developer tool that turns a product request into a 
 
 **Slice Plan** — The ordered list of Slices for a Run, proposed by the System Design Agent and reviewed at the Design Gate. The Orchestrator executes it; it does not author it.
 
+**Parallel Slices** — Slices the Slice Plan marks as independent, built at the same time (`SDLC_MAX_PARALLEL_SLICES`, one by default, at most four). A Slice says so with `dependsOn`: the titles of earlier Slices it needs, or an empty list for none but the Walking Skeleton; a Slice that says nothing follows every Slice before it, and every Slice waits for the Walking Skeleton. Their Coding Agents work at once, but each Slice is merged, tested and committed in turn, on top of what the others already committed, so every Slice Commit was tested with all before it. A Slice that conflicts with a peer's commit starts over on top of it, at the cost of a retry. One Escalation is open at a time: the first Slice in plan order that stops the Run raises it, and the others, which keep what they have, go again when the Run does.
+
 **Walking Skeleton** — Always the first Slice: the Stack Profile's template, database, a health check, one empty screen and the test script, proving the pipeline works before feature work.
 
 **API Contract** — The endpoints and request/response schemas for a Slice, produced by the System Design Agent. The only agreement the Backend and Frontend Coding Agents share while working in parallel.

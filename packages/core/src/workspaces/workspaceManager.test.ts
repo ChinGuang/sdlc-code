@@ -926,3 +926,57 @@ describe("GitWorkspaceManager.exportArchive: what the application says about its
     expect(zip.includes(Buffer.from("$Format:%H$"))).toBe(true);
   });
 });
+
+describe("GitWorkspaceManager.isBehind (S5)", () => {
+  async function committed(manager: WorkspaceManager, sliceId: string) {
+    const backend = await manager.openWorkspace(sliceId, "backend");
+    write(backend, `server/${sliceId}.ts`, `export const id = "${sliceId}";\n`);
+    await manager.saveWorkspace(backend, `Backend: ${sliceId}`);
+    const merged = await manager.mergeSlice(sliceId, [backend]);
+    if (merged.status !== "merged") throw new Error("the Slice did not merge");
+    await manager.commitSlice(merged, PASSED, `Slice ${sliceId}`);
+  }
+
+  it("is false for a Slice with nothing saved, and for one started at the head", async () => {
+    const { manager } = await setup();
+
+    expect(await manager.isBehind("slice-1")).toBe(false);
+    await manager.openWorkspace("slice-1", "backend");
+    expect(await manager.isBehind("slice-1")).toBe(false);
+  });
+
+  it("is true once a Slice built beside this one has committed, and false again after starting over", async () => {
+    const { manager } = await setup();
+    const waiting = await manager.openWorkspace("slice-2", "backend");
+    write(waiting, "server/b.ts", "export const b = 1;\n");
+    await manager.saveWorkspace(waiting, "Backend: b");
+
+    await committed(manager, "slice-1");
+
+    expect(await manager.isBehind("slice-2")).toBe(true);
+    // Its own commit is not "behind": it started from what it merged onto.
+    expect(await manager.isBehind("slice-1")).toBe(false);
+    await manager.discardSlice("slice-2");
+    expect(await manager.isBehind("slice-2")).toBe(false);
+    const again = await manager.openWorkspace("slice-2", "backend");
+    expect(await manager.isBehind("slice-2")).toBe(false);
+    expect(read(again, "server/slice-1.ts")).toContain("slice-1");
+  });
+
+  it("holds for a new manager over the same repository, as after a restart", async () => {
+    const { manager, repoDir, root } = await setup();
+    const waiting = await manager.openWorkspace("slice-2", "backend");
+    write(waiting, "server/b.ts", "export const b = 1;\n");
+    await manager.saveWorkspace(waiting, "Backend: b");
+    await committed(manager, "slice-1");
+
+    // Tests depend on the interface; only this factory knows the class.
+    const restarted: WorkspaceManager = new GitWorkspaceManager({
+      repoDir,
+      runBranch: "sdlc/todo-app",
+      workspacesDir: join(root, "workspaces"),
+    });
+
+    expect(await restarted.isBehind("slice-2")).toBe(true);
+  });
+});

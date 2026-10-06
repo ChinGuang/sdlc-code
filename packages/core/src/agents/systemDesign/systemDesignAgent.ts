@@ -59,7 +59,7 @@ export const SYSTEM_DESIGN_PROMPT = `You are the System Design Agent of sdlc-cod
 
 Design the application for the Project Request. Submit it in parts, one tool call each:
 1. ${DESIGN_TOOLS.systemDesign}: an overview in Markdown and Mermaid diagrams, at least a component flowchart and a classDiagram of the domain. Mermaid source only, no \`\`\` fences. Put node labels that contain spaces or punctuation in double quotes, e.g. Api["API client (fetch)"].
-2. ${DESIGN_TOOLS.slicePlan}: ordered vertical Slices, each built end to end (backend, frontend, tests). Slice 1 is always the Walking Skeleton: the template, database, GET /health and one empty screen, no feature endpoints. Then one Slice per feature, smallest useful first. List each Slice's endpoints as "METHOD /path", e.g. "GET /todos/{id}".
+2. ${DESIGN_TOOLS.slicePlan}: ordered vertical Slices, each built end to end (backend, frontend, tests). Slice 1 is always the Walking Skeleton: the template, database, GET /health and one empty screen, no feature endpoints. Then one Slice per feature, smallest useful first. List each Slice's endpoints as "METHOD /path", e.g. "GET /todos/{id}". Slices are built one after another by default. Give a Slice "dependsOn" (titles of earlier Slices, [] for none but the Walking Skeleton) only when it shares no database tables, endpoints or screens with the Slices it does not list: such Slices may be built at the same time. When in doubt leave it out.
 3. ${DESIGN_TOOLS.apiContract}: one OpenAPI 3.1.0 document, as YAML text, with every endpoint and its request and response schemas. Every operation belongs to exactly one Slice, with paths matching the Slice Plan exactly.
 4. ${DESIGN_TOOLS.finish}: checks the parts against each other.
 

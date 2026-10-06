@@ -37,6 +37,7 @@ import type {
   Workspace,
   WorkspaceManager,
 } from "../workspaces/workspaceManager.js";
+import { Mutex } from "../mutex.js";
 import { routeIssues, type RoutedReport } from "./issueRouting.js";
 import type { OwnerContext, OwnerResolver } from "./ownerResolution.js";
 import {
@@ -173,6 +174,14 @@ const STOPPED: Partial<Record<StopReason, string>> = {
 
 export class OrchestratedSliceRunner implements SliceRunner {
   #options: SliceRunnerOptions;
+  /**
+   * Slices built at the same time (S5) take turns at what changes the run
+   * branch: each is merged, tested and committed on top of what the others
+   * already committed. Coding, the long part, is not behind it.
+   */
+  #integration = new Mutex();
+  /** Opening worktrees changes the shared repository; one at a time is safe. */
+  #opening = new Mutex();
 
   constructor(options: SliceRunnerOptions) {
     this.#options = options;
@@ -230,8 +239,10 @@ export class OrchestratedSliceRunner implements SliceRunner {
           [],
           history,
         );
-      const opened = await Promise.all(
-        sides.map((side) => workspaces.openWorkspace(input.slice.id, side)),
+      const opened = await this.#opening.run(() =>
+        Promise.all(
+          sides.map((side) => workspaces.openWorkspace(input.slice.id, side)),
+        ),
       );
       // Every Step ends before anything else happens, even if one throws, so
       // no Step is left running behind the caller's back.
@@ -301,46 +312,92 @@ export class OrchestratedSliceRunner implements SliceRunner {
         );
 
       this.#stopIfAborted();
-      const merged = await workspaces.mergeSlice(input.slice.id, opened);
-      if (merged.status === "conflict")
-        return this.#escalate(
-          input,
-          "undecidableOwner",
-          `The ${merged.role} Workspace conflicts with the other side in ${merged.files.join(", ")}.`,
-          [],
-          history,
-        );
-      this.#options.checkpoint?.({
-        at: "merged",
-        sliceId: input.slice.id,
-        attempt,
-        commit: merged.commit,
-      });
-
-      this.#stopIfAborted();
-      this.#move(input, "testing");
-      const tested = await testing.testSlice({
-        profile: input.profile,
-        files: await workspaces.readFiles(merged.commit),
-      });
-      if (tested.testRun.status === "passed") {
-        // A Slice that passed after the abort is not committed to its Run.
-        this.#stopIfAborted();
-        const commit = await workspaces.commitSlice(
-          merged,
-          // Checked just above; the union does not narrow on its own.
-          tested.testRun as PassedTestRun,
-          `Slice ${input.slice.order}: ${input.plan.title}`,
-        );
-        slices.moveSlice(input.slice.id, "passed", commit);
-        for (const task of tasks.values())
-          this.#options.tasks.setTaskStatus(task.id, "done");
+      const release = await this.#integration.acquire();
+      let tested: Awaited<ReturnType<TestingAgent["testSlice"]>>;
+      try {
+        const merged = await workspaces.mergeSlice(input.slice.id, opened);
+        if (merged.status === "conflict") {
+          // Not the other side's doing but a peer Slice's, committed while this
+          // one was coding: start again on top of it, which costs a retry.
+          if (await workspaces.isBehind(input.slice.id)) {
+            await workspaces.discardSlice(input.slice.id);
+            const decisions = sides.map((side) => ({
+              side,
+              decision: this.#decide(side, [], tasks, history),
+              issues: [
+                {
+                  summary: `Another Slice was committed while you worked, and your changes conflict with it in ${merged.files.join(", ")}. Your Workspace was reset to the code as it is now: build this Slice again on top of it, and keep what the other Slice added.`,
+                  evidence:
+                    "Read the files named, then add this Slice's changes beside the existing ones.",
+                },
+              ],
+            }));
+            const escalation = decisions.find(
+              ({ decision }) => decision.action === "escalate",
+            );
+            if (escalation?.decision.action === "escalate")
+              return this.#escalate(
+                input,
+                escalation.decision.trigger,
+                // Not "the agents did not finish": they kept meeting a peer's work.
+                `Slice "${input.plan.title}" kept conflicting with a Slice committed beside it, in ${merged.files.join(", ")}.`,
+                [],
+                history,
+              );
+            pending = this.#retry(decisions, tasks);
+            // Written down as a retry is: the Workspaces are gone, so every
+            // side codes again, and a restart must know it.
+            history.pending = Object.fromEntries(pending);
+            this.#options.checkpoint?.({
+              at: "retrying",
+              sliceId: input.slice.id,
+              attempt,
+              history,
+            });
+            continue;
+          }
+          return this.#escalate(
+            input,
+            "undecidableOwner",
+            `The ${merged.role} Workspace conflicts with the other side in ${merged.files.join(", ")}.`,
+            [],
+            history,
+          );
+        }
         this.#options.checkpoint?.({
-          at: "committed",
+          at: "merged",
           sliceId: input.slice.id,
-          commit,
+          attempt,
+          commit: merged.commit,
         });
-        return { status: "passed", commit, attempts: attempt };
+
+        this.#stopIfAborted();
+        this.#move(input, "testing");
+        tested = await testing.testSlice({
+          profile: input.profile,
+          files: await workspaces.readFiles(merged.commit),
+        });
+        if (tested.testRun.status === "passed") {
+          // A Slice that passed after the abort is not committed to its Run.
+          this.#stopIfAborted();
+          const commit = await workspaces.commitSlice(
+            merged,
+            // Checked just above; the union does not narrow on its own.
+            tested.testRun as PassedTestRun,
+            `Slice ${input.slice.order}: ${input.plan.title}`,
+          );
+          slices.moveSlice(input.slice.id, "passed", commit);
+          for (const task of tasks.values())
+            this.#options.tasks.setTaskStatus(task.id, "done");
+          this.#options.checkpoint?.({
+            at: "committed",
+            sliceId: input.slice.id,
+            commit,
+          });
+          return { status: "passed", commit, attempts: attempt };
+        }
+      } finally {
+        release();
       }
 
       const reports = tested.issueReports;

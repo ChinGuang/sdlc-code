@@ -3,7 +3,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { goodDesign } from "./fixtures/goodDesign.js";
 import { MERMAID_LOAD_TIMEOUT, warmMermaid } from "./fixtures/warmMermaid.js";
 import { mermaidProblem, repairMermaid } from "./mermaid.js";
-import { contractEndpoints, validateDesign } from "./validateDesign.js";
+import {
+  contractEndpoints,
+  slicePlanProblems,
+  validateDesign,
+} from "./validateDesign.js";
 
 beforeAll(warmMermaid, MERMAID_LOAD_TIMEOUT);
 
@@ -254,6 +258,42 @@ describe("contractEndpoints", () => {
       "GET /todos",
       "POST /todos",
       "PATCH /todos/{id}",
+    ]);
+  });
+});
+
+describe("slicePlanProblems: dependsOn (S5)", () => {
+  const skeleton = goodDesign().slicePlan[0]!;
+  const feature = (title: string, dependsOn?: string[]) => ({
+    title,
+    goal: `${title} works`,
+    isWalkingSkeleton: false,
+    endpoints: [`GET /${title.toLowerCase()}`],
+    ...(dependsOn ? { dependsOn } : {}),
+  });
+
+  it("accepts a Slice that depends on none, or on an earlier one", () => {
+    expect(
+      slicePlanProblems([
+        skeleton,
+        feature("Alpha", []),
+        feature("Beta", ["Alpha"]),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("refuses a dependency on a Slice that is not in the plan, or does not come first", () => {
+    const problems = slicePlanProblems([
+      skeleton,
+      feature("Alpha", ["Nowhere"]),
+      feature("Beta", ["Gamma"]),
+      feature("Gamma", ["Gamma"]),
+    ]);
+
+    expect(problems).toEqual([
+      expect.stringContaining('depends on "Nowhere", which is not a Slice'),
+      expect.stringContaining('depends on "Gamma", which does not come before'),
+      expect.stringContaining('depends on "Gamma", which does not come before'),
     ]);
   });
 });

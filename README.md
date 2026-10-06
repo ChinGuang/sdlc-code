@@ -89,6 +89,7 @@ Secrets are read from the environment (`.env` is git-ignored; `.env.example` sho
 | `SDLC_MODEL_<ROLE>` | Optional: a model id for one role, e.g. `SDLC_MODEL_CODE_REVIEW` |
 | `SDLC_DATA_DIR` | Optional: where Runs are kept (default `.sdlc-runs/` in the repository) |
 | `SDLC_CODE_PORT`, `SDLC_API_URL`, `SDLC_DASHBOARD_URL` | Optional: ports and addresses of the server, CLI and dashboard |
+| `SDLC_MAX_PARALLEL_SLICES` | Optional, 1 to 4 (default 1): how many Slices the Slice Plan marks independent are built at the same time. Each costs a Coding Agent's tokens at once, so a Token Budget goes faster. |
 | `SDLC_CODE_HOST`, `SDLC_ACCESS_TOKEN`, `SDLC_WEB_DIR`, `SDLC_SECURE_COOKIE` | Only for running on a network ([docs/deploy.md](docs/deploy.md)): a host other than `127.0.0.1` needs the token (16 characters or more) |
 
 Change a role's model or reasoning in `sdlc-code.config.json` (copy [`sdlc-code.config.example.json`](sdlc-code.config.example.json)); `config:check` prints what each role will use. Restart the server after changing `.env` or the config file.

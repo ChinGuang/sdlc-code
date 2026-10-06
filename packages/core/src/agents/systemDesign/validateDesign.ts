@@ -137,6 +137,20 @@ export function slicePlanProblems(slices: DesignSlice[]): string[] {
       );
   }
 
+  // S5: a dependency is a Slice that comes earlier, so no cycle is possible.
+  for (const [index, slice] of slices.entries())
+    for (const dependency of slice.dependsOn ?? []) {
+      const at = slices.findIndex((one) => one.title === dependency);
+      if (at < 0)
+        problems.push(
+          `Slice ${index + 1} "${slice.title}" depends on "${dependency}", which is not a Slice of the plan.`,
+        );
+      else if (at >= index)
+        problems.push(
+          `Slice ${index + 1} "${slice.title}" depends on "${dependency}", which does not come before it.`,
+        );
+    }
+
   const titles = new Set<string>();
   for (const [index, slice] of slices.entries()) {
     if (titles.has(slice.title))

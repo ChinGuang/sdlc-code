@@ -150,6 +150,12 @@ export interface WorkspaceManager {
   ) => Promise<string>;
   /** Discards a Slice's worktrees and branches, so its next attempt starts clean. */
   discardSlice: (sliceId: string) => Promise<void>;
+  /**
+   * Whether the Slice's saved work was started before the last Slice Commit: a
+   * Slice built beside this one committed since, and its work is not in this
+   * one (S5). Read from git, so it holds after a restart.
+   */
+  isBehind: (sliceId: string) => Promise<boolean>;
   /** Discards every unfinished worktree, e.g. when a Run stops early. */
   discardUnfinished: () => Promise<void>;
   /**
@@ -521,6 +527,24 @@ export class GitWorkspaceManager implements WorkspaceManager {
     await this.#discard(`${WORKSPACE_REFS}${sliceId}/`, (entry) =>
       folders.includes(entry),
     );
+  };
+
+  isBehind = async (sliceId: string): Promise<boolean> => {
+    assertSafeId(sliceId);
+    const head = await this.lastSliceCommit();
+    for (const role of WORKSPACE_ROLES) {
+      const { branch } = this.#workspacePaths(sliceId, role);
+      if (!(await this.#resolve(`refs/heads/${branch}`))) continue;
+      // The head is in the branch's history only if the branch started from it.
+      const contains = await this.#exec(this.#repoDir, [
+        "merge-base",
+        "--is-ancestor",
+        head,
+        `refs/heads/${branch}`,
+      ]);
+      if (contains.exitCode !== 0) return true;
+    }
+    return false;
   };
 
   discardUnfinished = (): Promise<void> =>
