@@ -123,7 +123,7 @@ In the plan's order. Dates are from [docs/PLAN.md](docs/PLAN.md); M4 and M5 over
 - **T25d A Draft PR says what it holds** (in review) · Oct 8 — found in T25: Draft PR #1 said "Delete Todo (not included)" and "4 of 5 slices" while the run branch carried that Slice's commit (it passed, Code Review sent it back and it was re-opened). The text says what is pushed, why the Run stopped (the Escalation, not "The Run was stopped"), and the Issue Reports it left.
 - **T25e The Escalation Brief knows the template's facts** (in review) · Oct 9 — found in T25: the brief's analysis was misleading at least twice (it blamed the System Design for the sandbox's missing OpenSSL, and offered a hint that kept the import that caused the error). Its look gets the Stack Profile's template facts (those of the side the reports point at) and the template's file list, and a suggested hint that seems to contradict one comes with a warning to check it: a keyword guess, so it warns instead of dropping a good hint.
 - **T26 README + compliance** (README and compliance notes merged; T26b: the SPDX line on every source file and the lint rule that keeps it, in review) · Oct 21–22 — setup and instructions, how Nemotron is used per agent, where Token Factory and Nebius Sandboxes are used, third-party licence checks, MPL 2.0 headers.
-- **T27 Demo video + submission** · Oct 23–25 — record the dashboard, the Penpot canvas filling live and the PR on GitHub, then submit.
+- **T27 Demo video + submission** (script and checklist in docs/demo-script.md, in review; a rehearsal Run to the PR Gate comes first) · Oct 23–25 — record the dashboard, the Penpot canvas filling live and the PR on GitHub, then submit.
 
 ### Stretch, only after T25
 
