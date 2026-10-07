@@ -9,7 +9,7 @@ import { Test } from "@nestjs/testing";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   accessSettings,
   AccessConfigError,
@@ -26,6 +26,9 @@ import {
   type RunService,
 } from "./runs/runService.js";
 import { fileFor, stripApiPrefix } from "./staticWeb.js";
+
+// Each test boots a Nest application: slow on Windows and under a full suite.
+vi.setConfig({ testTimeout: 60_000 });
 
 const TOKEN = "a-long-enough-access-token";
 
