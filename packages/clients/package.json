@@ -11,13 +11,12 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "sandbox:whoami": "tsx --env-file-if-exists=../../.env scripts/sandboxWhoami.ts",
+    "sandbox:mcp": "tsx --env-file-if-exists=../../.env scripts/sandboxMcp.ts",
     "models:list": "tsx --env-file-if-exists=../../.env scripts/listModels.ts",
     "github:access": "tsx --env-file-if-exists=../../.env scripts/githubAccess.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0"
-  },
-  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.6.5"
   }
 }

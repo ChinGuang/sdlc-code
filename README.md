@@ -161,6 +161,10 @@ The same request twice (a todo app), each into a new empty repository, in [docs/
 
 Between the Runs the platform fixed what the first one found (the sandbox image, the lint, false review Findings, the Escalation Brief, a dashboard that went stale after a restart, the Draft PR text). What still costs most is the **Frontend Coding Agent's screen tests**: about 80% of the tokens in the first Run. Neither Run reached the PR Gate; a third, smaller Run is the way to show that.
 
+## The Sandbox as an MCP server
+
+The sandboxes the Test Runs use are also an MCP server on stdio, so a client such as Claude Code can run a command in one: `claude mcp add sdlc-sandbox -- pnpm --silent --filter @sdlc-code/clients sandbox:mcp`. It has four tools, bounds what a client may spend or send, and keeps the Nebius key out of every reply; [docs/sandbox-mcp.md](docs/sandbox-mcp.md) says what it does and does not protect.
+
 ## Self-hosted Penpot
 
 Penpot Cloud is the default. To keep the designs on your own machine, `deploy/penpot/` runs Penpot's official Docker Compose stack (its MCP server included) bound to `127.0.0.1`, and sdlc-code needs only a different `PENPOT_MCP_URL`. Started and connected to with sdlc-code's own client; the drawing itself was not tried on it: [docs/penpot-self-hosted.md](docs/penpot-self-hosted.md).
