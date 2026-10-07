@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseAgentConfig } from "../config/agentConfig.js";
 import {
   createRunRuntime,
+  MAX_PARALLEL_SLICES_LIMIT,
+  maxParallelSlices,
   MissingKeyError,
   type RunRuntime,
   type RunRuntimeOptions,
@@ -136,4 +138,28 @@ describe("createRunRuntime: starting a Run", () => {
       { runId: run.id, type: "status", status: "designing" },
     ]);
   });
+});
+
+describe("maxParallelSlices (S5)", () => {
+  it("is one, the Slices one after another, unless asked for more", () => {
+    expect(maxParallelSlices(undefined)).toBe(1);
+    expect(maxParallelSlices("")).toBe(1);
+    expect(maxParallelSlices("1")).toBe(1);
+  });
+
+  it("is what is asked for, up to the limit", () => {
+    expect(maxParallelSlices("3")).toBe(3);
+    expect(maxParallelSlices(String(MAX_PARALLEL_SLICES_LIMIT))).toBe(
+      MAX_PARALLEL_SLICES_LIMIT,
+    );
+  });
+
+  it.each(["0", "-1", "2.5", "many", "5", "1e3"])(
+    "refuses %j, which is a mistake to stop for and not to pass over",
+    (value) => {
+      expect(() => maxParallelSlices(value)).toThrow(
+        /SDLC_MAX_PARALLEL_SLICES must be a whole number from 1 to 4/,
+      );
+    },
+  );
 });

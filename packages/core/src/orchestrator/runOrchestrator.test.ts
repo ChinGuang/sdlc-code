@@ -102,6 +102,10 @@ function setup(options: {
   mode?: RunMode;
   /** What the Slice runner returns, call by call; passes when it runs out. */
   outcomes?: SliceOutcome[];
+  /** The Slice Plan the first design comes back with, instead of the sample's. */
+  plan?: Design["slicePlan"];
+  /** How many independent Slices are built together (S5); one unless given. */
+  maxParallelSlices?: number;
   /** The Slice Plan a revision of the System Design comes back with. */
   revisedPlan?: Design["slicePlan"];
   /** Design calls that fail (no valid design), by call number from 1. */
@@ -180,6 +184,7 @@ function setup(options: {
           loop: { ...loop, workingMemory: "- mermaid kept failing" },
         };
       const design: Design = goodDesign();
+      if (!input.revision && options.plan) design.slicePlan = options.plan;
       if (input.revision && options.revisedPlan)
         design.slicePlan = options.revisedPlan;
       // A revision changes the Contract's title, so it is a new version.
@@ -271,6 +276,7 @@ function setup(options: {
   // one over the same stores is a restarted process (see "resuming a Run").
   const build = (): RunOrchestrator =>
     new AgentRunOrchestrator({
+      maxParallelSlices: options.maxParallelSlices,
       runs,
       documents,
       slices,
@@ -1420,6 +1426,151 @@ describe("AgentRunOrchestrator: a Token Budget Escalation", () => {
     });
 
     expect(status()).not.toBe("escalated");
+  });
+});
+
+// S5: Slices the plan says are independent are built together.
+describe("AgentRunOrchestrator: parallel Slices (S5)", () => {
+  const slice = (title: string, dependsOn?: string[]) => ({
+    title,
+    goal: `${title} works`,
+    isWalkingSkeleton: false,
+    endpoints: [`GET /${title.toLowerCase()}`],
+    ...(dependsOn ? { dependsOn } : {}),
+  });
+  const skeleton = goodDesign().slicePlan[0]!;
+  // Gamma says nothing, so it follows every Slice before it, Beta included
+  // in order though not in the building: Beta may go ahead of it.
+  const PLAN = [
+    skeleton,
+    slice("Alpha", []),
+    slice("Gamma"),
+    slice("Beta", []),
+  ];
+  const passed = (n: number) => ({
+    status: "passed" as const,
+    commit: `c${n}`,
+    attempts: 1,
+  });
+
+  it("builds one Slice at a time unless told otherwise, whatever the plan says", async () => {
+    const { orchestrator, runId, runnerCalls } = await approved({
+      plan: PLAN,
+      outcomes: [passed(1), escalatedWith()],
+    });
+
+    await orchestrator.advance(runId);
+
+    // Alpha escalated and Beta, which could have gone beside it, never started.
+    expect(runnerCalls.map((call) => call.plan.title)).toEqual([
+      "Walking Skeleton",
+      "Alpha",
+    ]);
+  });
+
+  it("builds a Slice beside the next one when the plan says it is independent", async () => {
+    const { orchestrator, runId, runnerCalls, sliceStatuses } = await approved({
+      plan: PLAN,
+      maxParallelSlices: 2,
+      outcomes: [passed(1), passed(2), passed(3)],
+    });
+
+    await orchestrator.advance(runId);
+
+    // The Walking Skeleton goes alone; then Alpha with Beta; then Gamma.
+    expect(runnerCalls.map((call) => call.plan.title)).toEqual([
+      "Walking Skeleton",
+      "Alpha",
+      "Beta",
+      "Gamma",
+    ]);
+    expect(sliceStatuses().map(([, status]) => status)).toEqual([
+      "passed",
+      "passed",
+      "passed",
+      "passed",
+    ]);
+  });
+
+  it("keeps what a peer finished when another Slice escalates", async () => {
+    const { orchestrator, runId, status, sliceStatuses, escalations } =
+      await approved({
+        plan: PLAN,
+        maxParallelSlices: 2,
+        // Alpha escalates; Beta, built beside it, passes.
+        outcomes: [passed(1), escalatedWith(), passed(3)],
+      });
+
+    await orchestrator.advance(runId);
+
+    expect(status()).toBe("escalated");
+    expect(sliceStatuses()).toEqual([
+      ["Walking Skeleton", "passed"],
+      ["Alpha", "building"],
+      ["Gamma", "pending"],
+      ["Beta", "passed"],
+    ]);
+    expect(escalations.getOpenEscalation(runId)).toMatchObject({
+      slice: "Alpha",
+    });
+  });
+
+  // The Slice that stops the Run is not always the first unfinished one: Alpha
+  // passes, Beta (built beside it) escalates, and Gamma is first in line.
+  it("names the Slice that stopped the Run, not the first unfinished one", async () => {
+    const { orchestrator, runId, escalations } = await approved({
+      plan: PLAN,
+      maxParallelSlices: 2,
+      outcomes: [passed(1), passed(2), escalatedWith()],
+    });
+
+    await orchestrator.advance(runId);
+
+    expect(escalations.getOpenEscalation(runId)).toMatchObject({
+      slice: "Beta",
+    });
+  });
+
+  it("answers an Escalation for the Slice it was about: a hint goes to that Slice", async () => {
+    const { orchestrator, runId, runnerCalls } = await approved({
+      plan: PLAN,
+      maxParallelSlices: 2,
+      outcomes: [passed(1), passed(2), escalatedWith()],
+    });
+    await orchestrator.advance(runId);
+
+    await orchestrator.resolveEscalation(runId, {
+      choice: "retryWithHint",
+      hint: "Use the existing client.",
+    });
+    await orchestrator.advance(runId);
+
+    const again = runnerCalls.filter((call) => call.plan.title === "Beta");
+    expect(again.at(-1)!.hint?.issues[0]!.summary).toBe(
+      "Use the existing client.",
+    );
+    // Gamma, which was first in line, got no hint that was not its own.
+    expect(
+      runnerCalls.find((call) => call.plan.title === "Gamma")!.hint,
+    ).toBeUndefined();
+  });
+
+  it("skips the Slice an Escalation was about, not the first unfinished one", async () => {
+    const { orchestrator, runId, sliceStatuses } = await approved({
+      plan: PLAN,
+      maxParallelSlices: 2,
+      outcomes: [passed(1), passed(2), escalatedWith()],
+    });
+    await orchestrator.advance(runId);
+
+    await orchestrator.resolveEscalation(runId, { choice: "skipSlice" });
+
+    expect(sliceStatuses()).toEqual([
+      ["Walking Skeleton", "passed"],
+      ["Alpha", "passed"],
+      ["Gamma", "pending"],
+      ["Beta", "skipped"],
+    ]);
   });
 });
 

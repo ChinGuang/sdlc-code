@@ -45,6 +45,12 @@ const DesignSlice = z.object({
     .boolean()
     .default(false)
     .describe("true only for Slice 1"),
+  dependsOn: z
+    .array(z.string().min(1))
+    .optional()
+    .describe(
+      "Titles of EARLIER Slices this one needs built first, besides the Walking Skeleton. Leave it out and the Slice follows every Slice before it. Set it (an empty list is fine) only when the Slice shares no tables, endpoints or screens with the Slices it does not list: it may then be built at the same time as them (S5).",
+    ),
   endpoints: z
     .array(z.string().regex(ENDPOINT_PATTERN, 'must look like "GET /todos"'))
     .describe(

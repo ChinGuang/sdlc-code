@@ -414,6 +414,7 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
     });
 
   const orchestrator: RunOrchestrator = new AgentRunOrchestrator({
+    maxParallelSlices: maxParallelSlices(options.env.SDLC_MAX_PARALLEL_SLICES),
     runs: reportedRuns,
     documents,
     slices,
@@ -576,6 +577,29 @@ export function createRunRuntime(options: RunRuntimeOptions): RunRuntime {
       db.close();
     },
   };
+}
+
+/** The most Slices built at once. Each costs a Coding Agent's tokens at the same time. */
+export const MAX_PARALLEL_SLICES_LIMIT = 4;
+
+/**
+ * SDLC_MAX_PARALLEL_SLICES: how many independent Slices (S5) are built at the
+ * same time. Unset is one, the Slices one after another. Anything else that is
+ * not a whole number from 1 to 4 is a mistake worth stopping for, not a
+ * silent one.
+ */
+export function maxParallelSlices(value: string | undefined): number {
+  if (value === undefined || value.trim() === "") return 1;
+  const count = Number(value);
+  if (
+    !Number.isInteger(count) ||
+    count < 1 ||
+    count > MAX_PARALLEL_SLICES_LIMIT
+  )
+    throw new Error(
+      `SDLC_MAX_PARALLEL_SLICES must be a whole number from 1 to ${MAX_PARALLEL_SLICES_LIMIT}, not "${value}".`,
+    );
+  return count;
 }
 
 function required(
